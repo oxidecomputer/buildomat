@@ -1,3 +1,7 @@
+/*
+ * Copyright 2021 Oxide Computer Company
+ */
+
 #![allow(dead_code)]
 
 mod c {

@@ -1,3 +1,7 @@
+/*
+ * Copyright 2021 Oxide Computer Company
+ */
+
 #![allow(unused_imports)]
 #![allow(clippy::many_single_char_names)]
 

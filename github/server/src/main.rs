@@ -1,3 +1,7 @@
+/*
+ * Copyright 2021 Oxide Computer Company
+ */
+
 use anyhow::{anyhow, bail, Context, Result};
 use dropshot::ConfigLogging;
 use rusty_ulid::Ulid;

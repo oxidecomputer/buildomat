@@ -1,3 +1,7 @@
+/*
+ * Copyright 2021 Oxide Computer Company
+ */
+
 use super::prelude::*;
 
 trait JobOwns {

@@ -1,3 +1,7 @@
+/*
+ * Copyright 2021 Oxide Computer Company
+ */
+
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;

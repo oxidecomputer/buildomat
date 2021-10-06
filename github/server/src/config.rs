@@ -1,3 +1,7 @@
+/*
+ * Copyright 2021 Oxide Computer Company
+ */
+
 use anyhow::Result;
 use serde::Deserialize;
 use std::fs::OpenOptions;

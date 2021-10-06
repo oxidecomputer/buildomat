@@ -1,3 +1,7 @@
+/*
+ * Copyright 2021 Oxide Computer Company
+ */
+
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;

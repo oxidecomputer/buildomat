@@ -2,6 +2,7 @@
 name = "buildomat-agent"
 version = "0.0.0"
 edition = "2018"
+license = "MPL-2.0"
 
 [dependencies]
 anyhow = "1"

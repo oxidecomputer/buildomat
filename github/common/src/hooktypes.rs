@@ -1,3 +1,7 @@
+/*
+ * Copyright 2021 Oxide Computer Company
+ */
+
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]

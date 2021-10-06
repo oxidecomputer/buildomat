@@ -1,3 +1,7 @@
+/*
+ * Copyright 2021 Oxide Computer Company
+ */
+
 use anyhow::{anyhow, bail, Result};
 use chrono::prelude::*;
 use dropshot::{

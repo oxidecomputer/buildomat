@@ -1,3 +1,7 @@
+/*
+ * Copyright 2021 Oxide Computer Company
+ */
+
 use crate::{App, FlushOut, FlushState};
 use anyhow::Result;
 use chrono::SecondsFormat;

@@ -1,3 +1,7 @@
+/*
+ * Copyright 2021 Oxide Computer Company
+ */
+
 mod prelude {
     pub(crate) use crate::{db, unauth_response, Central, MakeInternalError};
     pub use anyhow::Result;

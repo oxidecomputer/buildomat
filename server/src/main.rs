@@ -1,3 +1,7 @@
+/*
+ * Copyright 2021 Oxide Computer Company
+ */
+
 #![allow(clippy::many_single_char_names)]
 
 use std::io::Read;

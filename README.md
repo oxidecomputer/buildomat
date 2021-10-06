@@ -128,3 +128,8 @@ SEQ   ACK RECVTIME             EVENT          ACTION
 
 The `wollongong-dbtool del unack SEQ` command can be used to trigger the
 reprocessing of an invididual webhook message.
+
+## Licence
+
+Unless otherwise noted, all components are licenced under the [Mozilla Public
+License Version 2.0](./LICENSE).
