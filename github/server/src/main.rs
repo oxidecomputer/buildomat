@@ -592,7 +592,7 @@ async fn bgtask_one(app: &Arc<App>) -> Result<()> {
                 app.db.delivery_ack(del.seq, ack)?;
                 continue;
             }
-            "push" | "pull_request" | "create" | "delete" => {
+            "push" | "pull_request" | "create" | "delete" | "public" => {
                 /*
                  * For now, we don't process these events specifically.
                  */
