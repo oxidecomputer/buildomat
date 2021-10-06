@@ -1,0 +1,16 @@
+[package]
+name = "wollongong-database"
+version = "0.0.0"
+edition = "2018"
+
+[dependencies]
+anyhow = "1.0.41"
+chrono = { version = "0.4.19", features = ["serde"] }
+rand = "0.8.4"
+rusqlite = { version = "0.25.3", features = ["chrono", "serde_json", "bundled"] }
+rusty_ulid = "0.11.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_with = "1.10.0"
+slog = "2.7"
+thiserror = "1"

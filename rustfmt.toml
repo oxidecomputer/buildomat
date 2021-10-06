@@ -1,0 +1,12 @@
+max_width = 80
+edition = "2018"
+use_small_heuristics = "Max"
+
+#
+# We do not wish to reformat the generated client code, but of course this
+# directive (uncontroversial though it would surely seem) is not available in
+# stable rustfmt:
+#
+# ignore = [
+#	"/openapi"
+# ]

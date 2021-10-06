@@ -1,0 +1,11 @@
+[workspace]
+members = [
+	"agent",
+	"client",
+	"github/common",
+	"github/database",
+	"github/dbtool",
+	"github/server",
+	"openapi",
+	"server",
+]

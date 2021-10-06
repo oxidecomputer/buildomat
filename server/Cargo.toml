@@ -1,0 +1,26 @@
+[package]
+name = "buildomat-server"
+version = "0.0.0"
+edition = "2018"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.13"
+chrono = "0.4"
+dropshot = { git = "https://github.com/oxidecomputer/dropshot" }
+getopts = "0.2"
+hyper = "0.14"
+hyper-staticfile = "0.6"
+rand = "0.8"
+rusoto_core = "0.47.0"
+rusoto_credential = "0.47.0"
+rusoto_ec2 = "0.47.0"
+rusqlite = { version = "0.25.3", features = [ "chrono" ]}
+rusty_ulid = "0.11"
+schemars = { version = "0.8", features = [ "chrono" ] }
+serde = { version = "1", features = [ "derive" ] }
+serde_json = "1.0.66"
+slog = "2.7"
+thiserror = "1"
+tokio = { version = "1", features = [ "full" ] }
+toml = "0.5"
