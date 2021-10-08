@@ -20,7 +20,6 @@ cargo run -p "$NAME-server" -- -S "$sf"
 sed -i \
     -e 's/: &String/: \&str/' \
     -e 's/: &Option/: Option/g' \
-    -e 's/BTreeMap/HashMap/' \
     -e 's/&u32/u32/g' \
     -e 's/&i32/i32/g' \
     -e 's/&u64/u64/g' \
