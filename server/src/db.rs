@@ -478,6 +478,14 @@ impl Database {
             conflict!("job {} already assigned to worker {}", j.id, jw);
         }
 
+        if j.complete {
+            conflict!(
+                "job {} already complete, cannot assign to {}",
+                j.id,
+                w.id
+            );
+        }
+
         let c = self.i_worker_job_count(&tx, worker)?;
         if c > 0 {
             conflict!("worker {} already has {} jobs assigned", worker, c);
