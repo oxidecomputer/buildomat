@@ -151,28 +151,24 @@ pub(crate) async fn workers_list(
     let workers = w
         .iter()
         .filter_map(|w| {
-            if w.deleted {
-                None
-            } else {
-                let jobs =
-                    c.db.worker_jobs(&w.id)
-                        .unwrap_or_else(|_| vec![])
-                        .iter()
-                        .map(|j| WorkerJob {
-                            id: j.id.to_string(),
-                            name: j.name.to_string(),
-                            owner: j.owner.to_string(),
-                        })
-                        .collect::<Vec<_>>();
-                Some(Worker {
-                    id: w.id.to_string(),
-                    instance_id: w.instance_id.clone(),
-                    deleted: w.deleted,
-                    recycle: w.recycle,
-                    lastping: w.lastping,
-                    jobs,
-                })
-            }
+            let jobs =
+                c.db.worker_jobs(&w.id)
+                    .unwrap_or_else(|_| vec![])
+                    .iter()
+                    .map(|j| WorkerJob {
+                        id: j.id.to_string(),
+                        name: j.name.to_string(),
+                        owner: j.owner.to_string(),
+                    })
+                    .collect::<Vec<_>>();
+            Some(Worker {
+                id: w.id.to_string(),
+                instance_id: w.instance_id.clone(),
+                deleted: w.deleted,
+                recycle: w.recycle,
+                lastping: w.lastping,
+                jobs,
+            })
         })
         .collect::<Vec<_>>();
 

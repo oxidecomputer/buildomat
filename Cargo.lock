@@ -96,6 +96,7 @@ dependencies = [
  "hiercmd",
  "rand",
  "reqwest",
+ "rusty_ulid",
  "serde",
  "serde_json",
  "tokio",

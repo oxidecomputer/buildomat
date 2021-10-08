@@ -12,25 +12,24 @@ use std::future::Future;
 use std::io::{ErrorKind, Read, Write};
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::str::FromStr;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
 use buildomat_openapi::{types::*, Client};
+use chrono::prelude::*;
 use hiercmd::prelude::*;
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use reqwest::ClientBuilder;
+use rusty_ulid::Ulid;
 
 mod config;
 
-pub fn genkey(len: usize) -> String {
-    thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(len)
-        .map(|c| c as char)
-        .collect()
+fn to_ulid(id: &str) -> Result<Ulid> {
+    Ok(Ulid::from_str(id)?)
 }
 
 async fn sleep_ms(ms: u64) {
@@ -389,6 +388,45 @@ async fn do_user(mut l: Level<Stuff>) -> Result<()> {
     sel!(l).run().await
 }
 
+async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
+    l.add_column("id", 26, true);
+    l.add_column("flags", 5, true);
+    l.add_column("creation", 15, true);
+
+    let a = no_args!(l);
+
+    let mut t = a.table();
+
+    for w in l.context().admin()?.workers_list().await?.workers {
+        let id = to_ulid(&w.id)?;
+        let creation = Utc.timestamp_millis(id.timestamp() as i64);
+
+        let flags = format!(
+            "{}{}",
+            if w.recycle { "R" } else { "-" },
+            if w.deleted { "D" } else { "-" },
+        );
+
+        let mut r = Row::default();
+        r.add_str("id", &w.id);
+        r.add_str(
+            "creation",
+            creation.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        );
+        r.add_str("flags", flags);
+        t.add_row(r);
+    }
+
+    print!("{}", t.output()?);
+    Ok(())
+}
+
+async fn do_worker(mut l: Level<Stuff>) -> Result<()> {
+    l.cmda("list", "ls", "list workers", cmd!(do_worker_list))?;
+
+    sel!(l).run().await
+}
+
 fn bearer_client(token: &str) -> Result<reqwest::Client> {
     let mut dh = HeaderMap::new();
     dh.insert(
@@ -416,6 +454,7 @@ async fn main() -> Result<()> {
     l.cmd("control", "server control functions", cmd!(do_control))?;
     l.cmd("job", "job management", cmd!(do_job))?;
     l.cmd("user", "user management", cmd!(do_user))?;
+    l.cmd("worker", "worker management", cmd!(do_worker))?;
 
     let a = args!(l);
 
