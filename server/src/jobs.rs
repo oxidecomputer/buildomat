@@ -44,7 +44,7 @@ async fn job_assignment_one(log: &Logger, c: &Central) -> Result<()> {
                     &j.id,
                     None,
                     "control",
-                    &Utc::now(),
+                    Utc::now(),
                     "worker failed without completing job",
                 )?;
                 c.db.job_complete(&j.id, true)?;

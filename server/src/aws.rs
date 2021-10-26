@@ -25,7 +25,7 @@ struct Instance {
     id: String,
     state: String,
     ip: Option<String>,
-    worker_id: Option<Ulid>,
+    worker_id: Option<db::WorkerId>,
 }
 
 trait TagExtractor {
@@ -204,7 +204,8 @@ async fn instances(
                         .tags
                         .tag(&format!("{}-worker_id", tag))
                         .map(|s| Ulid::from_str(&s).ok())
-                        .unwrap_or_default();
+                        .unwrap_or_default()
+                        .map(|id| db::WorkerId(id));
 
                     let ip = i.private_ip_address.clone();
 

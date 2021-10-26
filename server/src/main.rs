@@ -26,12 +26,16 @@ use rusty_ulid::Ulid;
 use serde::Deserialize;
 #[allow(unused_imports)]
 use slog::{error, info, warn, Logger};
+#[macro_use]
+extern crate diesel;
 
 mod api;
 mod aws;
 mod chunks;
 mod db;
 mod jobs;
+
+use db::{JobId, JobOutputId};
 
 pub(crate) trait MakeInternalError<T> {
     fn or_500(self) -> SResult<T, HttpError>;
@@ -249,7 +253,7 @@ impl Central {
         Ok(p)
     }
 
-    fn chunk_path(&self, job: &Ulid, chunk: &Ulid) -> Result<PathBuf> {
+    fn chunk_path(&self, job: &JobId, chunk: &Ulid) -> Result<PathBuf> {
         let mut p = self.chunk_dir()?;
         p.push(job.to_string());
         std::fs::create_dir_all(&p)?;
@@ -257,7 +261,11 @@ impl Central {
         Ok(p)
     }
 
-    fn output_path(&self, job: &Ulid, output: &Ulid) -> Result<PathBuf> {
+    fn output_path(
+        &self,
+        job: &JobId,
+        output: &JobOutputId,
+    ) -> Result<PathBuf> {
         let mut p = self.datadir.clone();
         p.push("output");
         p.push(job.to_string());

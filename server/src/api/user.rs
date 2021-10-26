@@ -68,10 +68,10 @@ pub(crate) async fn job_events_get(
     Ok(HttpResponseOk(
         jevs.iter()
             .map(|jev| JobEvent {
-                seq: jev.seq,
+                seq: jev.seq as usize,
                 task: jev.task.map(|n| n as u32),
                 stream: jev.stream.to_string(),
-                time: jev.time,
+                time: jev.time.into(),
                 payload: jev.payload.to_string(),
             })
             .collect(),
@@ -109,7 +109,7 @@ pub(crate) async fn job_outputs_get(
         jops.iter()
             .map(|jop| JobOutput {
                 id: jop.id.to_string(),
-                size: jop.size,
+                size: jop.size.0,
                 path: jop.path.to_string(),
             })
             .collect(),
@@ -170,8 +170,8 @@ fn format_task(t: &db::Task) -> Task {
         script: t.script.to_string(),
         env_clear: t.env_clear,
         env: t.env.clone(),
-        uid: t.user_id,
-        gid: t.group_id,
+        uid: t.user_id.map(|x| x.0),
+        gid: t.group_id.map(|x| x.0),
         workdir: t.workdir.clone(),
         state,
     }

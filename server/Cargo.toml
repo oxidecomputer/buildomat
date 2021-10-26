@@ -8,6 +8,7 @@ license = "MPL-2.0"
 anyhow = "1"
 base64 = "0.13"
 chrono = "0.4"
+diesel = { git = "https://github.com/diesel-rs/diesel", features = ["sqlite", "extras"] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot" }
 getopts = "0.2"
 hyper = "0.14"
@@ -16,7 +17,6 @@ rand = "0.8"
 rusoto_core = "0.47.0"
 rusoto_credential = "0.47.0"
 rusoto_ec2 = "0.47.0"
-rusqlite = { version = "0.25.3", features = [ "chrono" ]}
 rusty_ulid = "0.11"
 schemars = { version = "0.8", features = [ "chrono" ] }
 serde = { version = "1", features = [ "derive" ] }

@@ -67,7 +67,7 @@ pub(crate) async fn users_list(
             .map(|u| User {
                 id: u.id.to_string(),
                 name: u.name.to_string(),
-                time_create: u.time_create,
+                time_create: u.time_create.into(),
             })
             .collect::<Vec<_>>();
 
@@ -166,7 +166,7 @@ pub(crate) async fn workers_list(
                 instance_id: w.instance_id.clone(),
                 deleted: w.deleted,
                 recycle: w.recycle,
-                lastping: w.lastping,
+                lastping: w.lastping.map(|x| x.into()),
                 jobs,
             })
         })

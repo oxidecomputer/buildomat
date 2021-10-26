@@ -94,8 +94,8 @@ pub(crate) async fn worker_ping(
                     script: t.script.to_string(),
                     env_clear: t.env_clear,
                     env: t.env.clone(),
-                    uid: t.user_id.unwrap_or(0),
-                    gid: t.group_id.unwrap_or(0),
+                    uid: t.user_id.map(|x| x.0).unwrap_or(0),
+                    gid: t.group_id.map(|x| x.0).unwrap_or(0),
                     workdir: t.workdir.as_deref().unwrap_or("/").to_string(),
                 })
                 .collect::<Vec<_>>();
@@ -142,7 +142,7 @@ pub(crate) async fn worker_job_append(
 
     info!(log, "worker {} append to job {} stream {}", w.id, j.id, a.stream);
 
-    c.db.job_append_event(&j.id, None, &a.stream, &a.time, &a.payload)
+    c.db.job_append_event(&j.id, None, &a.stream, a.time, &a.payload)
         .or_500()?;
 
     Ok(HttpResponseCreated(()))
@@ -177,7 +177,7 @@ pub(crate) async fn worker_task_append(
         a.stream
     );
 
-    c.db.job_append_event(&j.id, Some(p.task), &a.stream, &a.time, &a.payload)
+    c.db.job_append_event(&j.id, Some(p.task), &a.stream, a.time, &a.payload)
         .or_500()?;
 
     Ok(HttpResponseCreated(()))
@@ -356,7 +356,7 @@ pub(crate) async fn worker_job_add_output(
      * Assign an ID for this output and determine where we will store it in the
      * file system.
      */
-    let oid = Ulid::generate();
+    let oid = db::JobOutputId::generate();
     let op = c.output_path(&j.id, &oid).or_500()?;
     let mut fout = fs::OpenOptions::new()
         .create_new(true)

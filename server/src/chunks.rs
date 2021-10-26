@@ -32,7 +32,7 @@ async fn chunk_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
 
         let id = if let Ok(name) = ent.file_name().into_string() {
             match rusty_ulid::Ulid::from_str(name.as_str()) {
-                Ok(id) => id,
+                Ok(id) => super::db::JobId(id),
                 Err(e) => {
                     error!(
                         log,
