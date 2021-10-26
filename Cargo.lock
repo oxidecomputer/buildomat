@@ -630,7 +630,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 [[package]]
 name = "hiercmd"
 version = "0.1.0"
-source = "git+https://github.com/jclulow/hiercmd#3a2810fb5e3c0241ed86473206ac021718e4f611"
+source = "git+https://github.com/jclulow/hiercmd#9cba402c47b2cc3ac3fd414bd2cd0d28a4298d29"
 dependencies = [
  "anyhow",
  "getopts",

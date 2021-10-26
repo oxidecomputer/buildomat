@@ -26,6 +26,8 @@ use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use reqwest::ClientBuilder;
 use rusty_ulid::Ulid;
 
+const WIDTH_ISODATE: usize = 20;
+
 mod config;
 
 fn to_ulid(id: &str) -> Result<Ulid> {
@@ -360,7 +362,7 @@ async fn do_user_create(mut l: Level<Stuff>) -> Result<()> {
 async fn do_user_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("id", 26, true);
     l.add_column("name", 30, true);
-    l.add_column("creation", 15, true);
+    l.add_column("creation", WIDTH_ISODATE, true);
 
     let a = no_args!(l);
 
@@ -391,15 +393,28 @@ async fn do_user(mut l: Level<Stuff>) -> Result<()> {
 async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("id", 26, true);
     l.add_column("flags", 5, true);
-    l.add_column("creation", 15, true);
+    l.add_column("creation", WIDTH_ISODATE, true);
+    l.add_column("age", 8, true);
+
+    l.optflag("A", "active", "display only workers not yet destroyed");
 
     let a = no_args!(l);
+    let active = a.opts().opt_present("active");
 
     let mut t = a.table();
 
     for w in l.context().admin()?.workers_list().await?.workers {
+        if active && w.deleted {
+            continue;
+        }
+
         let id = to_ulid(&w.id)?;
         let creation = Utc.timestamp_millis(id.timestamp() as i64);
+
+        let when = std::time::UNIX_EPOCH
+            .checked_add(Duration::from_millis(id.timestamp()))
+            .unwrap();
+        let age = std::time::SystemTime::now().duration_since(when).unwrap();
 
         let flags = format!(
             "{}{}",
@@ -413,6 +428,7 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
             "creation",
             creation.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         );
+        r.add_age("age", age);
         r.add_str("flags", flags);
         t.add_row(r);
     }
