@@ -260,8 +260,18 @@ pub struct JobEvent {
     pub task: Option<i32>,
     pub seq: i32,
     pub stream: String,
+    /**
+     * The time at which the core API server received or generated this event.
+     */
     pub time: IsoDate,
     pub payload: String,
+    /**
+     * If this event was received from a remote system, such as a worker, this
+     * time reflects the time on that remote system when the event was
+     * generated.  Due to issues with NTP, etc, it might not align exactly with
+     * the time field.
+     */
+    pub time_remote: Option<IsoDate>,
 }
 
 #[derive(Debug, Queryable, Insertable, Identifiable)]

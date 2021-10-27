@@ -7,7 +7,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::sync::Mutex;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Result};
 use chrono::prelude::*;
 use diesel::prelude::*;
 use rand::distributions::Alphanumeric;
@@ -237,7 +237,7 @@ impl Database {
         let c = &mut self.1.lock().unwrap().conn;
 
         c.immediate_transaction(|tx| {
-            use schema::{job, job_event, worker};
+            use schema::{job, worker};
 
             let w: Worker = worker::dsl::worker.find(wid).get_result(tx)?;
             if w.deleted || w.recycle {
@@ -263,16 +263,15 @@ impl Database {
                 .execute(tx)?;
             assert_eq!(uc, 1);
 
-            diesel::insert_into(job_event::dsl::job_event)
-                .values(JobEvent {
-                    job: j.id,
-                    task: None,
-                    seq: 0,
-                    stream: "control".to_string(),
-                    time: IsoDate(Utc::now()),
-                    payload: format!("job assigned to worker {}", w.id),
-                })
-                .execute(tx)?;
+            self.i_job_event_insert(
+                tx,
+                &j.id,
+                None,
+                "control",
+                Utc::now(),
+                None,
+                &format!("job assigned to worker {}", w.id),
+            )?;
 
             Ok(())
         })
@@ -620,6 +619,7 @@ impl Database {
         task: Option<u32>,
         stream: &str,
         time: DateTime<Utc>,
+        time_remote: Option<DateTime<Utc>>,
         payload: &str,
     ) -> OResult<()> {
         use schema::job;
@@ -632,8 +632,15 @@ impl Database {
                 conflict!("job already complete, cannot append");
             }
 
-            Ok(self
-                .i_job_event_insert(tx, &j.id, task, stream, time, payload)?)
+            Ok(self.i_job_event_insert(
+                tx,
+                &j.id,
+                task,
+                stream,
+                time,
+                time_remote,
+                payload,
+            )?)
         })
     }
 
@@ -674,6 +681,7 @@ impl Database {
                     None,
                     "control",
                     Utc::now(),
+                    None,
                     &format!("task {} was incomplete, marked failed", t.seq),
                 )?;
 
@@ -702,6 +710,7 @@ impl Database {
                     None,
                     "control",
                     Utc::now(),
+                    None,
                     "job failed because at least one task failed",
                 )?;
                 true
@@ -760,6 +769,7 @@ impl Database {
         task: Option<u32>,
         stream: &str,
         time: DateTime<Utc>,
+        time_remote: Option<DateTime<Utc>>,
         payload: &str,
     ) -> Result<()> {
         use schema::job_event;
@@ -776,6 +786,7 @@ impl Database {
                 seq: max.unwrap_or(0) + 1,
                 stream: stream.to_string(),
                 time: IsoDate(time),
+                time_remote: time_remote.map(|t| IsoDate(t)),
                 payload: payload.to_string(),
             })
             .execute(tx)?;

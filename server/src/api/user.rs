@@ -10,6 +10,7 @@ pub(crate) struct JobEvent {
     task: Option<u32>,
     stream: String,
     time: DateTime<Utc>,
+    time_remote: Option<DateTime<Utc>>,
     payload: String,
 }
 
@@ -72,6 +73,7 @@ pub(crate) async fn job_events_get(
                 task: jev.task.map(|n| n as u32),
                 stream: jev.stream.to_string(),
                 time: jev.time.into(),
+                time_remote: jev.time_remote.map(|t| t.into()),
                 payload: jev.payload.to_string(),
             })
             .collect(),

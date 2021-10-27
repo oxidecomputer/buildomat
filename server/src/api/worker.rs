@@ -142,8 +142,15 @@ pub(crate) async fn worker_job_append(
 
     info!(log, "worker {} append to job {} stream {}", w.id, j.id, a.stream);
 
-    c.db.job_append_event(&j.id, None, &a.stream, a.time, &a.payload)
-        .or_500()?;
+    c.db.job_append_event(
+        &j.id,
+        None,
+        &a.stream,
+        Utc::now(),
+        Some(a.time),
+        &a.payload,
+    )
+    .or_500()?;
 
     Ok(HttpResponseCreated(()))
 }
@@ -177,8 +184,15 @@ pub(crate) async fn worker_task_append(
         a.stream
     );
 
-    c.db.job_append_event(&j.id, Some(p.task), &a.stream, a.time, &a.payload)
-        .or_500()?;
+    c.db.job_append_event(
+        &j.id,
+        Some(p.task),
+        &a.stream,
+        Utc::now(),
+        Some(a.time),
+        &a.payload,
+    )
+    .or_500()?;
 
     Ok(HttpResponseCreated(()))
 }

@@ -60,6 +60,7 @@ table! {
         stream -> Text,
         time -> Text,
         payload -> Text,
+        time_remote -> Nullable<Text>,
     }
 }
 

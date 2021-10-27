@@ -38,6 +38,8 @@ pub mod types {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub task: Option<u32>,
         pub time: chrono::DateTime<chrono::offset::Utc>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub time_remote: Option<chrono::DateTime<chrono::offset::Utc>>,
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone)]

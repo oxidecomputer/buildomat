@@ -75,3 +75,7 @@ CREATE TABLE worker (
     recycle         INTEGER,
     lastping        TEXT
 );
+
+-- v 8
+ALTER TABLE job_event ADD COLUMN
+    time_remote     TEXT;
