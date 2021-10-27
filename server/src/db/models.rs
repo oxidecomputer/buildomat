@@ -252,7 +252,7 @@ impl Task {
     }
 }
 
-#[derive(Debug, Queryable, Insertable, Identifiable)]
+#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
 #[table_name = "job_event"]
 #[primary_key(job, seq)]
 pub struct JobEvent {
@@ -272,6 +272,17 @@ pub struct JobEvent {
      * the time field.
      */
     pub time_remote: Option<IsoDate>,
+}
+
+impl JobEvent {
+    pub fn age(&self) -> std::time::Duration {
+        if let Ok(age) = Utc::now().signed_duration_since(self.time.0).to_std()
+        {
+            age
+        } else {
+            std::time::Duration::from_secs(0)
+        }
+    }
 }
 
 #[derive(Debug, Queryable, Insertable, Identifiable)]

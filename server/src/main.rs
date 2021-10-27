@@ -34,6 +34,7 @@ mod aws;
 mod chunks;
 mod db;
 mod jobs;
+mod workers;
 
 use db::{JobId, JobOutputId};
 
@@ -133,6 +134,7 @@ struct ConfigFileAws {
     security_group: String,
     limit_spares: usize,
     limit_total: usize,
+    max_runtime: u64,
 }
 
 fn read_toml<T>(n: &str) -> Result<T>
@@ -398,6 +400,14 @@ async fn main() -> Result<()> {
             .context("chunk cleanup task failure")
     });
 
+    let c0 = Arc::clone(&c);
+    let log0 = log.clone();
+    let t_workers = tokio::task::spawn(async move {
+        workers::worker_cleanup(log0, c0)
+            .await
+            .context("worker cleanup task failure")
+    });
+
     let server = HttpServerStarter::new(
         #[allow(clippy::needless_update)]
         &ConfigDropshot {
@@ -418,6 +428,7 @@ async fn main() -> Result<()> {
             _ = t_aws => bail!("AWS task stopped early"),
             _ = t_assign => bail!("task assignment task stopped early"),
             _ = t_chunks => bail!("chunk cleanup task stopped early"),
+            _ = t_workers => bail!("worker cleanup task stopped early"),
             _ = server_task => bail!("server stopped early"),
         }
     }
