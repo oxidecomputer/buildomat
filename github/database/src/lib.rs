@@ -637,6 +637,22 @@ impl Database {
         Ok(rows.into_iter().collect::<std::result::Result<_, _>>()?)
     }
 
+    pub fn list_check_suites_active(&self) -> Result<Vec<CheckSuite>> {
+        let c = &mut self.1.lock().unwrap();
+
+        let mut q = c.prepare(
+            "SELECT * FROM check_suite \
+            WHERE state <> 'parked' AND \
+            state <> 'complete' AND \
+            state <> 'retired' \
+            ORDER BY id ASC",
+        )?;
+
+        let rows = q.query_map([], row_to_check_suite)?;
+
+        Ok(rows.into_iter().collect::<std::result::Result<_, _>>()?)
+    }
+
     pub fn list_check_runs_for_suite(
         &self,
         check_suite: &Ulid,

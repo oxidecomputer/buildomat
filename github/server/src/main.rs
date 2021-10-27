@@ -1166,13 +1166,14 @@ async fn process_check_suite(app: &Arc<App>, cs: &Ulid) -> Result<()> {
 
     let mut cs = db.load_check_suite(cs)?;
     let repo = app.db.load_repository(cs.repo)?;
-    let gh = app.install_client(cs.install);
 
     match &cs.state {
         CheckSuiteState::Parked => {}
         CheckSuiteState::Complete => {}
         CheckSuiteState::Retired => {}
         CheckSuiteState::Created => {
+            let gh = app.install_client(cs.install);
+
             /*
              * Read our top-level configuration file in the default branch of
              * the repository.  If checks are not enabled, we will do nothing
@@ -1437,7 +1438,7 @@ async fn bgtask(app: Arc<App>) {
         if let Err(e) = bgtask_one(&app).await {
             error!(log, "background task 1 error: {:?}", e);
         }
-        match app.db.list_check_suites() {
+        match app.db.list_check_suites_active() {
             Ok(suites) => {
                 for suite in suites {
                     if let Err(e) = process_check_suite(&app, &suite.id).await {
