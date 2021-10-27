@@ -263,6 +263,31 @@ impl Database {
                 .execute(tx)?;
             assert_eq!(uc, 1);
 
+            /*
+             * Estimate how long the job was waiting in the queue for a worker.
+             */
+            let wait = if let Ok(dur) =
+                Utc::now().signed_duration_since(j.id.datetime()).to_std()
+            {
+                let mut out = String::new();
+                let mut secs = dur.as_secs();
+                let hours = secs / 3600;
+                if hours > 0 {
+                    secs -= hours * 3600;
+                    out += &format!(" {} h", hours);
+                }
+                let minutes = secs / 60;
+                if minutes > 0 || hours > 0 {
+                    secs -= minutes * 60;
+                    out += &format!(" {} m", minutes);
+                }
+                out += &format!(" {} s", secs);
+
+                format!(" (queued for{})", out)
+            } else {
+                "".to_string()
+            };
+
             self.i_job_event_insert(
                 tx,
                 &j.id,
@@ -270,7 +295,7 @@ impl Database {
                 "control",
                 Utc::now(),
                 None,
-                &format!("job assigned to worker {}", w.id),
+                &format!("job assigned to worker {}{}", w.id, wait),
             )?;
 
             Ok(())
