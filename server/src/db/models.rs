@@ -149,7 +149,25 @@ where
         bytes: diesel::backend::RawValue<DB>,
     ) -> diesel::deserialize::Result<Self> {
         let s = String::from_sql(bytes)?;
-        let fo = DateTime::parse_from_rfc3339(&s)?;
+        let fo = match DateTime::parse_from_rfc3339(&s) {
+            Ok(fo) => fo,
+            Err(e1) => {
+                /*
+                 * Try an older date format from before we switched to diesel:
+                 */
+                match DateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S%.9f%z") {
+                    Ok(fo) => fo,
+                    Err(_) => {
+                        return Err(
+                            diesel::result::Error::DeserializationError(
+                                e1.into(),
+                            )
+                            .into(),
+                        )
+                    }
+                }
+            }
+        };
         Ok(IsoDate(DateTime::from(fo)))
     }
 }
