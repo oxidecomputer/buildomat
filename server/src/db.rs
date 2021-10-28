@@ -8,10 +8,9 @@ use std::str::FromStr;
 use std::sync::Mutex;
 
 use anyhow::{bail, Result};
+use buildomat_common::*;
 use chrono::prelude::*;
 use diesel::prelude::*;
-use rand::distributions::Alphanumeric;
-use rand::{thread_rng, Rng};
 #[allow(unused_imports)]
 use rusty_ulid::Ulid;
 #[allow(unused_imports)]
@@ -44,14 +43,6 @@ macro_rules! conflict {
     }
 }
 
-pub fn genkey(len: usize) -> String {
-    thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(len)
-        .map(|c| c as char)
-        .collect()
-}
-
 struct Inner {
     conn: diesel::sqlite::SqliteConnection,
 }
@@ -70,80 +61,11 @@ pub struct CreateTask {
 
 impl Database {
     pub fn new<P: AsRef<Path>>(log: Logger, path: P) -> Result<Database> {
-        let url = format!("sqlite://{}", path.as_ref().to_str().unwrap());
-        let mut conn = diesel::SqliteConnection::establish(&url)?;
-
-        #[derive(QueryableByName)]
-        struct UserVersion {
-            #[sql_type = "diesel::sql_types::Integer"]
-            user_version: i32,
-        }
-
-        /*
-         * Take the schema file and split it on the special comments we use to
-         * split up into statements
-         */
-        let mut steps: Vec<(i32, String)> = Vec::new();
-        let mut version = None;
-        let mut statement = String::new();
-
-        for l in include_str!("../schema.sql").lines() {
-            if l.starts_with("-- v ") {
-                if let Some(version) = version.take() {
-                    steps.push((version, statement.trim().to_string()));
-                }
-
-                version = Some(l.trim_start_matches("-- v ").parse()?);
-                statement.clear();
-            } else {
-                statement.push_str(l);
-                statement.push('\n');
-            }
-        }
-        if let Some(version) = version.take() {
-            steps.push((version, statement.trim().to_string()));
-        }
-
-        info!(
-            log,
-            "found user version {} in database",
-            diesel::sql_query("PRAGMA user_version")
-                .get_result::<UserVersion>(&mut conn)?
-                .user_version
-        );
-        for (version, statement) in steps {
-            /*
-             * Do some whitespace normalisation.  We would prefer to keep the
-             * whitespace-heavy layout of the schema as represented in the file,
-             * as SQLite will preserve it in the ".schema" output.
-             * Unfortunately, there is no obvious way to ALTER TABLE ADD COLUMN
-             * in a way that similarly maintains the whitespace, so we will
-             * instead uniformly do without.
-             */
-            let mut statement = statement.replace('\n', " ");
-            while statement.contains("( ") {
-                statement = statement.trim().replace("( ", "(");
-            }
-            while statement.contains(" )") {
-                statement = statement.trim().replace(" )", ")");
-            }
-            while statement.contains("  ") {
-                statement = statement.trim().replace("  ", " ");
-            }
-
-            /*
-             * Determine the current user version.
-             */
-            let uv = diesel::sql_query("PRAGMA user_version")
-                .get_result::<UserVersion>(&mut conn)?
-                .user_version;
-            if version > uv {
-                info!(log, "apply version {}, run {}", version, statement);
-                diesel::sql_query(statement).execute(&mut conn)?;
-                diesel::sql_query(format!("PRAGMA user_version = {}", version))
-                    .execute(&mut conn)?;
-            }
-        }
+        let conn = buildomat_common::db::sqlite_setup(
+            &log,
+            path,
+            include_str!("../schema.sql"),
+        )?;
 
         Ok(Database(log, Mutex::new(Inner { conn })))
     }

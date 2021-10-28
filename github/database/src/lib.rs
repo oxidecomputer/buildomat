@@ -3,8 +3,8 @@
  */
 
 use anyhow::{anyhow, bail, Context, Result};
+use buildomat_common::*;
 use chrono::prelude::*;
-use rand::Rng;
 use rusqlite::{
     params, types::Type, OptionalExtension, Row, Transaction,
     TransactionBehavior,
@@ -21,14 +21,6 @@ use thiserror::Error;
 
 /* XXX from rusqlite? */
 const UNKNOWN_COLUMN: usize = std::usize::MAX;
-
-pub fn genkey(len: usize) -> String {
-    rand::thread_rng()
-        .sample_iter(&rand::distributions::Alphanumeric)
-        .take(len)
-        .map(|c| (c as char).to_ascii_lowercase())
-        .collect()
-}
 
 #[derive(Error, Debug)]
 pub enum DatabaseError {

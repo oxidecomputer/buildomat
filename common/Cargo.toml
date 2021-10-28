@@ -1,0 +1,21 @@
+[package]
+name = "buildomat-common"
+version = "0.0.0"
+edition = "2018"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.13"
+buildomat-openapi = { path = "../openapi" }
+chrono = { version = "0.4", features = ["serde"] }
+diesel = { git = "https://github.com/diesel-rs/diesel", features = ["sqlite", "extras"] }
+getopts = "0.2"
+rand = "0.8"
+reqwest = { version = "0.11", features = ["json", "stream"] }
+rusty_ulid = "0.11"
+serde = { version = "1", features = [ "derive" ] }
+serde_json = "1.0.66"
+slog = "2.7"
+slog-term = "2.7"
+tokio = { version = "1", features = [ "full" ] }
+toml = "0.5"

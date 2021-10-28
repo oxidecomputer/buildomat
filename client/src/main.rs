@@ -17,27 +17,15 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
+use buildomat_common::*;
 use buildomat_openapi::{types::*, Client};
 use chrono::prelude::*;
 use hiercmd::prelude::*;
-use rand::distributions::Alphanumeric;
-use rand::{thread_rng, Rng};
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
-use reqwest::ClientBuilder;
 use rusty_ulid::Ulid;
 
 const WIDTH_ISODATE: usize = 20;
 
 mod config;
-
-fn to_ulid(id: &str) -> Result<Ulid> {
-    Ok(Ulid::from_str(id)?)
-}
-
-async fn sleep_ms(ms: u64) {
-    tokio::time::sleep(Duration::from_millis(ms)).await;
-    // std::thread::sleep(std::time::Duration::from_millis(ms));
-}
 
 #[derive(Default)]
 struct Stuff {
@@ -441,20 +429,6 @@ async fn do_worker(mut l: Level<Stuff>) -> Result<()> {
     l.cmda("list", "ls", "list workers", cmd!(do_worker_list))?;
 
     sel!(l).run().await
-}
-
-fn bearer_client(token: &str) -> Result<reqwest::Client> {
-    let mut dh = HeaderMap::new();
-    dh.insert(
-        AUTHORIZATION,
-        HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
-    );
-
-    Ok(ClientBuilder::new()
-        .timeout(Duration::from_secs(15))
-        .connect_timeout(Duration::from_secs(15))
-        .default_headers(dh)
-        .build()?)
 }
 
 #[tokio::main]

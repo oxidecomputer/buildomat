@@ -2,6 +2,7 @@
 members = [
 	"agent",
 	"client",
+	"common",
 	"github/common",
 	"github/database",
 	"github/dbtool",

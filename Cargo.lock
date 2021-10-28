@@ -101,11 +101,11 @@ name = "buildomat"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "buildomat-common",
  "buildomat-openapi",
  "chrono",
  "dirs-next",
  "hiercmd",
- "rand",
  "reqwest",
  "rusty_ulid",
  "serde",
@@ -119,15 +119,36 @@ name = "buildomat-agent"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "buildomat-common",
  "buildomat-openapi",
  "bytes 1.1.0",
  "chrono",
  "glob",
- "rand",
  "reqwest",
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "buildomat-common"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "base64 0.13.0",
+ "buildomat-openapi",
+ "chrono",
+ "diesel",
+ "getopts",
+ "rand",
+ "reqwest",
+ "rusty_ulid",
+ "serde",
+ "serde_json",
+ "slog",
+ "slog-term",
+ "tokio",
+ "toml",
 ]
 
 [[package]]
@@ -147,13 +168,13 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "base64 0.13.0",
+ "buildomat-common",
  "chrono",
  "diesel",
  "dropshot",
  "getopts",
  "hyper",
  "hyper-staticfile",
- "rand",
  "rusoto_core",
  "rusoto_credential",
  "rusoto_ec2",
@@ -164,7 +185,6 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "toml",
 ]
 
 [[package]]
@@ -2350,6 +2370,7 @@ name = "wollongong-database"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "buildomat-common",
  "chrono",
  "rand",
  "rusqlite",

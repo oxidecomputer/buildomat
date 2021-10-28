@@ -4,7 +4,6 @@
 
 #![allow(clippy::many_single_char_names)]
 
-use std::io::Read;
 use std::path::PathBuf;
 use std::process::exit;
 use std::result::Result as SResult;
@@ -12,8 +11,8 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, bail, Context, Result};
 use dropshot::{
-    endpoint, ApiDescription, ConfigDropshot, ConfigLogging,
-    ConfigLoggingLevel, HttpError, HttpServerStarter, RequestContext,
+    endpoint, ApiDescription, ConfigDropshot, HttpError, HttpServerStarter,
+    RequestContext,
 };
 use getopts::Options;
 #[allow(unused_imports)]
@@ -28,6 +27,7 @@ use serde::Deserialize;
 use slog::{error, info, warn, Logger};
 #[macro_use]
 extern crate diesel;
+use buildomat_common::*;
 
 mod api;
 mod aws;
@@ -135,16 +135,6 @@ struct ConfigFileAws {
     limit_spares: usize,
     limit_total: usize,
     max_runtime: u64,
-}
-
-fn read_toml<T>(n: &str) -> Result<T>
-where
-    for<'de> T: Deserialize<'de>,
-{
-    let mut f = std::fs::File::open(n)?;
-    let mut buf: Vec<u8> = Vec::new();
-    f.read_to_end(&mut buf)?;
-    Ok(toml::from_slice(buf.as_slice())?)
 }
 
 struct CentralInner {
@@ -354,9 +344,7 @@ async fn main() -> Result<()> {
         bail!("must specify configuration file (-f)");
     };
 
-    let log = ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info }
-        .to_logger("buildomat")
-        .context("logging setup")?;
+    let log = make_log("buildomat");
 
     let mut datadir = std::env::current_dir()?;
     datadir.push("data");

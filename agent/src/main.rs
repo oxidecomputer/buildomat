@@ -17,13 +17,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::prelude::*;
-use rand::distributions::Alphanumeric;
-use rand::{thread_rng, Rng};
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
-use reqwest::ClientBuilder;
 use serde::{Deserialize, Serialize};
 use ErrorKind::NotFound;
 
+use buildomat_common::*;
 use buildomat_openapi::types::*;
 
 mod exec;
@@ -193,18 +190,6 @@ impl ClientWrap {
     }
 }
 
-pub fn genkey(len: usize) -> String {
-    thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(len)
-        .map(|c| c as char)
-        .collect()
-}
-
-async fn sleep_ms(ms: u64) {
-    tokio::time::sleep(Duration::from_millis(ms)).await;
-}
-
 fn load<P, T>(p: P) -> Result<T>
 where
     P: AsRef<Path>,
@@ -306,18 +291,7 @@ fn argn(n: usize, name: &str) -> Result<String> {
 }
 
 fn make_client(cf: &ConfigFile) -> ClientWrap {
-    let mut dh = HeaderMap::new();
-    dh.insert(
-        AUTHORIZATION,
-        HeaderValue::from_str(&format!("Bearer {}", cf.token)).unwrap(),
-    );
-
-    let client = ClientBuilder::new()
-        .timeout(Duration::from_secs(15))
-        .connect_timeout(Duration::from_secs(15))
-        .default_headers(dh)
-        .build()
-        .expect("new client");
+    let client = bearer_client(&cf.token).expect("new client");
 
     ClientWrap {
         client: buildomat_openapi::Client::new_with_client(&cf.baseurl, client),
