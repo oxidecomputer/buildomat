@@ -93,7 +93,7 @@ pub(crate) async fn worker_ping(
                     name: t.name.to_string(),
                     script: t.script.to_string(),
                     env_clear: t.env_clear,
-                    env: t.env.clone(),
+                    env: t.env.clone().into(),
                     uid: t.user_id.map(|x| x.0).unwrap_or(0),
                     gid: t.group_id.map(|x| x.0).unwrap_or(0),
                     workdir: t.workdir.as_deref().unwrap_or("/").to_string(),

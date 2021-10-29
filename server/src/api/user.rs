@@ -171,7 +171,7 @@ fn format_task(t: &db::Task) -> Task {
         name: t.name.to_string(),
         script: t.script.to_string(),
         env_clear: t.env_clear,
-        env: t.env.clone(),
+        env: t.env.clone().into(),
         uid: t.user_id.map(|x| x.0),
         gid: t.group_id.map(|x| x.0),
         workdir: t.workdir.clone(),

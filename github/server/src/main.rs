@@ -4,15 +4,14 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use dropshot::ConfigLogging;
-use rusty_ulid::Ulid;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use slog::{debug, error, info, o, trace, warn, Logger};
 use std::collections::HashSet;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use wollongong_common::hooktypes;
+use wollongong_database::types::*;
 
 mod config;
 mod http;
@@ -28,7 +27,7 @@ pub struct RepoConfig {
 #[derive(Deserialize)]
 struct FrontMatter {
     name: String,
-    variety: wollongong_database::CheckRunVariety,
+    variety: CheckRunVariety,
     #[serde(flatten)]
     extra: toml::Value,
 }
@@ -50,11 +49,7 @@ impl App {
         format!("{}/{}", self.config.base_url, path)
     }
 
-    fn make_details_url(
-        &self,
-        cs: &wollongong_database::CheckSuite,
-        cr: &wollongong_database::CheckRun,
-    ) -> String {
+    fn make_details_url(&self, cs: &CheckSuite, cr: &CheckRun) -> String {
         self.make_url(&format!("details/{}/{}/{}", cs.id, cs.url_key, cr.id))
     }
 
@@ -84,7 +79,7 @@ impl App {
     async fn temp_access_token(
         &self,
         install_id: i64,
-        repo: &wollongong_database::Repository,
+        repo: &Repository,
     ) -> Result<String> {
         use octorust::types::{
             AppPermissions, AppsCreateInstallationAccessTokenRequest, Pages,
@@ -114,7 +109,7 @@ impl App {
     async fn load_file(
         &self,
         gh: &octorust::Client,
-        repo: &wollongong_database::Repository,
+        repo: &Repository,
         sha: &str,
         path: &str,
     ) -> Result<Option<String>> {
@@ -156,9 +151,9 @@ impl App {
     async fn load_repo_job_files(
         &self,
         gh: &octorust::Client,
-        cs: &wollongong_database::CheckSuite,
-        repo: &wollongong_database::Repository,
-    ) -> Result<LoadedFromSha<wollongong_database::Plan>> {
+        cs: &CheckSuite,
+        repo: &Repository,
+    ) -> Result<LoadedFromSha<Plan>> {
         /*
          * List the jobs directory in the commit under test.
          */
@@ -183,9 +178,7 @@ impl App {
                      */
                     return Ok(LoadedFromSha {
                         sha: cs.head_sha.to_string(),
-                        loaded: wollongong_database::Plan {
-                            jobfiles: Vec::new(),
-                        },
+                        loaded: Plan { jobfiles: Vec::new() },
                     });
                 }
 
@@ -252,7 +245,7 @@ impl App {
                         anyhow!("TOML front matter in {:?}", ent.path)
                     })?;
 
-                jobfiles.push(wollongong_database::JobFile {
+                jobfiles.push(JobFile {
                     path: ent.path.to_string(),
                     name: toml.name.to_string(),
                     variety: toml.variety,
@@ -266,14 +259,14 @@ impl App {
 
         Ok(LoadedFromSha {
             sha: cs.head_sha.to_string(),
-            loaded: wollongong_database::Plan { jobfiles },
+            loaded: Plan { jobfiles },
         })
     }
 
     async fn load_repo_config(
         &self,
-        cs: &wollongong_database::CheckSuite,
-        repo: &wollongong_database::Repository,
+        cs: &CheckSuite,
+        repo: &Repository,
     ) -> Result<LoadedFromSha<RepoConfig>> {
         let gh = self.install_client(cs.install);
 
@@ -350,7 +343,6 @@ async fn bgtask_one(app: &Arc<App>) -> Result<()> {
      */
     for del in app.db.list_deliveries_unacked()? {
         use hooktypes::Payload;
-        use wollongong_database::{CheckRunVariety, CheckSuiteState};
 
         if del.event == "ping" {
             /*
@@ -362,7 +354,7 @@ async fn bgtask_one(app: &Arc<App>) -> Result<()> {
             continue;
         }
 
-        let payload = match serde_json::from_value::<Payload>(del.payload) {
+        let payload = match serde_json::from_value::<Payload>(del.payload.0) {
             Ok(payload) => {
                 info!(
                     log,
@@ -611,7 +603,7 @@ async fn bgtask_one(app: &Arc<App>) -> Result<()> {
                  * XXX A re-run of a failed check as requested.
                  */
                 let crid = if let Some(cr) = &payload.check_run {
-                    if let Ok(id) = Ulid::from_str(&cr.external_id) {
+                    if let Ok(id) = cr.external_id.parse() {
                         id
                     } else {
                         error!(
@@ -737,10 +729,7 @@ async fn bgtask_one(app: &Arc<App>) -> Result<()> {
  * Load the full set of Check Runs from the database and from GitHub.  Ensure
  * that every Run on GitHub has a local database entry and vice-versa.
  */
-async fn reconcile_check_runs(
-    app: &Arc<App>,
-    cs: &wollongong_database::CheckSuite,
-) -> Result<()> {
+async fn reconcile_check_runs(app: &Arc<App>, cs: &CheckSuite) -> Result<()> {
     let log = &app.log;
     let db = &app.db;
     let repo = db.load_repository(cs.repo)?;
@@ -786,7 +775,7 @@ async fn reconcile_check_runs(
         let completed =
             matches!(run.status, octorust::types::JobStatus::Completed,);
 
-        let mut cr = match Ulid::from_str(&run.external_id) {
+        let mut cr = match run.external_id.parse() {
             Ok(id) => db.load_check_run(&id)?,
             Err(e) => {
                 /*
@@ -889,11 +878,9 @@ struct FlushOut {
 
 async fn flush_check_runs(
     app: &Arc<App>,
-    cs: &wollongong_database::CheckSuite,
-    repo: &wollongong_database::Repository,
+    cs: &CheckSuite,
+    repo: &Repository,
 ) -> Result<()> {
-    use wollongong_database::CheckRunVariety;
-
     let log = &app.log;
     let db = &app.db;
     let gh = app.install_client(cs.install);
@@ -1110,10 +1097,9 @@ struct ControlPrivate {
  */
 async fn check_run_run(
     app: &Arc<App>,
-    cs: &wollongong_database::CheckSuite,
-    cr: &mut wollongong_database::CheckRun,
+    cs: &CheckSuite,
+    cr: &mut CheckRun,
 ) -> Result<bool> {
-    use wollongong_database::CheckRunVariety;
     let db = &app.db;
 
     Ok(match &cr.variety {
@@ -1158,9 +1144,7 @@ async fn check_run_run(
     })
 }
 
-async fn process_check_suite(app: &Arc<App>, cs: &Ulid) -> Result<()> {
-    use wollongong_database::{CheckRunVariety, CheckSuiteState};
-
+async fn process_check_suite(app: &Arc<App>, cs: &CheckSuiteId) -> Result<()> {
     let log = &app.log;
     let db = &app.db;
 
@@ -1282,7 +1266,7 @@ async fn process_check_suite(app: &Arc<App>, cs: &Ulid) -> Result<()> {
                         db.update_check_run(&cr)?;
                     }
 
-                    cs.plan = Some(lp.loaded);
+                    cs.plan = Some(lp.loaded.into());
                     cs.plan_sha = Some(lp.sha);
                     cs.state = CheckSuiteState::Planned;
                 }
@@ -1355,7 +1339,7 @@ async fn process_check_suite(app: &Arc<App>, cs: &Ulid) -> Result<()> {
 
                 let mut update = false;
                 if cr.config.is_none() {
-                    cr.config = Some(jf.config.clone());
+                    cr.config = Some(JsonValue(jf.config.clone()));
                     debug!(log, "cr {} config -> {:?}", cr.id, cr.config);
                     update = true;
                 }

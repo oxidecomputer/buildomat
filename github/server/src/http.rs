@@ -7,7 +7,6 @@ use chrono::prelude::*;
 use dropshot::{
     endpoint, ConfigDropshot, HttpError, HttpResponseOk, RequestContext,
 };
-use rusty_ulid::Ulid;
 use schemars::JsonSchema;
 #[allow(unused_imports)]
 use serde::{Deserialize, Serialize};
@@ -15,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use slog::{debug, error, info, o, trace, Logger};
 use std::collections::HashMap;
 use std::result::Result as SResult;
-use std::str::FromStr;
 use std::sync::Arc;
+use wollongong_database::types::*;
 
 use super::{variety, App};
 
@@ -75,12 +74,12 @@ struct ArtefactPath {
 }
 
 impl ArtefactPath {
-    fn check_suite(&self) -> SResult<Ulid, HttpError> {
-        Ulid::from_str(&self.check_suite).to_500()
+    fn check_suite(&self) -> SResult<CheckSuiteId, HttpError> {
+        self.check_suite.parse::<CheckSuiteId>().to_500()
     }
 
-    fn check_run(&self) -> SResult<Ulid, HttpError> {
-        Ulid::from_str(&self.check_run).to_500()
+    fn check_run(&self) -> SResult<CheckRunId, HttpError> {
+        self.check_run.parse::<CheckRunId>().to_500()
     }
 }
 
@@ -102,7 +101,7 @@ async fn artefact(
     }
 
     let response = match cr.variety {
-        wollongong_database::CheckRunVariety::Basic => {
+        CheckRunVariety::Basic => {
             variety::basic::artefact(app, &cs, &cr, &path.output, &path.name)
                 .await
                 .to_500()?
@@ -132,12 +131,12 @@ struct DetailsPath {
 }
 
 impl DetailsPath {
-    fn check_suite(&self) -> SResult<Ulid, HttpError> {
-        Ulid::from_str(&self.check_suite).to_500()
+    fn check_suite(&self) -> SResult<CheckSuiteId, HttpError> {
+        self.check_suite.parse::<CheckSuiteId>().to_500()
     }
 
-    fn check_run(&self) -> SResult<Ulid, HttpError> {
-        Ulid::from_str(&self.check_run).to_500()
+    fn check_run(&self) -> SResult<CheckRunId, HttpError> {
+        self.check_run.parse::<CheckRunId>().to_500()
     }
 }
 
@@ -165,19 +164,19 @@ async fn details(
     out += &format!("<h1>{}: {}</h1>\n", cr.id, cr.name);
 
     match cr.variety {
-        wollongong_database::CheckRunVariety::Control => {
+        CheckRunVariety::Control => {
             let p: super::ControlPrivate = cr.get_private().to_500()?;
             out += &format!("<pre>{:#?}</pre>\n", p);
         }
-        wollongong_database::CheckRunVariety::FailFirst => {
+        CheckRunVariety::FailFirst => {
             let p: super::FailFirstPrivate = cr.get_private().to_500()?;
             out += &format!("<pre>{:#?}</pre>\n", p);
         }
-        wollongong_database::CheckRunVariety::AlwaysPass => {
+        CheckRunVariety::AlwaysPass => {
             let p: super::AlwaysPassPrivate = cr.get_private().to_500()?;
             out += &format!("<pre>{:#?}</pre>\n", p);
         }
-        wollongong_database::CheckRunVariety::Basic => {
+        CheckRunVariety::Basic => {
             out += &variety::basic::details(app, &cs, &cr).await.to_500()?;
         }
     }

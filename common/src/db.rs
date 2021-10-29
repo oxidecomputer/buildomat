@@ -8,10 +8,105 @@ use std::collections::HashMap;
 use std::path::Path;
 
 #[macro_export]
+macro_rules! sql_for_enum {
+    ($name:ident) => {
+        impl<DB> ToSql<diesel::sql_types::Text, DB> for $name
+        where
+            DB: diesel::backend::Backend,
+            String: ToSql<diesel::sql_types::Text, DB>,
+        {
+            fn to_sql<W: std::io::Write>(
+                &self,
+                out: &mut diesel::serialize::Output<W, DB>,
+            ) -> diesel::serialize::Result {
+                self.to_string().to_sql(out)
+            }
+        }
+
+        impl<DB> FromSql<diesel::sql_types::Text, DB> for $name
+        where
+            DB: diesel::backend::Backend,
+            String: FromSql<diesel::sql_types::Text, DB>,
+        {
+            fn from_sql(
+                bytes: diesel::backend::RawValue<DB>,
+            ) -> diesel::deserialize::Result<Self> {
+                Ok($name::from_str(&String::from_sql(bytes)?)?)
+            }
+        }
+    };
+}
+pub use sql_for_enum;
+
+#[macro_export]
+macro_rules! json_new_type {
+    ($name:ident, $mytype:ty) => {
+        #[derive(
+            Clone, Debug, FromSqlRow, diesel::expression::AsExpression,
+        )]
+        #[sql_type = "diesel::sql_types::Text"]
+        pub struct $name(pub $mytype);
+
+        impl<DB> ToSql<diesel::sql_types::Text, DB> for $name
+        where
+            DB: diesel::backend::Backend,
+            String: ToSql<diesel::sql_types::Text, DB>,
+        {
+            fn to_sql<W: std::io::Write>(
+                &self,
+                out: &mut diesel::serialize::Output<W, DB>,
+            ) -> diesel::serialize::Result {
+                serde_json::to_string(&self.0)?.to_sql(out)
+            }
+        }
+
+        impl<DB> FromSql<diesel::sql_types::Text, DB> for $name
+        where
+            DB: diesel::backend::Backend,
+            String: FromSql<diesel::sql_types::Text, DB>,
+        {
+            fn from_sql(
+                bytes: diesel::backend::RawValue<DB>,
+            ) -> diesel::deserialize::Result<Self> {
+                Ok($name(serde_json::from_str(&String::from_sql(bytes)?)?))
+            }
+        }
+
+        impl Into<$mytype> for $name {
+            fn into(self) -> $mytype {
+                self.0
+            }
+        }
+
+        impl From<$mytype> for $name {
+            fn from(t: $mytype) -> $name {
+                $name(t)
+            }
+        }
+
+        impl std::ops::Deref for $name {
+            type Target = $mytype;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+    };
+}
+pub use json_new_type;
+
+#[macro_export]
 macro_rules! integer_new_type {
     ($name:ident, $mytype:ty, $intype:ty, $sqltype:ident, $sqlts:literal) => {
         #[derive(
-            Clone, Copy, Debug, FromSqlRow, diesel::expression::AsExpression,
+            Clone,
+            Copy,
+            Debug,
+            PartialEq,
+            Hash,
+            Eq,
+            FromSqlRow,
+            diesel::expression::AsExpression,
         )]
         #[sql_type = $sqlts]
         pub struct $name(pub $mytype);
@@ -40,6 +135,20 @@ macro_rules! integer_new_type {
             ) -> diesel::deserialize::Result<Self> {
                 let n = <$intype>::from_sql(bytes)? as $mytype;
                 Ok($name(n))
+            }
+        }
+
+        impl std::str::FromStr for $name {
+            type Err = std::num::ParseIntError;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                Ok($name(s.parse()?))
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.0.to_string())
             }
         }
 
@@ -97,6 +206,14 @@ macro_rules! ulid_new_type {
         impl std::fmt::Display for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(f, "{}", self.0.to_string())
+            }
+        }
+
+        impl std::str::FromStr for $name {
+            type Err = rusty_ulid::DecodingError;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                Ok($name(rusty_ulid::Ulid::from_str(s)?))
             }
         }
 
@@ -179,46 +296,16 @@ impl From<DateTime<Utc>> for IsoDate {
     }
 }
 
-/*
- * Dictionary
- */
-
-#[derive(Debug, FromSqlRow, diesel::expression::AsExpression)]
-#[sql_type = "diesel::sql_types::Text"]
-pub struct Dictionary(pub HashMap<String, String>);
-
-impl<DB> ToSql<diesel::sql_types::Text, DB> for Dictionary
-where
-    DB: diesel::backend::Backend,
-    String: ToSql<diesel::sql_types::Text, DB>,
-{
-    fn to_sql<W: std::io::Write>(
-        &self,
-        out: &mut diesel::serialize::Output<W, DB>,
-    ) -> diesel::serialize::Result {
-        serde_json::to_string(&self.0)?.to_sql(out)
-    }
-}
-
-impl<DB> FromSql<diesel::sql_types::Text, DB> for Dictionary
-where
-    DB: diesel::backend::Backend,
-    String: FromSql<diesel::sql_types::Text, DB>,
-{
-    fn from_sql(
-        bytes: diesel::backend::RawValue<DB>,
-    ) -> diesel::deserialize::Result<Self> {
-        Ok(Dictionary(serde_json::from_str(&String::from_sql(bytes)?)?))
-    }
-}
-
-impl std::ops::Deref for Dictionary {
-    type Target = HashMap<String, String>;
+impl std::ops::Deref for IsoDate {
+    type Target = DateTime<Utc>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
+
+json_new_type!(Dictionary, HashMap<String, String>);
+json_new_type!(JsonValue, serde_json::Value);
 
 pub fn sqlite_setup<P: AsRef<Path>, S: AsRef<str>>(
     log: &Logger,

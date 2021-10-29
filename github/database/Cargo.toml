@@ -8,8 +8,8 @@ license = "MPL-2.0"
 anyhow = "1.0.41"
 buildomat-common = { path = "../../common" }
 chrono = { version = "0.4.19", features = ["serde"] }
+diesel = { git = "https://github.com/diesel-rs/diesel", features = ["sqlite", "extras", "serde_json"] }
 rand = "0.8.4"
-rusqlite = { version = "0.25.3", features = ["chrono", "serde_json", "bundled"] }
 rusty_ulid = "0.11.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

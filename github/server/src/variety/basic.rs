@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use slog::{debug, error, info, o, trace, warn, Logger};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use wollongong_database::types::*;
 
 const KILOBYTE: f64 = 1024.0;
 const MEGABYTE: f64 = 1024.0 * KILOBYTE;
@@ -57,8 +58,8 @@ struct BasicOutput {
 impl BasicOutput {
     fn new(
         app: &Arc<App>,
-        cs: &wollongong_database::CheckSuite,
-        cr: &wollongong_database::CheckRun,
+        cs: &CheckSuite,
+        cr: &CheckRun,
         o: &buildomat_openapi::types::JobOutput,
     ) -> BasicOutput {
         let name = o
@@ -93,9 +94,9 @@ impl BasicOutput {
 
 pub(crate) async fn flush(
     app: &Arc<App>,
-    cs: &wollongong_database::CheckSuite,
-    cr: &mut wollongong_database::CheckRun,
-    _repo: &wollongong_database::Repository,
+    cs: &CheckSuite,
+    cr: &mut CheckRun,
+    _repo: &Repository,
 ) -> Result<FlushOut> {
     let p: BasicPrivate = cr.get_private()?;
 
@@ -222,8 +223,8 @@ pub(crate) async fn flush(
  */
 pub(crate) async fn run(
     app: &Arc<App>,
-    cs: &wollongong_database::CheckSuite,
-    cr: &mut wollongong_database::CheckRun,
+    cs: &CheckSuite,
+    cr: &mut CheckRun,
 ) -> Result<bool> {
     let db = &app.db;
 
@@ -522,8 +523,8 @@ pub(crate) async fn run(
 
 pub(crate) async fn artefact(
     app: &Arc<App>,
-    _cs: &wollongong_database::CheckSuite,
-    cr: &wollongong_database::CheckRun,
+    _cs: &CheckSuite,
+    cr: &CheckRun,
     output: &str,
     name: &str,
 ) -> Result<Option<hyper::Response<hyper::Body>>> {
@@ -574,8 +575,8 @@ pub(crate) async fn artefact(
 
 pub(crate) async fn details(
     app: &Arc<App>,
-    cs: &wollongong_database::CheckSuite,
-    cr: &wollongong_database::CheckRun,
+    cs: &CheckSuite,
+    cr: &CheckRun,
 ) -> Result<String> {
     let mut out = String::new();
 

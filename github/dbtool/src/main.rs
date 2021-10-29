@@ -57,7 +57,7 @@ async fn do_delivery_dump(mut l: Level<Stuff>) -> Result<()> {
             println!("delivery: sequence {} event \"{}\"", del.seq, del.event);
 
             let payload: hooktypes::Payload =
-                serde_json::from_value(del.payload)?;
+                serde_json::from_value(del.payload.0)?;
             println!("{:#?}", payload);
         }
     }
@@ -79,7 +79,7 @@ async fn do_delivery_list(mut l: Level<Stuff>) -> Result<()> {
 
     for del in l.context().db().list_deliveries()? {
         let mut r = Row::default();
-        r.add_u64("seq", del.seq as u64);
+        r.add_u64("seq", del.seq.0 as u64);
         r.add_str("uuid", &del.uuid);
         r.add_str("event", &del.event);
         r.add_str(
@@ -92,7 +92,7 @@ async fn do_delivery_list(mut l: Level<Stuff>) -> Result<()> {
         );
 
         let seq = del.seq;
-        match serde_json::from_value::<hooktypes::Payload>(del.payload) {
+        match serde_json::from_value::<hooktypes::Payload>(del.payload.0) {
             Ok(payload) => {
                 r.add_str("action", &payload.action);
                 r.add_str("sender", &payload.sender.login);
