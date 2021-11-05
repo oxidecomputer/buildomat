@@ -288,6 +288,17 @@ async fn aws_worker_one(
                          */
                         warn!(log, "instance {} stopped, destroying!", i.id);
                         true
+                    } else if w.token.is_none() && w.age().as_secs() > 1800 {
+                        /*
+                         * This worker has existed for half an hour but has not
+                         * completed bootstrap.  We should recycle it so that we
+                         * can create a new one.
+                         */
+                        warn!(
+                            log,
+                            "instance {} never bootstrapped, destroying!", i.id
+                        );
+                        true
                     } else {
                         /*
                          * Otherwise, this is a regular active worker that does

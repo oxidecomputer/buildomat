@@ -3,6 +3,7 @@ use chrono::prelude::*;
 use diesel::deserialize::FromSql;
 use diesel::serialize::ToSql;
 use std::str::FromStr;
+use std::time::Duration;
 
 use buildomat_common::db::*;
 pub use buildomat_common::db::{Dictionary, IsoDate};
@@ -85,13 +86,11 @@ pub struct JobEvent {
 }
 
 impl JobEvent {
-    pub fn age(&self) -> std::time::Duration {
-        if let Ok(age) = Utc::now().signed_duration_since(self.time.0).to_std()
-        {
-            age
-        } else {
-            std::time::Duration::from_secs(0)
-        }
+    pub fn age(&self) -> Duration {
+        Utc::now()
+            .signed_duration_since(self.time.0)
+            .to_std()
+            .unwrap_or_else(|_| Duration::from_secs(0))
     }
 }
 
@@ -126,6 +125,13 @@ impl Worker {
          * yet.
          */
         self.token.is_some()
+    }
+
+    pub fn age(&self) -> Duration {
+        Utc::now()
+            .signed_duration_since(self.id.datetime())
+            .to_std()
+            .unwrap_or_else(|_| Duration::from_secs(0))
     }
 }
 
