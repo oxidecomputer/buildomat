@@ -383,6 +383,7 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("flags", 5, true);
     l.add_column("creation", WIDTH_ISODATE, true);
     l.add_column("age", 8, true);
+    l.add_column("info", 20, false);
 
     l.optflag("A", "active", "display only workers not yet destroyed");
 
@@ -405,7 +406,9 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
         let age = std::time::SystemTime::now().duration_since(when).unwrap();
 
         let flags = format!(
-            "{}{}",
+            "{}{}{}{}",
+            if w.bootstrap { "B" } else { "-" },
+            if !w.jobs.is_empty() { "J" } else { "-" },
             if w.recycle { "R" } else { "-" },
             if w.deleted { "D" } else { "-" },
         );
@@ -418,6 +421,7 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
         );
         r.add_age("age", age);
         r.add_str("flags", flags);
+        r.add_str("info", w.instance_id.as_deref().unwrap_or("-"));
         t.add_row(r);
     }
 

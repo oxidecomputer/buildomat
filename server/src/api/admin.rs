@@ -123,6 +123,7 @@ struct WorkerJob {
 struct Worker {
     pub id: String,
     pub instance_id: Option<String>,
+    pub bootstrap: bool,
     pub deleted: bool,
     pub recycle: bool,
     pub lastping: Option<DateTime<Utc>>,
@@ -164,6 +165,7 @@ pub(crate) async fn workers_list(
             Some(Worker {
                 id: w.id.to_string(),
                 instance_id: w.instance_id.clone(),
+                bootstrap: w.token.is_some(),
                 deleted: w.deleted,
                 recycle: w.recycle,
                 lastping: w.lastping.map(|x| x.into()),

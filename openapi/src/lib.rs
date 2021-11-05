@@ -123,6 +123,7 @@ pub mod types {
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct Worker {
+        pub bootstrap: bool,
         pub deleted: bool,
         pub id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -226,10 +227,7 @@ impl Client {
     }
 
     pub fn new_with_client(baseurl: &str, client: reqwest::Client) -> Client {
-        Client {
-            baseurl: baseurl.to_string(),
-            client,
-        }
+        Client { baseurl: baseurl.to_string(), client }
     }
 
     #[doc = "control_hold: POST /0/control/hold"]
@@ -265,7 +263,10 @@ impl Client {
     }
 
     #[doc = "job_submit: POST /0/jobs"]
-    pub async fn job_submit(&self, body: &types::JobSubmit) -> Result<types::JobSubmitResult> {
+    pub async fn job_submit(
+        &self,
+        body: &types::JobSubmit,
+    ) -> Result<types::JobSubmitResult> {
         let url = format!("{}/0/jobs", self.baseurl,);
         let res = self
             .client
@@ -304,7 +305,10 @@ impl Client {
     }
 
     #[doc = "job_outputs_get: GET /0/jobs/{job}/outputs"]
-    pub async fn job_outputs_get(&self, job: &str) -> Result<Vec<types::JobOutput>> {
+    pub async fn job_outputs_get(
+        &self,
+        job: &str,
+    ) -> Result<Vec<types::JobOutput>> {
         let url = format!(
             "{}/0/jobs/{}/outputs",
             self.baseurl,
@@ -338,7 +342,10 @@ impl Client {
     }
 
     #[doc = "user_create: POST /0/users"]
-    pub async fn user_create(&self, body: &types::UserCreate) -> Result<types::UserCreateResult> {
+    pub async fn user_create(
+        &self,
+        body: &types::UserCreate,
+    ) -> Result<types::UserCreateResult> {
         let url = format!("{}/0/users", self.baseurl,);
         let res = self
             .client
