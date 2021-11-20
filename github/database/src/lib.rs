@@ -74,7 +74,7 @@ impl Database {
         headers: &HashMap<String, String>,
         payload: &serde_json::Value,
         recvtime: DateTime<Utc>,
-    ) -> DBResult<usize> {
+    ) -> DBResult<DeliverySeq> {
         use schema::delivery;
 
         let c = &mut self.1.lock().unwrap().conn;
@@ -93,7 +93,7 @@ impl Database {
 
             let ic = diesel::insert_into(delivery::dsl::delivery)
                 .values(Delivery {
-                    seq,
+                    seq: seq.clone(),
                     uuid: uuid.to_string(),
                     event: event.to_string(),
                     headers: Dictionary(headers.clone()),
@@ -104,7 +104,7 @@ impl Database {
                 .execute(tx)?;
             assert_eq!(ic, 1);
 
-            Ok(ic)
+            Ok(seq)
         })
     }
 
