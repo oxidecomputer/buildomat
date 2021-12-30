@@ -17,6 +17,7 @@ pub struct Config {
 
 #[derive(Deserialize, Clone)]
 pub struct Profile {
+    pub name: Option<String>,
     pub url: String,
     pub secret: String,
     pub admin_token: Option<String>,
@@ -34,7 +35,7 @@ impl Profile {
 
         match (url, secret) {
             (Some(url), Some(secret)) => {
-                Some(Profile { url, secret, admin_token })
+                Some(Profile { name: None, url, secret, admin_token })
             }
             _ => None,
         }
@@ -60,7 +61,7 @@ fn read_file(p: &Path) -> Result<Config> {
     Ok(toml::from_slice(&buf)?)
 }
 
-pub fn load(profile: Option<&str>) -> Result<Profile> {
+pub fn load(profile_name: Option<&str>) -> Result<Profile> {
     /*
      * First, try to use the environment.  If we have a complete profile in the
      * environment we don't need to look at the file system at all.
@@ -80,22 +81,28 @@ pub fn load(profile: Option<&str>) -> Result<Profile> {
     let c: Config =
         read_file(&path).with_context(|| anyhow!("reading file {:?}", path))?;
 
-    let profile = if let Some(profile) = profile {
-        profile
+    let env_profile = env("BUILDOMAT_PROFILE");
+
+    let (profile_name, src) = if let Some(profile) = profile_name {
+        (profile, "-p argument")
+    } else if let Some(profile) = env_profile.as_deref() {
+        (profile, "BUILDOMAT_PROFILE environment variable")
     } else if let Some(profile) = c.default_profile.as_deref() {
-        profile
+        (profile, "\"default_profile\" in config.toml")
     } else {
-        "default"
+        ("default", "fallback default")
     };
 
-    if let Some(profile) = c.profile.get(profile) {
+    if let Some(profile) = c.profile.get(profile_name) {
         let mut profile = profile.clone();
+        profile.name = Some(profile_name.to_string());
         profile.apply_env();
         Ok(profile)
     } else {
         bail!(
-            "profile \"{}\" not found in configuration file {:?}",
-            profile,
+            "profile \"{}\" (from {}) not found in configuration file {:?}",
+            profile_name,
+            src,
             path
         );
     }

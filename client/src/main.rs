@@ -31,7 +31,7 @@ mod config;
 struct Stuff {
     client_user: Option<Client>,
     client_admin: Option<Client>,
-    //profile: Option<config::Profile>,
+    profile: Option<config::Profile>,
 }
 
 impl Stuff {
@@ -435,11 +435,37 @@ async fn do_worker(mut l: Level<Stuff>) -> Result<()> {
     sel!(l).run().await
 }
 
+async fn do_check(mut l: Level<Stuff>) -> Result<()> {
+    l.optflag("v", "verbose", "print details about profile");
+
+    let a = no_args!(l);
+    let s = l.context();
+
+    let verbose = a.opts().opt_present("v");
+
+    if let Some(p) = &s.profile {
+        if verbose {
+            println!("profile:");
+            if let Some(name) = p.name.as_deref() {
+                println!("    named {:?}, loaded from file", name);
+            } else {
+                println!("    from environment");
+            }
+            println!("    url: {:?}", p.url);
+        }
+    } else {
+        bail!("no profile");
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut l = Level::new("buildomat", Stuff::default());
     l.optopt("p", "profile", "authentication and server profile", "PROFILE");
 
+    l.hcmd("check", "confirm profile is valid", cmd!(do_check))?;
     l.cmd(
         "info",
         "get information about server and user account",
@@ -465,6 +491,8 @@ async fn main() -> Result<()> {
         &profile.url,
         bearer_client(profile.secret.as_str())?,
     ));
+
+    l.context_mut().profile = Some(profile);
 
     sel!(l).run().await
 }
