@@ -48,7 +48,7 @@ pub struct Task {
 impl Task {
     pub fn from_create(ct: &super::CreateTask, job: JobId, seq: usize) -> Task {
         Task {
-            job: job,
+            job,
             seq: seq as i32,
             name: ct.name.to_string(),
             script: ct.script.to_string(),
@@ -102,6 +102,10 @@ pub struct JobOutput {
     pub path: String,
     pub size: DataSize,
     pub id: JobOutputId,
+    /**
+     * When was this file successfully uploaded to the object store?
+     */
+    pub time_archived: Option<IsoDate>,
 }
 
 #[derive(Debug, Clone, Queryable, Insertable, Identifiable)]

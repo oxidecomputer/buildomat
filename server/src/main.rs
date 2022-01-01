@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 use std::process::exit;
 use std::result::Result as SResult;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -30,6 +31,7 @@ extern crate diesel;
 use buildomat_common::*;
 
 mod api;
+mod archive;
 mod aws;
 mod chunks;
 mod db;
@@ -80,6 +82,20 @@ impl<T> MakeInternalError<T> for db::OResult<T> {
     }
 }
 
+impl<T> MakeInternalError<T>
+    for std::result::Result<
+        T,
+        rusoto_core::RusotoError<rusoto_s3::GetObjectError>,
+    >
+{
+    fn or_500(self) -> SResult<T, HttpError> {
+        self.map_err(|e| {
+            let msg = format!("object store get error: {:?}", e);
+            HttpError::for_internal_error(msg)
+        })
+    }
+}
+
 pub(crate) trait ApiResultEx {
     fn api_check(&self) -> Result<()>;
     fn note(&self, n: &str) -> Result<()>;
@@ -103,6 +119,7 @@ struct ConfigFile {
     pub aws: ConfigFileAws,
     pub admin: ConfigFileAdmin,
     pub general: ConfigFileGeneral,
+    pub storage: ConfigFileStorage,
 }
 
 #[derive(Deserialize, Debug)]
@@ -117,6 +134,15 @@ struct ConfigFileAdmin {
      * Should we hold off on new VM creation by default at startup?
      */
     pub hold: bool,
+}
+
+#[derive(Deserialize, Debug)]
+struct ConfigFileStorage {
+    access_key_id: String,
+    secret_access_key: String,
+    bucket: String,
+    prefix: String,
+    region: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -147,6 +173,7 @@ struct Central {
     db: db::Database,
     datadir: PathBuf,
     inner: Mutex<CentralInner>,
+    s3: rusoto_s3::S3Client,
 }
 
 pub(crate) fn unauth_response<T>() -> SResult<T, HttpError> {
@@ -253,17 +280,32 @@ impl Central {
         Ok(p)
     }
 
+    fn output_dir(&self) -> Result<PathBuf> {
+        let mut p = self.datadir.clone();
+        p.push("output");
+        std::fs::create_dir_all(&p)?;
+        Ok(p)
+    }
+
     fn output_path(
         &self,
         job: &JobId,
         output: &JobOutputId,
     ) -> Result<PathBuf> {
-        let mut p = self.datadir.clone();
-        p.push("output");
+        let mut p = self.output_dir()?;
         p.push(job.to_string());
         std::fs::create_dir_all(&p)?;
         p.push(output.to_string());
         Ok(p)
+    }
+
+    fn output_object_key(&self, job: &JobId, output: &JobOutputId) -> String {
+        /*
+         * Object keys begin with a prefix string so that we can have more than
+         * one scheme, or more than one buildomat, using the same bucket without
+         * conflicts.
+         */
+        format!("{}/output/{}/{}", self.config.storage.prefix, job, output)
     }
 }
 
@@ -356,6 +398,16 @@ async fn main() -> Result<()> {
     dbfile.push("data.sqlite3");
     let db = db::Database::new(log.clone(), dbfile)?;
 
+    let credprov = rusoto_credential::StaticProvider::new_minimal(
+        config.storage.access_key_id.clone(),
+        config.storage.secret_access_key.clone(),
+    );
+    let s3 = rusoto_s3::S3Client::new_with(
+        rusoto_core::HttpClient::new()?,
+        credprov,
+        rusoto_core::Region::from_str(&config.storage.region)?,
+    );
+
     let c = Arc::new(Central {
         inner: Mutex::new(CentralInner {
             hold: config.admin.hold,
@@ -364,6 +416,7 @@ async fn main() -> Result<()> {
         config,
         datadir,
         db,
+        s3,
     });
 
     let c0 = Arc::clone(&c);
@@ -386,6 +439,12 @@ async fn main() -> Result<()> {
         chunks::chunk_cleanup(log0, c0)
             .await
             .context("chunk cleanup task failure")
+    });
+
+    let c0 = Arc::clone(&c);
+    let log0 = log.clone();
+    let t_archive = tokio::task::spawn(async move {
+        archive::archive_outputs(log0, c0).await.context("archive task failure")
     });
 
     let c0 = Arc::clone(&c);
@@ -416,6 +475,7 @@ async fn main() -> Result<()> {
             _ = t_aws => bail!("AWS task stopped early"),
             _ = t_assign => bail!("task assignment task stopped early"),
             _ = t_chunks => bail!("chunk cleanup task stopped early"),
+            _ = t_archive => bail!("archive task stopped early"),
             _ = t_workers => bail!("worker cleanup task stopped early"),
             _ = server_task => bail!("server stopped early"),
         }

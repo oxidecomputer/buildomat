@@ -2,6 +2,8 @@
  * Copyright 2021 Oxide Computer Company
  */
 
+use rusoto_s3::S3;
+
 use super::prelude::*;
 
 #[derive(Serialize, JsonSchema)]
@@ -145,16 +147,71 @@ pub(crate) async fn job_output_download(
 
     let o = c.db.job_output_by_str(&p.job, &p.output).or_500()?;
 
-    let op = c.output_path(&t.id, &o.id).or_500()?;
-    let f = tokio::fs::File::open(op).await.or_500()?;
-    let md = f.metadata().await.or_500()?;
-    assert!(md.is_file());
-    let fbs = FileBytesStream::new(f);
+    let mut res = Response::builder();
+    res = res.header(CONTENT_TYPE, "application/octet-stream");
 
-    Ok(Response::builder()
-        .header(CONTENT_TYPE, "application/octet-stream")
-        .header(CONTENT_LENGTH, md.len())
-        .body(fbs.into_body())?)
+    let op = c.output_path(&t.id, &o.id).or_500()?;
+
+    Ok(if op.is_file() {
+        /*
+         * The file exists locally.
+         */
+        info!(
+            log,
+            "job {} output {} path {:?} is in the local file system",
+            t.id,
+            o.id,
+            o.path
+        );
+        let f = tokio::fs::File::open(op).await.or_500()?;
+        let md = f.metadata().await.or_500()?;
+        assert!(md.is_file());
+        let fbs = FileBytesStream::new(f);
+
+        res = res.header(CONTENT_LENGTH, md.len());
+        res.body(fbs.into_body())?
+    } else {
+        /*
+         * Otherwise, try to get it from the object store.
+         *
+         * XXX We could conceivably 302 redirect people to the actual object
+         * store with a presigned request?
+         */
+        let key = c.output_object_key(&t.id, &o.id);
+        info!(
+            log,
+            "job {} output {} path {:?} is in the object store at {}",
+            t.id,
+            o.id,
+            o.path,
+            key
+        );
+        let obj =
+            c.s3.get_object(rusoto_s3::GetObjectRequest {
+                bucket: c.config.storage.bucket.to_string(),
+                key,
+                ..Default::default()
+            })
+            .await
+            .or_500()?;
+
+        if let Some(body) = obj.body {
+            res = res.header(
+                CONTENT_LENGTH,
+                obj.content_length
+                    .ok_or_else(|| {
+                        anyhow!("no content length from object store?")
+                    })
+                    .or_500()?,
+            );
+            res.body(Body::wrap_stream(body))?
+        } else {
+            return Err(HttpError::for_internal_error(format!(
+                "no body on object request for {}",
+                o.id
+            )));
+        }
+    })
 }
 
 fn format_task(t: &db::Task) -> Task {

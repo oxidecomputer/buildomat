@@ -79,3 +79,7 @@ CREATE TABLE worker (
 -- v 8
 ALTER TABLE job_event ADD COLUMN
     time_remote     TEXT;
+
+-- v 9
+ALTER TABLE job_output ADD COLUMN
+    time_archived   TEXT;

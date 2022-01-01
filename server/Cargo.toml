@@ -1,7 +1,7 @@
 [package]
 name = "buildomat-server"
 version = "0.0.0"
-edition = "2018"
+edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
@@ -16,6 +16,7 @@ hyper-staticfile = "0.6"
 rusoto_core = "0.47.0"
 rusoto_credential = "0.47.0"
 rusoto_ec2 = "0.47.0"
+rusoto_s3 = "0.47.0"
 rusty_ulid = "0.11"
 schemars = { version = "0.8", features = [ "chrono" ] }
 serde = { version = "1", features = [ "derive" ] }
@@ -24,3 +25,5 @@ slog = "2.7"
 thiserror = "1"
 tokio = { version = "1", features = [ "full" ] }
 buildomat-common = { path = "../common" }
+tokio-util = { version = "0.6.9", features = ["io"] }
+walkdir = "2.3.2"

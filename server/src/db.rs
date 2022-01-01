@@ -422,6 +422,20 @@ impl Database {
             .get_results(c)?)
     }
 
+    pub fn job_output_by_id_opt(
+        &self,
+        job: &JobId,
+        output: &JobOutputId,
+    ) -> Result<Option<JobOutput>> {
+        let c = &mut self.1.lock().unwrap().conn;
+        use schema::job_output::dsl;
+        Ok(dsl::job_output
+            .filter(dsl::job.eq(job))
+            .filter(dsl::id.eq(output))
+            .get_result(c)
+            .optional()?)
+    }
+
     pub fn job_events(
         &self,
         job: &JobId,
@@ -552,12 +566,54 @@ impl Database {
                     path: path.to_string(),
                     id: id.clone(),
                     size: DataSize(size),
+                    time_archived: None,
                 })
                 .execute(tx)?;
             assert_eq!(ic, 1);
 
             Ok(())
         })
+    }
+
+    pub fn job_output_next_unarchived(&self) -> OResult<Option<JobOutput>> {
+        use schema::{job, job_output};
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        /*
+         * Find the most recently uploaded output stored as part of a job that
+         * has been completed.
+         */
+        let res: Option<(Job, JobOutput)> = job::dsl::job
+            .inner_join(job_output::table)
+            .filter(job::dsl::complete.eq(true))
+            .filter(job_output::dsl::time_archived.is_null())
+            .order_by(job_output::dsl::id.asc())
+            .limit(1)
+            .get_result(c)
+            .optional()?;
+
+        Ok(res.map(|(_, out)| out))
+    }
+
+    pub fn job_output_mark_archived(
+        &self,
+        output: &JobOutput,
+        time: DateTime<Utc>,
+    ) -> OResult<()> {
+        use schema::job_output;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let uc = diesel::update(job_output::dsl::job_output)
+            .filter(job_output::dsl::job.eq(&output.job))
+            .filter(job_output::dsl::path.eq(&output.path))
+            .filter(job_output::dsl::time_archived.is_null())
+            .set((job_output::dsl::time_archived.eq(IsoDate(time)),))
+            .execute(c)?;
+        assert_eq!(uc, 1);
+
+        Ok(())
     }
 
     pub fn job_append_event(

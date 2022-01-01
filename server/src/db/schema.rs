@@ -49,8 +49,12 @@ table! {
         path -> Text,
         size -> BigInt,
         id -> Text,
+        time_archived -> Nullable<Text>,
     }
 }
+
+joinable!(job_output -> job (job));
+allow_tables_to_appear_in_same_query!(job_output, job);
 
 table! {
     job_event (job, seq) {

@@ -4,7 +4,7 @@
 
 mod prelude {
     pub(crate) use crate::{db, unauth_response, Central, MakeInternalError};
-    pub use anyhow::Result;
+    pub use anyhow::{anyhow, Result};
     pub use chrono::prelude::*;
     pub use dropshot::{
         endpoint, HttpError, HttpResponseCreated, HttpResponseOk,
