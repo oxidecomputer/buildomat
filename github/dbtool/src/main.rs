@@ -209,7 +209,7 @@ async fn main() -> Result<()> {
     l.cmd("check", "GitHub checks", cmd!(do_check))?;
 
     l.context_mut().db =
-        Some(Database::new(l.discard_logger(), "var/data.sqlite3")?);
+        Some(Database::new(l.discard_logger(), "var/data.sqlite3", None)?);
 
     sel!(l).run().await
 }

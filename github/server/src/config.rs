@@ -9,6 +9,12 @@ use std::io::Read;
 use std::path::Path;
 
 #[derive(Deserialize)]
+pub struct Sqlite {
+    #[serde(default)]
+    pub cache_kb: Option<u32>,
+}
+
+#[derive(Deserialize)]
 pub struct Buildomat {
     pub token: String,
     pub url: String,
@@ -23,6 +29,7 @@ pub struct Config {
     pub confroot: String,
     pub buildomat: Buildomat,
     pub allow_owners: Vec<String>,
+    pub sqlite: Sqlite,
 }
 
 pub fn load_toml<T, P: AsRef<Path>>(p: P) -> Result<T>

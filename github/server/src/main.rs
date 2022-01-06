@@ -1463,12 +1463,13 @@ async fn main() -> Result<()> {
 
     let app0 = Arc::new(App {
         log: log.clone(),
-        config,
         jwt: jwt.clone(),
         db: wollongong_database::Database::new(
             log.new(o!("component" => "db")),
             "var/data.sqlite3",
+            config.sqlite.cache_kb.clone(),
         )?,
+        config,
     });
 
     /*

@@ -60,11 +60,16 @@ pub struct CreateTask {
 }
 
 impl Database {
-    pub fn new<P: AsRef<Path>>(log: Logger, path: P) -> Result<Database> {
+    pub fn new<P: AsRef<Path>>(
+        log: Logger,
+        path: P,
+        cache_kb: Option<u32>,
+    ) -> Result<Database> {
         let conn = buildomat_common::db::sqlite_setup(
             &log,
             path,
             include_str!("../schema.sql"),
+            cache_kb,
         )?;
 
         Ok(Database(log, Mutex::new(Inner { conn })))

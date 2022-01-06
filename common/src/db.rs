@@ -311,6 +311,7 @@ pub fn sqlite_setup<P: AsRef<Path>, S: AsRef<str>>(
     log: &Logger,
     path: P,
     schema: S,
+    cache_kb: Option<u32>,
 ) -> Result<diesel::SqliteConnection> {
     let url = if let Some(path) = path.as_ref().to_str() {
         format!("sqlite://{}", path)
@@ -332,6 +333,15 @@ pub fn sqlite_setup<P: AsRef<Path>, S: AsRef<str>>(
      * Enable the WAL.
      */
     diesel::sql_query("PRAGMA journal_mode = 'WAL'").execute(&mut c)?;
+
+    if let Some(kb) = cache_kb {
+        /*
+         * If requested, set the page cache size to something other than the
+         * default value of 2MB.
+         */
+        diesel::sql_query(format!("PRAGMA cache_size = -{}", kb))
+            .execute(&mut c)?;
+    }
 
     #[derive(QueryableByName)]
     struct UserVersion {

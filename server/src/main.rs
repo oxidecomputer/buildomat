@@ -120,11 +120,18 @@ struct ConfigFile {
     pub admin: ConfigFileAdmin,
     pub general: ConfigFileGeneral,
     pub storage: ConfigFileStorage,
+    pub sqlite: ConfigFileSqlite,
 }
 
 #[derive(Deserialize, Debug)]
 struct ConfigFileGeneral {
     pub baseurl: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct ConfigFileSqlite {
+    #[serde(default)]
+    pub cache_kb: Option<u32>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -396,7 +403,11 @@ async fn main() -> Result<()> {
 
     let mut dbfile = datadir.clone();
     dbfile.push("data.sqlite3");
-    let db = db::Database::new(log.clone(), dbfile)?;
+    let db = db::Database::new(
+        log.clone(),
+        dbfile,
+        config.sqlite.cache_kb.clone(),
+    )?;
 
     let credprov = rusoto_credential::StaticProvider::new_minimal(
         config.storage.access_key_id.clone(),
