@@ -7,7 +7,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::sync::Mutex;
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use buildomat_common::*;
 use chrono::prelude::*;
 use diesel::prelude::*;
@@ -389,11 +389,32 @@ impl Database {
         Ok(w)
     }
 
-    pub fn jobs(&self) -> Result<Vec<Job>> {
+    /**
+     * Enumerate jobs that are active; i.e., not yet complete, but not waiting.
+     */
+    pub fn jobs_active(&self) -> Result<Vec<Job>> {
         use schema::job::dsl;
 
         let c = &mut self.1.lock().unwrap().conn;
-        Ok(dsl::job.order_by(dsl::id.asc()).get_results(c)?)
+        Ok(dsl::job
+            .filter(dsl::complete.eq(false))
+            .filter(dsl::waiting.eq(false))
+            .order_by(dsl::id.asc())
+            .get_results(c)?)
+    }
+
+    /**
+     * Enumerate jobs that are waiting for inputs, or for dependees to complete.
+     */
+    pub fn jobs_waiting(&self) -> Result<Vec<Job>> {
+        use schema::job::dsl;
+
+        let c = &mut self.1.lock().unwrap().conn;
+        Ok(dsl::job
+            .filter(dsl::complete.eq(false))
+            .filter(dsl::waiting.eq(true))
+            .order_by(dsl::id.asc())
+            .get_results(c)?)
     }
 
     pub fn job_tasks(&self, job: &JobId) -> Result<Vec<Task>> {
@@ -417,26 +438,54 @@ impl Database {
             .get_results::<String>(c)?)
     }
 
-    pub fn job_outputs(&self, job: &JobId) -> Result<Vec<JobOutput>> {
-        use schema::job_output::dsl;
+    pub fn job_inputs(
+        &self,
+        job: &JobId,
+    ) -> Result<Vec<(JobInput, Option<JobFile>)>> {
+        use schema::{job_file, job_input};
 
         let c = &mut self.1.lock().unwrap().conn;
-        Ok(dsl::job_output
-            .filter(dsl::job.eq(job))
-            .order_by(dsl::id.asc())
+
+        Ok(job_input::dsl::job_input
+            .left_outer_join(
+                job_file::table.on(job_file::dsl::job
+                    .eq(job_input::dsl::job)
+                    .and(job_file::dsl::id.nullable().eq(job_input::dsl::id))),
+            )
+            .filter(job_file::dsl::job.eq(job))
+            .order_by(job_file::dsl::id.asc())
             .get_results(c)?)
     }
 
-    pub fn job_output_by_id_opt(
+    pub fn job_outputs(
         &self,
         job: &JobId,
-        output: &JobOutputId,
-    ) -> Result<Option<JobOutput>> {
+    ) -> Result<Vec<(JobOutput, JobFile)>> {
+        use schema::{job_file, job_output};
+
         let c = &mut self.1.lock().unwrap().conn;
-        use schema::job_output::dsl;
-        Ok(dsl::job_output
+
+        Ok(job_output::dsl::job_output
+            .inner_join(
+                job_file::table.on(job_file::dsl::job
+                    .eq(job_output::dsl::job)
+                    .and(job_file::dsl::id.eq(job_output::dsl::id))),
+            )
+            .filter(job_file::dsl::job.eq(job))
+            .order_by(job_file::dsl::id.asc())
+            .get_results(c)?)
+    }
+
+    pub fn job_file_by_id_opt(
+        &self,
+        job: &JobId,
+        file: &JobFileId,
+    ) -> Result<Option<JobFile>> {
+        let c = &mut self.1.lock().unwrap().conn;
+        use schema::job_file::dsl;
+        Ok(dsl::job_file
             .filter(dsl::job.eq(job))
-            .filter(dsl::id.eq(output))
+            .filter(dsl::id.eq(file))
             .get_result(c)
             .optional()?)
     }
@@ -483,18 +532,26 @@ impl Database {
         target: &str,
         tasks: Vec<CreateTask>,
         output_rules: &[String],
+        inputs: &[String],
     ) -> Result<Job> {
-        use schema::{job, job_output_rule, task};
+        use schema::{job, job_input, job_output_rule, task};
 
         if tasks.is_empty() {
             bail!("a job must have at least one task");
         }
+
+        /*
+         * If the job has any input files, it begins in the "waiting" state.
+         * Otherwise it can begin immediately.
+         */
+        let waiting = !inputs.is_empty();
 
         let j = Job {
             id: JobId::generate(),
             owner: *owner,
             name: name.to_string(),
             target: target.to_string(),
+            waiting,
             complete: false,
             failed: false,
             worker: None,
@@ -510,6 +567,13 @@ impl Database {
             for (i, ct) in tasks.iter().enumerate() {
                 let ic = diesel::insert_into(task::dsl::task)
                     .values(Task::from_create(ct, j.id, i))
+                    .execute(tx)?;
+                assert_eq!(ic, 1);
+            }
+
+            for ci in inputs.iter() {
+                let ic = diesel::insert_into(job_input::dsl::job_input)
+                    .values(JobInput::from_create(ci.as_str(), j.id))
                     .execute(tx)?;
                 assert_eq!(ic, 1);
             }
@@ -530,21 +594,35 @@ impl Database {
         })
     }
 
+    pub fn job_input_by_str(&self, job: &str, file: &str) -> Result<JobInput> {
+        use schema::job_input;
+
+        let job = JobId(Ulid::from_str(job)?);
+        let file = JobFileId(Ulid::from_str(file)?);
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        Ok(job_input::dsl::job_input
+            .filter(job_input::dsl::job.eq(job))
+            .filter(job_input::dsl::id.eq(file))
+            .get_result(c)?)
+    }
+
     pub fn job_output_by_str(
         &self,
         job: &str,
-        output: &str,
+        file: &str,
     ) -> Result<JobOutput> {
         use schema::job_output;
 
         let job = JobId(Ulid::from_str(job)?);
-        let output = JobOutputId(Ulid::from_str(output)?);
+        let file = JobFileId(Ulid::from_str(file)?);
 
         let c = &mut self.1.lock().unwrap().conn;
 
         Ok(job_output::dsl::job_output
             .filter(job_output::dsl::job.eq(job))
-            .filter(job_output::dsl::id.eq(output))
+            .filter(job_output::dsl::id.eq(file))
             .get_result(c)?)
     }
 
@@ -552,10 +630,10 @@ impl Database {
         &self,
         job: &JobId,
         path: &str,
-        id: &JobOutputId,
+        id: &JobFileId,
         size: u64,
     ) -> OResult<()> {
-        use schema::{job, job_output};
+        use schema::{job, job_file, job_output};
 
         let c = &mut self.1.lock().unwrap().conn;
 
@@ -565,13 +643,21 @@ impl Database {
                 conflict!("job already complete, cannot add more files");
             }
 
+            let ic = diesel::insert_into(job_file::dsl::job_file)
+                .values(JobFile {
+                    job: job.clone(),
+                    id: *id,
+                    size: DataSize(size),
+                    time_archived: None,
+                })
+                .execute(tx)?;
+            assert_eq!(ic, 1);
+
             let ic = diesel::insert_into(job_output::dsl::job_output)
                 .values(JobOutput {
                     job: job.clone(),
                     path: path.to_string(),
                     id: id.clone(),
-                    size: DataSize(size),
-                    time_archived: None,
                 })
                 .execute(tx)?;
             assert_eq!(ic, 1);
@@ -580,8 +666,50 @@ impl Database {
         })
     }
 
-    pub fn job_output_next_unarchived(&self) -> OResult<Option<JobOutput>> {
-        use schema::{job, job_output};
+    pub fn job_add_input(
+        &self,
+        job: &JobId,
+        name: &str,
+        id: &JobFileId,
+        size: u64,
+    ) -> OResult<()> {
+        use schema::{job, job_file, job_input};
+
+        if name.contains("/") {
+            return Err(anyhow!("name cannot be a path").into());
+        }
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        c.immediate_transaction(|tx| {
+            let j: Job = job::dsl::job.find(job).get_result(tx)?;
+            if !j.waiting {
+                conflict!("job not waiting, cannot add more inputs");
+            }
+
+            let ic = diesel::insert_into(job_file::dsl::job_file)
+                .values(JobFile {
+                    job: job.clone(),
+                    id: *id,
+                    size: DataSize(size),
+                    time_archived: None,
+                })
+                .execute(tx)?;
+            assert_eq!(ic, 1);
+
+            let uc = diesel::update(job_input::dsl::job_input)
+                .filter(job_input::dsl::job.eq(job))
+                .filter(job_input::dsl::name.eq(name))
+                .set((job_input::dsl::id.eq(id),))
+                .execute(tx)?;
+            assert_eq!(uc, 1);
+
+            Ok(())
+        })
+    }
+
+    pub fn job_file_next_unarchived(&self) -> OResult<Option<JobFile>> {
+        use schema::{job, job_file};
 
         let c = &mut self.1.lock().unwrap().conn;
 
@@ -589,11 +717,11 @@ impl Database {
          * Find the most recently uploaded output stored as part of a job that
          * has been completed.
          */
-        let res: Option<(Job, JobOutput)> = job::dsl::job
-            .inner_join(job_output::table)
+        let res: Option<(Job, JobFile)> = job::dsl::job
+            .inner_join(job_file::table)
             .filter(job::dsl::complete.eq(true))
-            .filter(job_output::dsl::time_archived.is_null())
-            .order_by(job_output::dsl::id.asc())
+            .filter(job_file::dsl::time_archived.is_null())
+            .order_by(job_file::dsl::id.asc())
             .limit(1)
             .get_result(c)
             .optional()?;
@@ -601,20 +729,20 @@ impl Database {
         Ok(res.map(|(_, out)| out))
     }
 
-    pub fn job_output_mark_archived(
+    pub fn job_file_mark_archived(
         &self,
-        output: &JobOutput,
+        file: &JobFile,
         time: DateTime<Utc>,
     ) -> OResult<()> {
-        use schema::job_output;
+        use schema::job_file;
 
         let c = &mut self.1.lock().unwrap().conn;
 
-        let uc = diesel::update(job_output::dsl::job_output)
-            .filter(job_output::dsl::job.eq(&output.job))
-            .filter(job_output::dsl::path.eq(&output.path))
-            .filter(job_output::dsl::time_archived.is_null())
-            .set((job_output::dsl::time_archived.eq(IsoDate(time)),))
+        let uc = diesel::update(job_file::dsl::job_file)
+            .filter(job_file::dsl::job.eq(&file.job))
+            .filter(job_file::dsl::id.eq(&file.id))
+            .filter(job_file::dsl::time_archived.is_null())
+            .set((job_file::dsl::time_archived.eq(IsoDate(time)),))
             .execute(c)?;
         assert_eq!(uc, 1);
 
@@ -649,6 +777,28 @@ impl Database {
                 time_remote,
                 payload,
             )?)
+        })
+    }
+
+    pub fn job_wakeup(&self, job: &JobId) -> OResult<()> {
+        use schema::job;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        c.immediate_transaction(|tx| {
+            let j: Job = job::dsl::job.find(job).get_result(tx)?;
+            if !j.waiting {
+                conflict!("job {} was not waiting, cannot wakeup", j.id);
+            }
+
+            let uc = diesel::update(job::dsl::job)
+                .filter(job::dsl::id.eq(j.id))
+                .filter(job::dsl::waiting.eq(true))
+                .set((job::dsl::waiting.eq(false),))
+                .execute(tx)?;
+            assert_eq!(uc, 1);
+
+            Ok(())
         })
     }
 

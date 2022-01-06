@@ -402,17 +402,36 @@ pub fn sqlite_setup<P: AsRef<Path>, S: AsRef<str>>(
         }
 
         /*
-         * Determine the current user version.
+         * Perform the version check, statement execution, and version update
+         * inside a single transaction.  Not all of the things we could do in a
+         * statement are transactional, but if we are doing an INSERT SELECT to
+         * copy things from one table to another, we don't want that to conk out
+         * half way and run again.
          */
-        let uv = diesel::sql_query("PRAGMA user_version")
-            .get_result::<UserVersion>(&mut c)?
-            .user_version;
-        if version > uv {
-            info!(log, "apply version {}, run {}", version, statement);
-            diesel::sql_query(statement).execute(&mut c)?;
-            diesel::sql_query(format!("PRAGMA user_version = {}", version))
-                .execute(&mut c)?;
-        }
+        c.immediate_transaction::<_, anyhow::Error, _>(|tx| {
+            /*
+             * Determine the current user version.
+             */
+            let uv = diesel::sql_query("PRAGMA user_version")
+                .get_result::<UserVersion>(tx)?
+                .user_version;
+
+            if version > uv {
+                info!(log, "apply version {}, run {}", version, statement);
+
+                diesel::sql_query(statement).execute(tx)?;
+
+                /*
+                 * Update the user version.
+                 */
+                diesel::sql_query(format!("PRAGMA user_version = {}", version))
+                    .execute(tx)?;
+
+                info!(log, "version {} ok", version);
+            }
+
+            Ok(())
+        })?;
     }
 
     Ok(c)

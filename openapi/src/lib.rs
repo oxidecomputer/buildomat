@@ -31,6 +31,13 @@ pub mod types {
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct JobAddInput {
+        pub chunks: Vec<String>,
+        pub name: String,
+        pub size: i64,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct JobEvent {
         pub payload: String,
         pub seq: u32,
@@ -51,6 +58,8 @@ pub mod types {
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct JobSubmit {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub inputs: Vec<String>,
         pub name: String,
         pub output_rules: Vec<String>,
         pub target: String,
@@ -177,8 +186,15 @@ pub mod types {
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct WorkerPingInput {
+        pub id: String,
+        pub name: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct WorkerPingJob {
         pub id: String,
+        pub inputs: Vec<WorkerPingInput>,
         pub name: String,
         pub output_rules: Vec<String>,
         pub tasks: Vec<WorkerPingTask>,
@@ -239,25 +255,25 @@ impl Client {
     }
 
     #[doc = "control_hold: POST /0/control/hold"]
-    pub async fn control_hold(&self) -> Result<()> {
+    pub async fn control_hold<'a>(&'a self) -> Result<reqwest::Response> {
         let url = format!("{}/0/control/hold", self.baseurl,);
         let request = self.client.post(url).build()?;
         let result = self.client.execute(request).await;
         let res = result?.error_for_status()?;
-        Ok(())
+        Ok(res)
     }
 
     #[doc = "control_resume: POST /0/control/resume"]
-    pub async fn control_resume(&self) -> Result<()> {
+    pub async fn control_resume<'a>(&'a self) -> Result<reqwest::Response> {
         let url = format!("{}/0/control/resume", self.baseurl,);
         let request = self.client.post(url).build()?;
         let result = self.client.execute(request).await;
         let res = result?.error_for_status()?;
-        Ok(())
+        Ok(res)
     }
 
     #[doc = "job_get: GET /0/job/{job}"]
-    pub async fn job_get(&self, job: &str) -> Result<types::Job> {
+    pub async fn job_get<'a>(&'a self, job: &'a str) -> Result<types::Job> {
         let url = format!(
             "{}/0/job/{}",
             self.baseurl,
@@ -270,7 +286,7 @@ impl Client {
     }
 
     #[doc = "jobs_get: GET /0/jobs"]
-    pub async fn jobs_get(&self) -> Result<Vec<types::Job>> {
+    pub async fn jobs_get<'a>(&'a self) -> Result<Vec<types::Job>> {
         let url = format!("{}/0/jobs", self.baseurl,);
         let request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
@@ -279,9 +295,9 @@ impl Client {
     }
 
     #[doc = "job_submit: POST /0/jobs"]
-    pub async fn job_submit(
-        &self,
-        body: &types::JobSubmit,
+    pub async fn job_submit<'a>(
+        &'a self,
+        body: &'a types::JobSubmit,
     ) -> Result<types::JobSubmitResult> {
         let url = format!("{}/0/jobs", self.baseurl,);
         let request = self.client.post(url).json(body).build()?;
@@ -290,10 +306,27 @@ impl Client {
         Ok(res.json().await?)
     }
 
+    #[doc = "job_upload_chunk: POST /0/jobs/{job}/chunk"]
+    pub async fn job_upload_chunk<'a, B: Into<reqwest::Body>>(
+        &'a self,
+        job: &'a str,
+        body: B,
+    ) -> Result<types::UploadedChunk> {
+        let url = format!(
+            "{}/0/jobs/{}/chunk",
+            self.baseurl,
+            progenitor_support::encode_path(&job.to_string()),
+        );
+        let request = self.client.post(url).body(body).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res.json().await?)
+    }
+
     #[doc = "job_events_get: GET /0/jobs/{job}/events"]
-    pub async fn job_events_get(
-        &self,
-        job: &str,
+    pub async fn job_events_get<'a>(
+        &'a self,
+        job: &'a str,
         minseq: Option<u32>,
     ) -> Result<Vec<types::JobEvent>> {
         let url = format!(
@@ -312,10 +345,27 @@ impl Client {
         Ok(res.json().await?)
     }
 
+    #[doc = "job_add_input: POST /0/jobs/{job}/input"]
+    pub async fn job_add_input<'a>(
+        &'a self,
+        job: &'a str,
+        body: &'a types::JobAddInput,
+    ) -> Result<reqwest::Response> {
+        let url = format!(
+            "{}/0/jobs/{}/input",
+            self.baseurl,
+            progenitor_support::encode_path(&job.to_string()),
+        );
+        let request = self.client.post(url).json(body).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res)
+    }
+
     #[doc = "job_outputs_get: GET /0/jobs/{job}/outputs"]
-    pub async fn job_outputs_get(
-        &self,
-        job: &str,
+    pub async fn job_outputs_get<'a>(
+        &'a self,
+        job: &'a str,
     ) -> Result<Vec<types::JobOutput>> {
         let url = format!(
             "{}/0/jobs/{}/outputs",
@@ -329,10 +379,10 @@ impl Client {
     }
 
     #[doc = "job_output_download: GET /0/jobs/{job}/outputs/{output}"]
-    pub async fn job_output_download(
-        &self,
-        job: &str,
-        output: &str,
+    pub async fn job_output_download<'a>(
+        &'a self,
+        job: &'a str,
+        output: &'a str,
     ) -> Result<reqwest::Response> {
         let url = format!(
             "{}/0/jobs/{}/outputs/{}",
@@ -347,7 +397,7 @@ impl Client {
     }
 
     #[doc = "users_list: GET /0/users"]
-    pub async fn users_list(&self) -> Result<Vec<types::User>> {
+    pub async fn users_list<'a>(&'a self) -> Result<Vec<types::User>> {
         let url = format!("{}/0/users", self.baseurl,);
         let request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
@@ -356,9 +406,9 @@ impl Client {
     }
 
     #[doc = "user_create: POST /0/users"]
-    pub async fn user_create(
-        &self,
-        body: &types::UserCreate,
+    pub async fn user_create<'a>(
+        &'a self,
+        body: &'a types::UserCreate,
     ) -> Result<types::UserCreateResult> {
         let url = format!("{}/0/users", self.baseurl,);
         let request = self.client.post(url).json(body).build()?;
@@ -368,7 +418,7 @@ impl Client {
     }
 
     #[doc = "whoami: GET /0/whoami"]
-    pub async fn whoami(&self) -> Result<types::WhoamiResult> {
+    pub async fn whoami<'a>(&'a self) -> Result<types::WhoamiResult> {
         let url = format!("{}/0/whoami", self.baseurl,);
         let request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
@@ -377,9 +427,9 @@ impl Client {
     }
 
     #[doc = "worker_bootstrap: POST /0/worker/bootstrap"]
-    pub async fn worker_bootstrap(
-        &self,
-        body: &types::WorkerBootstrap,
+    pub async fn worker_bootstrap<'a>(
+        &'a self,
+        body: &'a types::WorkerBootstrap,
     ) -> Result<types::WorkerBootstrapResult> {
         let url = format!("{}/0/worker/bootstrap", self.baseurl,);
         let request = self.client.post(url).json(body).build()?;
@@ -389,11 +439,11 @@ impl Client {
     }
 
     #[doc = "worker_job_append: POST /0/worker/job/{job}/append"]
-    pub async fn worker_job_append(
-        &self,
-        job: &str,
-        body: &types::WorkerAppendJob,
-    ) -> Result<()> {
+    pub async fn worker_job_append<'a>(
+        &'a self,
+        job: &'a str,
+        body: &'a types::WorkerAppendJob,
+    ) -> Result<reqwest::Response> {
         let url = format!(
             "{}/0/worker/job/{}/append",
             self.baseurl,
@@ -402,13 +452,13 @@ impl Client {
         let request = self.client.post(url).json(body).build()?;
         let result = self.client.execute(request).await;
         let res = result?.error_for_status()?;
-        Ok(())
+        Ok(res)
     }
 
     #[doc = "worker_job_upload_chunk: POST /0/worker/job/{job}/chunk"]
-    pub async fn worker_job_upload_chunk<B: Into<reqwest::Body>>(
-        &self,
-        job: &str,
+    pub async fn worker_job_upload_chunk<'a, B: Into<reqwest::Body>>(
+        &'a self,
+        job: &'a str,
         body: B,
     ) -> Result<types::UploadedChunk> {
         let url = format!(
@@ -423,11 +473,11 @@ impl Client {
     }
 
     #[doc = "worker_job_complete: POST /0/worker/job/{job}/complete"]
-    pub async fn worker_job_complete(
-        &self,
-        job: &str,
-        body: &types::WorkerCompleteJob,
-    ) -> Result<()> {
+    pub async fn worker_job_complete<'a>(
+        &'a self,
+        job: &'a str,
+        body: &'a types::WorkerCompleteJob,
+    ) -> Result<reqwest::Response> {
         let url = format!(
             "{}/0/worker/job/{}/complete",
             self.baseurl,
@@ -436,15 +486,33 @@ impl Client {
         let request = self.client.post(url).json(body).build()?;
         let result = self.client.execute(request).await;
         let res = result?.error_for_status()?;
-        Ok(())
+        Ok(res)
+    }
+
+    #[doc = "worker_job_input_download: GET /0/worker/job/{job}/inputs/{input}"]
+    pub async fn worker_job_input_download<'a>(
+        &'a self,
+        job: &'a str,
+        input: &'a str,
+    ) -> Result<reqwest::Response> {
+        let url = format!(
+            "{}/0/worker/job/{}/inputs/{}",
+            self.baseurl,
+            progenitor_support::encode_path(&job.to_string()),
+            progenitor_support::encode_path(&input.to_string()),
+        );
+        let request = self.client.get(url).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res)
     }
 
     #[doc = "worker_job_add_output: POST /0/worker/job/{job}/output"]
-    pub async fn worker_job_add_output(
-        &self,
-        job: &str,
-        body: &types::WorkerAddOutput,
-    ) -> Result<()> {
+    pub async fn worker_job_add_output<'a>(
+        &'a self,
+        job: &'a str,
+        body: &'a types::WorkerAddOutput,
+    ) -> Result<reqwest::Response> {
         let url = format!(
             "{}/0/worker/job/{}/output",
             self.baseurl,
@@ -453,16 +521,16 @@ impl Client {
         let request = self.client.post(url).json(body).build()?;
         let result = self.client.execute(request).await;
         let res = result?.error_for_status()?;
-        Ok(())
+        Ok(res)
     }
 
     #[doc = "worker_task_append: POST /0/worker/job/{job}/task/{task}/append"]
-    pub async fn worker_task_append(
-        &self,
-        job: &str,
+    pub async fn worker_task_append<'a>(
+        &'a self,
+        job: &'a str,
         task: u32,
-        body: &types::WorkerAppendJob,
-    ) -> Result<()> {
+        body: &'a types::WorkerAppendJob,
+    ) -> Result<reqwest::Response> {
         let url = format!(
             "{}/0/worker/job/{}/task/{}/append",
             self.baseurl,
@@ -472,16 +540,16 @@ impl Client {
         let request = self.client.post(url).json(body).build()?;
         let result = self.client.execute(request).await;
         let res = result?.error_for_status()?;
-        Ok(())
+        Ok(res)
     }
 
     #[doc = "worker_task_complete: POST /0/worker/job/{job}/task/{task}/complete"]
-    pub async fn worker_task_complete(
-        &self,
-        job: &str,
+    pub async fn worker_task_complete<'a>(
+        &'a self,
+        job: &'a str,
         task: u32,
-        body: &types::WorkerCompleteTask,
-    ) -> Result<()> {
+        body: &'a types::WorkerCompleteTask,
+    ) -> Result<reqwest::Response> {
         let url = format!(
             "{}/0/worker/job/{}/task/{}/complete",
             self.baseurl,
@@ -491,11 +559,11 @@ impl Client {
         let request = self.client.post(url).json(body).build()?;
         let result = self.client.execute(request).await;
         let res = result?.error_for_status()?;
-        Ok(())
+        Ok(res)
     }
 
     #[doc = "worker_ping: GET /0/worker/ping"]
-    pub async fn worker_ping(&self) -> Result<types::WorkerPingResult> {
+    pub async fn worker_ping<'a>(&'a self) -> Result<types::WorkerPingResult> {
         let url = format!("{}/0/worker/ping", self.baseurl,);
         let request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
@@ -504,7 +572,7 @@ impl Client {
     }
 
     #[doc = "workers_list: GET /0/workers"]
-    pub async fn workers_list(&self) -> Result<types::WorkersResult> {
+    pub async fn workers_list<'a>(&'a self) -> Result<types::WorkersResult> {
         let url = format!("{}/0/workers", self.baseurl,);
         let request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
@@ -513,11 +581,11 @@ impl Client {
     }
 
     #[doc = "workers_recycle: POST /0/workers/recycle"]
-    pub async fn workers_recycle(&self) -> Result<()> {
+    pub async fn workers_recycle<'a>(&'a self) -> Result<reqwest::Response> {
         let url = format!("{}/0/workers/recycle", self.baseurl,);
         let request = self.client.post(url).build()?;
         let result = self.client.execute(request).await;
         let res = result?.error_for_status()?;
-        Ok(())
+        Ok(res)
     }
 }

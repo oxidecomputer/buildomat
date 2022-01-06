@@ -83,3 +83,44 @@ ALTER TABLE job_event ADD COLUMN
 -- v 9
 ALTER TABLE job_output ADD COLUMN
     time_archived   TEXT;
+
+-- v 10
+CREATE TABLE job_file (
+    job             TEXT    NOT NULL,
+    id              TEXT    NOT NULL,
+    size            INTEGER NOT NULL,
+    time_archived   TEXT,
+
+    PRIMARY KEY (job, id)
+);
+
+-- v 11
+INSERT INTO job_file (job, id, size, time_archived)
+    SELECT job, id, size, time_archived FROM job_output;
+
+-- v 12
+ALTER TABLE job_output DROP COLUMN time_archived;
+
+-- v 13
+ALTER TABLE job_output DROP COLUMN size;
+
+-- v 14
+CREATE TABLE job_input (
+    job             TEXT    NOT NULL,
+    name            TEXT    NOT NULL,
+    id              TEXT,
+
+    PRIMARY KEY (job, name)
+);
+
+-- v 15
+ALTER TABLE job ADD COLUMN
+    waiting         INTEGER NOT NULL    DEFAULT 0;
+
+-- v 16
+CREATE INDEX jobs_waiting ON job (complete, waiting)
+    WHERE complete = 0 AND waiting = 1;
+
+-- v 17
+CREATE INDEX jobs_active ON job (complete, waiting)
+    WHERE complete = 0 AND waiting = 0;

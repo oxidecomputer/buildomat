@@ -501,6 +501,7 @@ pub(crate) async fn run(
             output_rules: c.output_rules.clone(),
             target: c.target.as_deref().unwrap_or("default").into(),
             tasks,
+            inputs: Default::default(),
         };
         let jsr = b.job_submit(body).await?;
 

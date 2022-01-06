@@ -10,7 +10,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -23,16 +23,20 @@ use ErrorKind::NotFound;
 use buildomat_common::*;
 use buildomat_openapi::types::*;
 
+mod download;
 mod exec;
 mod uadmin;
 mod upload;
 
 use exec::{Activity, ExitDetails};
+use tokio::io::AsyncWriteExt;
 
 const CONFIG_PATH: &str = "/opt/buildomat/etc/agent.json";
 const AGENT: &str = "/opt/buildomat/lib/agent";
 const METHOD: &str = "/opt/buildomat/lib/start.sh";
 const MANIFEST: &str = "/var/svc/manifest/site/buildomat-agent.xml";
+const INPUT_DATASET: &str = "rpool/input";
+const INPUT_PATH: &str = "/input";
 
 #[derive(Serialize, Deserialize)]
 struct ConfigFile {
@@ -188,6 +192,47 @@ impl ClientWrap {
             }
         }
     }
+
+    async fn input(&self, id: &str, path: &Path) {
+        let job = self.job.as_ref().unwrap();
+
+        'outer: loop {
+            match self.client.worker_job_input_download(&job.id, id).await {
+                Ok(mut res) => {
+                    let mut f = match tokio::fs::File::create(path).await {
+                        Ok(f) => f,
+                        Err(e) => {
+                            println!("ERROR: input: {:?}", e);
+                            sleep_ms(1000).await;
+                            continue 'outer;
+                        }
+                    };
+
+                    loop {
+                        match res.chunk().await {
+                            Ok(None) => return,
+                            Ok(Some(mut ch)) => {
+                                if let Err(e) = f.write_all_buf(&mut ch).await {
+                                    println!("ERROR: input: {:?}", e);
+                                    sleep_ms(1000).await;
+                                    continue 'outer;
+                                }
+                            }
+                            Err(e) => {
+                                println!("ERROR: input: {:?}", e);
+                                sleep_ms(1000).await;
+                                continue 'outer;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("ERROR: input: {:?}", e);
+                    sleep_ms(1000).await;
+                }
+            }
+        }
+    }
 }
 
 fn load<P, T>(p: P) -> Result<T>
@@ -301,6 +346,7 @@ fn make_client(cf: &ConfigFile) -> ClientWrap {
 
 enum Stage {
     Ready,
+    Download(mpsc::Receiver<download::Activity>),
     NextTask,
     Child(mpsc::Receiver<exec::Activity>, WorkerPingTask, Option<bool>),
     Upload(mpsc::Receiver<upload::Activity>),
@@ -349,6 +395,23 @@ async fn main() -> Result<()> {
             write_text(MANIFEST, manifest)?;
 
             /*
+             * Create the input directory.
+             */
+            let status = Command::new("/sbin/zfs")
+                .arg("create")
+                .arg("-o")
+                .arg(&format!("mountpoint={}", INPUT_PATH))
+                .arg(INPUT_DATASET)
+                .env_clear()
+                .current_dir("/")
+                .status();
+            match status {
+                Ok(o) if o.success() => (),
+                Ok(o) => bail!("zfs create failure: {:?}", o),
+                Err(e) => bail!("could not execute zfs create: {:?}", e),
+            }
+
+            /*
              * Import SMF service.
              */
             let status = Command::new("/usr/sbin/svccfg")
@@ -358,7 +421,7 @@ async fn main() -> Result<()> {
                 .current_dir("/")
                 .status();
             match status {
-                Ok(o) if o.success() => {}
+                Ok(o) if o.success() => (),
                 Ok(o) => bail!("svccfg import failure: {:?}", o),
                 Err(e) => bail!("could not execute svccfg import: {:?}", e),
             }
@@ -435,7 +498,11 @@ async fn main() -> Result<()> {
                         tasks.clear();
                         tasks.extend(j.tasks.iter().cloned());
                         cw.job = Some(j.clone());
-                        stage = Stage::NextTask;
+                        stage = Stage::Download(download::download(
+                            cw.clone(),
+                            j.inputs.clone(),
+                            PathBuf::from(INPUT_PATH),
+                        ));
                     }
                 }
             }
@@ -625,6 +692,34 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
+                Stage::Download(ch) => match ch.recv_timeout(rem) {
+                    Ok(download::Activity::Downloading(p)) => {
+                        cw.append_msg(&format!(
+                            "downloading input: {}",
+                            p.display(),
+                        ))
+                        .await;
+                    }
+                    Ok(download::Activity::Downloaded(p)) => {
+                        cw.append_msg(&format!(
+                            "downloaded input: {}",
+                            p.display(),
+                        ))
+                        .await;
+                    }
+                    Ok(download::Activity::Complete) => {
+                        stage = Stage::NextTask;
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        break;
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        cw.append_msg("download channel disconnected").await;
+                        cw.job_complete(true).await;
+                        stage = Stage::Complete;
+                        break;
+                    }
+                },
                 Stage::Upload(ch) => match ch.recv_timeout(rem) {
                     Ok(upload::Activity::Scanned(count)) => {
                         cw.append_msg(&format!("found {} output files", count))

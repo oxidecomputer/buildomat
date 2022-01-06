@@ -14,7 +14,7 @@ integer_new_type!(DataSize, u64, i64, BigInt, "diesel::sql_types::BigInt");
 
 ulid_new_type!(UserId);
 ulid_new_type!(JobId);
-ulid_new_type!(JobOutputId);
+ulid_new_type!(JobFileId);
 ulid_new_type!(TaskId);
 ulid_new_type!(WorkerId);
 
@@ -100,8 +100,31 @@ impl JobEvent {
 pub struct JobOutput {
     pub job: JobId,
     pub path: String,
+    pub id: JobFileId,
+}
+
+#[derive(Debug, Queryable, Insertable, Identifiable)]
+#[table_name = "job_input"]
+#[primary_key(job, name)]
+pub struct JobInput {
+    pub job: JobId,
+    pub name: String,
+    pub id: Option<JobFileId>,
+}
+
+impl JobInput {
+    pub fn from_create(name: &str, job: JobId) -> JobInput {
+        JobInput { job, name: name.to_string(), id: None }
+    }
+}
+
+#[derive(Debug, Queryable, Insertable, Identifiable)]
+#[table_name = "job_file"]
+#[primary_key(job, id)]
+pub struct JobFile {
+    pub job: JobId,
+    pub id: JobFileId,
     pub size: DataSize,
-    pub id: JobOutputId,
     /**
      * When was this file successfully uploaded to the object store?
      */
@@ -150,6 +173,7 @@ pub struct Job {
     pub complete: bool,
     pub failed: bool,
     pub worker: Option<WorkerId>,
+    pub waiting: bool,
 }
 
 impl Job {

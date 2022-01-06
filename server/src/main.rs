@@ -4,6 +4,7 @@
 
 #![allow(clippy::many_single_char_names)]
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::exit;
 use std::result::Result as SResult;
@@ -22,6 +23,7 @@ use hyper::{
     StatusCode,
 };
 use hyper_staticfile::FileBytesStream;
+use rusoto_s3::S3;
 use rusty_ulid::Ulid;
 use serde::Deserialize;
 #[allow(unused_imports)]
@@ -38,7 +40,7 @@ mod db;
 mod jobs;
 mod workers;
 
-use db::{JobId, JobOutputId};
+use db::{JobFileId, JobId};
 
 pub(crate) trait MakeInternalError<T> {
     fn or_500(self) -> SResult<T, HttpError>;
@@ -112,6 +114,12 @@ impl ApiResultEx for std::result::Result<(), String> {
         self.as_ref().map_err(|e| anyhow!("{}: {}", n, e))?;
         Ok(())
     }
+}
+
+struct FileResponse {
+    pub info: String,
+    pub body: Body,
+    pub size: u64,
 }
 
 #[derive(Deserialize, Debug)]
@@ -287,32 +295,163 @@ impl Central {
         Ok(p)
     }
 
-    fn output_dir(&self) -> Result<PathBuf> {
+    fn file_dir(&self) -> Result<PathBuf> {
         let mut p = self.datadir.clone();
         p.push("output");
         std::fs::create_dir_all(&p)?;
         Ok(p)
     }
 
-    fn output_path(
-        &self,
-        job: &JobId,
-        output: &JobOutputId,
-    ) -> Result<PathBuf> {
-        let mut p = self.output_dir()?;
+    fn file_path(&self, job: &JobId, file: &JobFileId) -> Result<PathBuf> {
+        let mut p = self.file_dir()?;
         p.push(job.to_string());
         std::fs::create_dir_all(&p)?;
-        p.push(output.to_string());
+        p.push(file.to_string());
         Ok(p)
     }
 
-    fn output_object_key(&self, job: &JobId, output: &JobOutputId) -> String {
+    fn file_object_key(&self, job: &JobId, file: &JobFileId) -> String {
         /*
          * Object keys begin with a prefix string so that we can have more than
          * one scheme, or more than one buildomat, using the same bucket without
          * conflicts.
          */
-        format!("{}/output/{}/{}", self.config.storage.prefix, job, output)
+        format!("{}/output/{}/{}", self.config.storage.prefix, job, file)
+    }
+
+    fn write_chunk(&self, job: &JobId, chunk: &[u8]) -> Result<Ulid> {
+        /*
+         * Assign an ID for this chunk and determine where will store it in the
+         * file system.
+         */
+        let cid = Ulid::generate();
+        let p = self.chunk_path(job, &cid)?;
+        let f = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&p)?;
+        let mut bw = std::io::BufWriter::new(f);
+        bw.write_all(chunk).or_500()?;
+        bw.flush()?;
+
+        Ok(cid)
+    }
+
+    fn commit_file(
+        &self,
+        job: &JobId,
+        chunks: &[Ulid],
+        expected_size: u64,
+    ) -> Result<JobFileId> {
+        /*
+         * Check that all of the chunks the client wants to use exist, and that
+         * the sum of their sizes matches the total size.
+         */
+        let files = chunks
+            .iter()
+            .map(|cid| {
+                let f = self.chunk_path(job, cid)?;
+                let md = f.metadata()?;
+                Ok((f, md.len()))
+            })
+            .collect::<Result<Vec<_>>>()
+            .or_500()?;
+        let chunksize: u64 = files.iter().map(|(_, sz)| *sz).sum();
+        if chunksize != expected_size {
+            bail!(
+                "job {} file: expected size {} != chunk size {}",
+                job,
+                expected_size,
+                chunksize,
+            );
+        }
+
+        /*
+         * Assign an ID for this file and determine where we will store it in
+         * the file system.
+         */
+        let fid = db::JobFileId::generate();
+        let fp = self.file_path(job, &fid)?;
+        let mut fout = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&fp)?;
+        {
+            let mut bw = std::io::BufWriter::new(&mut fout);
+            for (ip, _) in files.iter() {
+                let fin = std::fs::File::open(&ip).or_500()?;
+                let mut br = std::io::BufReader::new(fin);
+
+                std::io::copy(&mut br, &mut bw).or_500()?;
+            }
+            bw.flush()?;
+        }
+        fout.flush()?;
+        fout.sync_all()?;
+
+        /*
+         * Confirm again that file size is as expected.
+         */
+        let md = fout.metadata()?;
+        if md.len() != expected_size {
+            bail!(
+                "job {} file {}: expected size {} != copied total {}",
+                job,
+                fid,
+                expected_size,
+                md.len(),
+            );
+        }
+
+        Ok(fid)
+    }
+
+    async fn file_response(
+        &self,
+        job: &JobId,
+        file: &JobFileId,
+    ) -> Result<FileResponse> {
+        let op = self.file_path(job, file)?;
+
+        Ok(if op.is_file() {
+            /*
+             * The file exists locally.
+             */
+            let info = format!("local file system at {:?}", op);
+            let f = tokio::fs::File::open(op).await?;
+            let md = f.metadata().await?;
+            assert!(md.is_file());
+            let fbs = FileBytesStream::new(f);
+
+            FileResponse { info, body: fbs.into_body(), size: md.len() }
+        } else {
+            /*
+             * Otherwise, try to get it from the object store.
+             *
+             * XXX We could conceivably 302 redirect people to the actual object
+             * store with a presigned request?
+             */
+            let key = self.file_object_key(job, file);
+            let info = format!("object store at {}", key);
+            let obj = self
+                .s3
+                .get_object(rusoto_s3::GetObjectRequest {
+                    bucket: self.config.storage.bucket.to_string(),
+                    key,
+                    ..Default::default()
+                })
+                .await?;
+
+            if let Some(body) = obj.body {
+                FileResponse {
+                    info,
+                    body: Body::wrap_stream(body),
+                    size: obj.content_length.unwrap() as u64,
+                }
+            } else {
+                bail!("no body on object request for {}/{}", job, file);
+            }
+        })
     }
 }
 
@@ -358,6 +497,8 @@ async fn main() -> Result<()> {
     ad.register(api::user::job_output_download).api_check()?;
     ad.register(api::user::job_get).api_check()?;
     ad.register(api::user::job_submit).api_check()?;
+    ad.register(api::user::job_upload_chunk).api_check()?;
+    ad.register(api::user::job_add_input).api_check()?;
     ad.register(api::user::jobs_get).api_check()?;
     ad.register(api::user::whoami).api_check()?;
     ad.register(api::worker::worker_bootstrap).api_check()?;
@@ -366,6 +507,7 @@ async fn main() -> Result<()> {
     ad.register(api::worker::worker_job_complete).api_check()?;
     ad.register(api::worker::worker_job_upload_chunk).api_check()?;
     ad.register(api::worker::worker_job_add_output).api_check()?;
+    ad.register(api::worker::worker_job_input_download).api_check()?;
     ad.register(api::worker::worker_task_append).api_check()?;
     ad.register(api::worker::worker_task_complete).api_check()?;
 
@@ -403,11 +545,8 @@ async fn main() -> Result<()> {
 
     let mut dbfile = datadir.clone();
     dbfile.push("data.sqlite3");
-    let db = db::Database::new(
-        log.clone(),
-        dbfile,
-        config.sqlite.cache_kb.clone(),
-    )?;
+    let db =
+        db::Database::new(log.clone(), dbfile, config.sqlite.cache_kb.clone())?;
 
     let credprov = rusoto_credential::StaticProvider::new_minimal(
         config.storage.access_key_id.clone(),
@@ -455,7 +594,7 @@ async fn main() -> Result<()> {
     let c0 = Arc::clone(&c);
     let log0 = log.clone();
     let t_archive = tokio::task::spawn(async move {
-        archive::archive_outputs(log0, c0).await.context("archive task failure")
+        archive::archive_files(log0, c0).await.context("archive task failure")
     });
 
     let c0 = Arc::clone(&c);

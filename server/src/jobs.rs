@@ -20,13 +20,9 @@ async fn job_assignment_one(log: &Logger, c: &Central) -> Result<()> {
         c.db.free_workers()?.iter().map(|w| w.id).collect::<Vec<_>>();
     let mut needfree = 0;
 
-    for j in c.db.jobs()?.iter() {
-        if j.complete {
-            /*
-             * Don't do anything with jobs that have already been completed.
-             */
-            continue;
-        }
+    for j in c.db.jobs_active()?.iter() {
+        assert!(!j.complete);
+        assert!(!j.waiting);
 
         if let Some(wid) = &j.worker {
             /*
@@ -74,11 +70,37 @@ async fn job_assignment_one(log: &Logger, c: &Central) -> Result<()> {
     Ok(())
 }
 
+async fn job_waiters_one(log: &Logger, c: &Central) -> Result<()> {
+    /*
+     * Look at jobs that are waiting for inputs or dependency satisfaction.
+     */
+    for j in c.db.jobs_waiting()?.iter() {
+        assert!(j.waiting);
+
+        let inputs = c.db.job_inputs(&j.id)?;
+        if inputs.iter().any(|(_, f)| f.is_none()) {
+            /*
+             * At least one input file is not yet uploaded.
+             */
+            continue;
+        }
+
+        info!(log, "waking up job {}", j.id);
+        c.db.job_wakeup(&j.id)?;
+    }
+
+    Ok(())
+}
+
 pub(crate) async fn job_assignment(log: Logger, c: Arc<Central>) -> Result<()> {
     let delay = Duration::from_secs(1);
     info!(log, "start job assignment task");
 
     loop {
+        if let Err(e) = job_waiters_one(&log, &c).await {
+            error!(log, "job waiters task error: {:?}", e);
+        }
+
         if let Err(e) = job_assignment_one(&log, &c).await {
             error!(log, "job assignment task error: {:?}", e);
         }

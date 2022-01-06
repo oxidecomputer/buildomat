@@ -17,3 +17,4 @@ serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 toml = "0.5.8"
+bytes = "1"

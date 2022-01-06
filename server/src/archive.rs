@@ -14,31 +14,41 @@ use slog::{debug, error, info, warn, Logger};
 
 use super::{db, Central};
 
-async fn archive_outputs_one(
+async fn archive_files_one(
     log: &Logger,
     c: &Central,
     s3: &rusoto_s3::S3Client,
 ) -> Result<()> {
-    while let Some(jo) = c.db.job_output_next_unarchived()? {
-        let key = c.output_object_key(&jo.job, &jo.id);
+    while let Some(jf) = c.db.job_file_next_unarchived()? {
+        let key = c.file_object_key(&jf.job, &jf.id);
         info!(
             log,
-            "uploading output {} path {:?} from job {} at {}:{}",
-            jo.id,
-            jo.path,
-            jo.job,
+            "uploading file {} from job {} at {}:{}",
+            jf.id,
+            jf.job,
             c.config.storage.bucket,
             key
         );
 
         /*
-         * Open the job output file in the local store.  We first need to
-         * determine the total size to include in the put request.
+         * Open the job file in the local store.  We first need to determine the
+         * total size to include in the put request, and confirm that the size
+         * in the database matches the local file size.
          */
-        let p = c.output_path(&jo.job, &jo.id)?;
+        let p = c.file_path(&jf.job, &jf.id)?;
 
         let f = tokio::fs::File::open(&p).await?;
-        let content_length = Some(f.metadata().await?.len().try_into()?);
+        let file_size = f.metadata().await?.len();
+        if file_size != jf.size.0 {
+            bail!(
+                "local file {:?} size {} != database size {}",
+                p,
+                file_size,
+                jf.size.0,
+            );
+        }
+
+        let content_length = Some(file_size.try_into()?);
 
         let stream = tokio_util::io::ReaderStream::new(f);
         let body = Some(rusoto_core::ByteStream::new(stream));
@@ -55,20 +65,20 @@ async fn archive_outputs_one(
 
         info!(
             log,
-            "uploaded output {} path {:?} from job {} at {}:{}",
-            jo.id, jo.path, jo.job, c.config.storage.bucket, key;
+            "uploaded file {} from job {} at {}:{}",
+            jf.id, jf.job, c.config.storage.bucket, key;
             "etag" => res.e_tag, "version" => res.version_id
         );
 
-        c.db.job_output_mark_archived(&jo, Utc::now())?;
+        c.db.job_file_mark_archived(&jf, Utc::now())?;
     }
 
-    debug!(log, "no more outputs to upload");
+    debug!(log, "no more files to upload");
     Ok(())
 }
 
-async fn clean_outputs_one(log: &Logger, c: &Central) -> Result<()> {
-    let mut ents = c.output_dir()?.read_dir()?;
+async fn clean_files_one(log: &Logger, c: &Central) -> Result<()> {
+    let mut ents = c.file_dir()?.read_dir()?;
     while let Some(ent) = ents.next().transpose()? {
         let md = ent.path().symlink_metadata()?;
         if !md.is_dir() {
@@ -77,8 +87,7 @@ async fn clean_outputs_one(log: &Logger, c: &Central) -> Result<()> {
         }
 
         /*
-         * Directories in the output directory are named for the ID of their
-         * job.
+         * Directories in the file directory are named for the ID of their job.
          */
         let jid: db::JobId = if let Some(name) = ent.file_name().to_str() {
             match name.parse() {
@@ -112,14 +121,14 @@ async fn clean_outputs_one(log: &Logger, c: &Central) -> Result<()> {
         } else {
             warn!(
                 log,
-                "output directory for job not in database: {:?}",
+                "file directory for job not in database: {:?}",
                 ent.path()
             );
             continue;
         };
 
         /*
-         * Inspect each file in the output directory for this job.
+         * Inspect each file in the file directory for this job.
          */
         let mut ents = ent.path().read_dir()?;
         while let Some(ent) = ents.next().transpose()? {
@@ -130,17 +139,17 @@ async fn clean_outputs_one(log: &Logger, c: &Central) -> Result<()> {
             }
 
             /*
-             * Files in the job output directory are named for the ID of
-             * the particular output.
+             * Files in the job file directory are named for the ID of
+             * the particular file.
              */
-            let oid: db::JobOutputId =
+            let fid: db::JobFileId =
                 if let Some(name) = ent.file_name().to_str() {
                     match name.parse() {
                         Ok(id) => id,
                         Err(e) => {
                             warn!(
                                 log,
-                                "directory name not Output ID at {:?}: {:?}",
+                                "directory name not File ID at {:?}: {:?}",
                                 ent.path(),
                                 e
                             );
@@ -152,28 +161,28 @@ async fn clean_outputs_one(log: &Logger, c: &Central) -> Result<()> {
                     continue;
                 };
 
-            let output =
-                if let Some(output) = c.db.job_output_by_id_opt(&jid, &oid)? {
-                    if output.time_archived.is_none() {
+            let file =
+                if let Some(file) = c.db.job_file_by_id_opt(&jid, &fid)? {
+                    if file.time_archived.is_none() {
                         /*
-                         * Ignore outputs not yet archived to the object store.
+                         * Ignore files not yet archived to the object store.
                          */
                         continue;
                     }
-                    output
+                    file
                 } else {
                     warn!(
                         log,
-                        "output file for job output not in database: {:?}",
-                        ent.path()
+                        "file not found in database for job: {:?}",
+                        ent.path(),
                     );
                     continue;
                 };
 
             info!(
                 log,
-                "removing archived job output {} for job {} at {:?}",
-                output.id,
+                "removing archived job file {} for job {} at {:?}",
+                file.id,
                 job.id,
                 ent.path()
             );
@@ -196,21 +205,18 @@ async fn clean_outputs_one(log: &Logger, c: &Central) -> Result<()> {
     Ok(())
 }
 
-pub(crate) async fn archive_outputs(
-    log: Logger,
-    c: Arc<Central>,
-) -> Result<()> {
+pub(crate) async fn archive_files(log: Logger, c: Arc<Central>) -> Result<()> {
     let delay = Duration::from_secs(15);
 
-    info!(log, "start output archive task");
+    info!(log, "start file archive task");
 
     loop {
-        if let Err(e) = archive_outputs_one(&log, &c, &c.s3).await {
-            error!(log, "output archive task error: {:?}", e);
+        if let Err(e) = archive_files_one(&log, &c, &c.s3).await {
+            error!(log, "file archive task error: {:?}", e);
         }
 
-        if let Err(e) = clean_outputs_one(&log, &c).await {
-            error!(log, "output clean task error: {:?}", e);
+        if let Err(e) = clean_files_one(&log, &c).await {
+            error!(log, "file clean task error: {:?}", e);
         }
 
         tokio::time::sleep(delay).await;

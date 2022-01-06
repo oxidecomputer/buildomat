@@ -32,6 +32,12 @@ pub(crate) struct JobPath {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub(crate) struct JobInputPath {
+    job: String,
+    input: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub(crate) struct JobTaskPath {
     job: String,
     task: u32,
@@ -50,11 +56,18 @@ pub(crate) struct WorkerPingTask {
 }
 
 #[derive(Serialize, JsonSchema)]
+pub(crate) struct WorkerPingInput {
+    name: String,
+    id: String,
+}
+
+#[derive(Serialize, JsonSchema)]
 pub(crate) struct WorkerPingJob {
     id: String,
     name: String,
     output_rules: Vec<String>,
     tasks: Vec<WorkerPingTask>,
+    inputs: Vec<WorkerPingInput>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -99,11 +112,21 @@ pub(crate) async fn worker_ping(
                     workdir: t.workdir.as_deref().unwrap_or("/").to_string(),
                 })
                 .collect::<Vec<_>>();
+        let inputs =
+            c.db.job_inputs(&job.id)
+                .or_500()?
+                .iter()
+                .map(|(ji, _)| WorkerPingInput {
+                    name: ji.name.to_string(),
+                    id: ji.id.unwrap().to_string(),
+                })
+                .collect::<Vec<_>>();
         Some(WorkerPingJob {
             id: job.id.to_string(),
             name: job.name,
             output_rules,
             tasks,
+            inputs,
         })
     } else {
         None
@@ -112,6 +135,44 @@ pub(crate) async fn worker_ping(
     let res = WorkerPingResult { poweroff: w.recycle || w.deleted, job };
 
     Ok(HttpResponseOk(res))
+}
+
+#[endpoint {
+    method = GET,
+    path = "/0/worker/job/{job}/inputs/{input}",
+}]
+pub(crate) async fn worker_job_input_download(
+    rqctx: Arc<RequestContext<Arc<Central>>>,
+    path: TypedPath<JobInputPath>,
+) -> SResult<Response<Body>, HttpError> {
+    let c = rqctx.context();
+    let req = rqctx.request.lock().await;
+    let log = &rqctx.log;
+
+    let w = c.require_worker(log, &req).await?;
+
+    let p = path.into_inner();
+    let j = c.db.job_by_str(&p.job).or_500()?;
+    w.owns(log, &j)?;
+
+    let i = c.db.job_input_by_str(&p.job, &p.input).or_500()?;
+
+    let mut res = Response::builder();
+    res = res.header(CONTENT_TYPE, "application/octet-stream");
+
+    let fr = c.file_response(&j.id, i.id.as_ref().unwrap()).await.or_500()?;
+    info!(
+        log,
+        "worker {} job {} input {} name {:?} is in the {}",
+        w.id,
+        j.id,
+        i.id.as_ref().unwrap(),
+        i.name,
+        fr.info
+    );
+
+    res = res.header(CONTENT_LENGTH, fr.size);
+    Ok(res.body(fr.body)?)
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -261,7 +322,7 @@ pub(crate) async fn worker_job_complete(
 
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct UploadedChunk {
-    id: String,
+    pub id: String,
 }
 
 #[endpoint {
@@ -281,20 +342,15 @@ pub(crate) async fn worker_job_upload_chunk(
     let j = c.db.job_by_str(&path.into_inner().job).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
-    /*
-     * Assign an ID for this chunk and determine where will store it in the file
-     * system.
-     */
-    let cid = Ulid::generate();
-    let p = c.chunk_path(&j.id, &cid).or_500()?;
-    let f = fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&p)
-        .or_500()?;
-    let mut bw = io::BufWriter::new(f);
-    bw.write_all(chunk.as_bytes()).or_500()?;
-    bw.flush().or_500()?;
+    let cid = c.write_chunk(&j.id, chunk.as_bytes()).or_500()?;
+    info!(
+        log,
+        "worker {} wrote chunk {} for job {}, size {}",
+        w.id,
+        cid,
+        j.id,
+        chunk.as_bytes().len(),
+    );
 
     Ok(HttpResponseCreated(UploadedChunk { id: cid.to_string() }))
 }
@@ -333,77 +389,38 @@ pub(crate) async fn worker_job_add_output(
     let j = c.db.job_by_str(&path.into_inner().job).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
-    /*
-     * Check that all of the chunks the client wants to use exist, and that the
-     * sum of their sizes matches the total size.
-     */
-    let files = add
+    let chunks = add
         .chunks
         .iter()
-        .map(|f| {
-            let cid = Ulid::from_str(f.as_str())?;
-            let f = c.chunk_path(&j.id, &cid)?;
-            let md = f.metadata()?;
-            Ok((f, md.len()))
-        })
+        .map(|f| Ok(Ulid::from_str(f.as_str())?))
         .collect::<Result<Vec<_>>>()
         .or_500()?;
-    let chunksize: u64 = files.iter().map(|(_, sz)| *sz).sum();
-    if chunksize != addsize {
-        warn!(
-            log,
-            "worker {} job {} upload {} size {} != chunk total {}",
-            w.id,
-            j.id,
-            add.path,
-            addsize,
-            chunksize
-        );
-        return Err(HttpError::for_client_error(
-            Some("invalid".to_string()),
-            StatusCode::BAD_REQUEST,
-            format!("size {} != chunk total {}", addsize, chunksize),
-        ));
-    }
 
-    /*
-     * Assign an ID for this output and determine where we will store it in the
-     * file system.
-     */
-    let oid = db::JobOutputId::generate();
-    let op = c.output_path(&j.id, &oid).or_500()?;
-    let mut fout = fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&op)
-        .or_500()?;
-    let mut bw = io::BufWriter::new(&mut fout);
-    for (ip, _) in files.iter() {
-        let fin = fs::File::open(&ip).or_500()?;
-        let mut br = io::BufReader::new(fin);
-
-        io::copy(&mut br, &mut bw).or_500()?;
-    }
-    bw.flush().or_500()?;
-    drop(bw);
-
-    /*
-     * Confirm again that file size is as expected.
-     */
-    let md = fout.metadata().or_500()?;
-    if md.len() != addsize {
-        return Err(HttpError::for_client_error(
-            Some("invalid".to_string()),
-            StatusCode::BAD_REQUEST,
-            format!("size {} != copied total {}", addsize, md.len()),
-        ));
-    }
+    let fid = match c.commit_file(&j.id, &chunks, addsize) {
+        Ok(fid) => fid,
+        Err(e) => {
+            warn!(
+                log,
+                "worker {} job {} upload {} size {}: {:?}",
+                w.id,
+                j.id,
+                add.path,
+                addsize,
+                e,
+            );
+            return Err(HttpError::for_client_error(
+                Some("invalid".to_string()),
+                StatusCode::BAD_REQUEST,
+                format!("{:?}", e),
+            ));
+        }
+    };
 
     /*
      * Insert a record in the database for this output object and report
      * success.
      */
-    c.db.job_add_output(&j.id, &add.path, &oid, addsize).or_500()?;
+    c.db.job_add_output(&j.id, &add.path, &fid, addsize).or_500()?;
 
     Ok(HttpResponseCreated(()))
 }

@@ -70,11 +70,13 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
         "output rule to match files to save after the job completes",
         "GLOB",
     );
+    l.optmulti("i", "input", "input file to pass to job", "[NAME=]FILE");
 
     l.mutually_exclusive(&[("c", "script"), ("C", "script-file")]);
 
     let a = no_args!(l);
 
+    let nowait = a.opts().opt_present("no-wait");
     let name = a.opts().opt_str("name").unwrap();
     let target = a.opts().opt_str("target").unwrap_or_else(|| "default".into());
     let script = if let Some(script) = a.opts().opt_str("script") {
@@ -104,6 +106,37 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
             }
         })
         .collect::<HashMap<String, String>>();
+    let inputs = a
+        .opts()
+        .opt_strs("input")
+        .iter()
+        .map(|val| {
+            if let Some((name, path)) = val.split_once('=') {
+                /*
+                 * If the user provided a name for the input, use it as-is:
+                 */
+                Ok((name.to_string(), PathBuf::from(path)))
+            } else {
+                /*
+                 * Otherwise, use basename (the name of the file) as the input
+                 * name:
+                 */
+                let path = PathBuf::from(val);
+                if !path.is_file() {
+                    bail!("path {:?} is not a file", path);
+                }
+                if let Some(name) = path.file_name() {
+                    if let Some(name) = name.to_str() {
+                        Ok((name.to_string(), path))
+                    } else {
+                        bail!("path {:?} not a valid string", path);
+                    }
+                } else {
+                    bail!("path {:?} not well-formed", path);
+                }
+            }
+        })
+        .collect::<Result<HashMap<String, PathBuf>>>()?;
 
     /*
      * Create the job on the server.
@@ -117,14 +150,67 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
         uid: None,
         workdir: None,
     };
-    let j = JobSubmit { name, target, output_rules, tasks: vec![t] };
+    let j = JobSubmit {
+        name,
+        target,
+        output_rules,
+        tasks: vec![t],
+        inputs: inputs.keys().cloned().collect(),
+    };
     let x = l.context().user().job_submit(&j).await?;
-    println!("job {} submitted", x.id);
 
-    if a.opts().opt_present("no-wait") {
+    for (name, path) in inputs.iter() {
+        let mut f = std::fs::File::open(path)?;
+
+        /*
+         * Read 5MB chunks of the file and upload them to the server.
+         */
+        let mut total = 0;
+        let mut chunks = Vec::new();
+        loop {
+            let mut buf = bytes::BytesMut::new();
+            buf.resize(5 * 1024 * 1024, 0);
+
+            let buf = match f.read(&mut buf) {
+                Ok(sz) if sz == 0 => break,
+                Ok(sz) => {
+                    buf.truncate(sz);
+                    total += sz as u64;
+                    buf.freeze()
+                }
+                Err(e) => {
+                    bail!("failed to read from {:?}: {:?}", path, e);
+                }
+            };
+
+            chunks.push(
+                l.context().user().job_upload_chunk(&x.id, buf).await?.id,
+            );
+        }
+
+        l.context()
+            .user()
+            .job_add_input(
+                &x.id,
+                &JobAddInput {
+                    chunks,
+                    name: name.to_string(),
+                    size: total as i64,
+                },
+            )
+            .await?;
+    }
+
+    if nowait {
+        /*
+         * In no-wait mode, just emit the job ID so that it can be used from a
+         * shell script without additional parsing.
+         */
+        println!("{}", x.id);
         return Ok(());
     }
 
+    println!("job {} submitted", x.id);
     poll_job(&l, &x.id).await
 }
 

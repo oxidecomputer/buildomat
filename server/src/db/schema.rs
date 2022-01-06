@@ -16,6 +16,7 @@ table! {
         complete -> Bool,
         failed -> Bool,
         worker -> Nullable<Text>,
+        waiting -> Bool,
     }
 }
 
@@ -36,6 +37,14 @@ table! {
 }
 
 table! {
+    job_input (job, name) {
+        job -> Text,
+        name -> Text,
+        id -> Nullable<Text>,
+    }
+}
+
+table! {
     job_output_rule (job, seq) {
         job -> Text,
         seq -> Integer,
@@ -47,14 +56,24 @@ table! {
     job_output (job, path) {
         job -> Text,
         path -> Text,
-        size -> BigInt,
         id -> Text,
+    }
+}
+
+table! {
+    job_file (job, id) {
+        job -> Text,
+        id -> Text,
+        size -> BigInt,
         time_archived -> Nullable<Text>,
     }
 }
 
-joinable!(job_output -> job (job));
-allow_tables_to_appear_in_same_query!(job_output, job);
+joinable!(job_file -> job (job));
+allow_tables_to_appear_in_same_query!(job_file, job);
+
+allow_tables_to_appear_in_same_query!(job_output, job_file);
+allow_tables_to_appear_in_same_query!(job_input, job_file);
 
 table! {
     job_event (job, seq) {

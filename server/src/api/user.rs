@@ -2,9 +2,9 @@
  * Copyright 2021 Oxide Computer Company
  */
 
-use rusoto_s3::S3;
-
 use super::prelude::*;
+
+use super::worker::UploadedChunk;
 
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct JobEvent {
@@ -111,9 +111,9 @@ pub(crate) async fn job_outputs_get(
 
     Ok(HttpResponseOk(
         jops.iter()
-            .map(|jop| JobOutput {
+            .map(|(jop, jf)| JobOutput {
                 id: jop.id.to_string(),
-                size: jop.size.0,
+                size: jf.size.0,
                 path: jop.path.to_string(),
             })
             .collect(),
@@ -150,68 +150,14 @@ pub(crate) async fn job_output_download(
     let mut res = Response::builder();
     res = res.header(CONTENT_TYPE, "application/octet-stream");
 
-    let op = c.output_path(&t.id, &o.id).or_500()?;
+    let fr = c.file_response(&t.id, &o.id).await.or_500()?;
+    info!(
+        log,
+        "job {} output {} path {:?} is in the {}", t.id, o.id, o.path, fr.info
+    );
 
-    Ok(if op.is_file() {
-        /*
-         * The file exists locally.
-         */
-        info!(
-            log,
-            "job {} output {} path {:?} is in the local file system",
-            t.id,
-            o.id,
-            o.path
-        );
-        let f = tokio::fs::File::open(op).await.or_500()?;
-        let md = f.metadata().await.or_500()?;
-        assert!(md.is_file());
-        let fbs = FileBytesStream::new(f);
-
-        res = res.header(CONTENT_LENGTH, md.len());
-        res.body(fbs.into_body())?
-    } else {
-        /*
-         * Otherwise, try to get it from the object store.
-         *
-         * XXX We could conceivably 302 redirect people to the actual object
-         * store with a presigned request?
-         */
-        let key = c.output_object_key(&t.id, &o.id);
-        info!(
-            log,
-            "job {} output {} path {:?} is in the object store at {}",
-            t.id,
-            o.id,
-            o.path,
-            key
-        );
-        let obj =
-            c.s3.get_object(rusoto_s3::GetObjectRequest {
-                bucket: c.config.storage.bucket.to_string(),
-                key,
-                ..Default::default()
-            })
-            .await
-            .or_500()?;
-
-        if let Some(body) = obj.body {
-            res = res.header(
-                CONTENT_LENGTH,
-                obj.content_length
-                    .ok_or_else(|| {
-                        anyhow!("no content length from object store?")
-                    })
-                    .or_500()?,
-            );
-            res.body(Body::wrap_stream(body))?
-        } else {
-            return Err(HttpError::for_internal_error(format!(
-                "no body on object request for {}",
-                o.id
-            )));
-        }
-    })
+    res = res.header(CONTENT_LENGTH, fr.size);
+    Ok(res.body(fr.body)?)
 }
 
 fn format_task(t: &db::Task) -> Task {
@@ -243,6 +189,8 @@ fn format_job(j: &db::Job, t: &[db::Task], output_rules: Vec<String>) -> Job {
         "completed"
     } else if j.worker.is_some() {
         "running"
+    } else if j.waiting {
+        "waiting"
     } else {
         "queued"
     }
@@ -355,6 +303,8 @@ pub(crate) struct JobSubmit {
     target: String,
     output_rules: Vec<String>,
     tasks: Vec<TaskSubmit>,
+    #[serde(default)]
+    inputs: Vec<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -409,10 +359,152 @@ pub(crate) async fn job_submit(
             &new_job.target,
             tasks,
             &new_job.output_rules,
+            &new_job.inputs,
         )
         .or_500()?;
 
     Ok(HttpResponseCreated(JobSubmitResult { id: t.id.to_string() }))
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/jobs/{job}/chunk",
+}]
+pub(crate) async fn job_upload_chunk(
+    rqctx: Arc<RequestContext<Arc<Central>>>,
+    path: TypedPath<JobsPath>,
+    chunk: UntypedBody,
+) -> SResult<HttpResponseCreated<UploadedChunk>, HttpError> {
+    let c = rqctx.context();
+    let req = rqctx.request.lock().await;
+    let log = &rqctx.log;
+
+    let owner = c.require_user(log, &req).await?;
+
+    let p = path.into_inner();
+
+    let job = c.db.job_by_str(&p.job).or_500()?;
+    if job.owner != owner.id {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::FORBIDDEN,
+            "not your job".into(),
+        ));
+    }
+
+    if !job.waiting {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::CONFLICT,
+            "cannot upload chunks for job that is not waiting".into(),
+        ));
+    }
+
+    let cid = c.write_chunk(&job.id, chunk.as_bytes()).or_500()?;
+    info!(
+        log,
+        "user {} wrote chunk {} for job {}, size {}",
+        owner.id,
+        cid,
+        job.id,
+        chunk.as_bytes().len(),
+    );
+
+    Ok(HttpResponseCreated(UploadedChunk { id: cid.to_string() }))
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JobAddInput {
+    name: String,
+    size: i64,
+    chunks: Vec<String>,
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/jobs/{job}/input",
+}]
+pub(crate) async fn job_add_input(
+    rqctx: Arc<RequestContext<Arc<Central>>>,
+    path: TypedPath<JobsPath>,
+    add: TypedBody<JobAddInput>,
+) -> SResult<HttpResponseCreated<()>, HttpError> {
+    let c = rqctx.context();
+    let req = rqctx.request.lock().await;
+    let log = &rqctx.log;
+
+    let owner = c.require_user(log, &req).await?;
+
+    let p = path.into_inner();
+
+    let job = c.db.job_by_str(&p.job).or_500()?;
+    if job.owner != owner.id {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::FORBIDDEN,
+            "not your job".into(),
+        ));
+    }
+
+    if !job.waiting {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::CONFLICT,
+            "cannot add inputs to a job that is not waiting".into(),
+        ));
+    }
+
+    let add = add.into_inner();
+    let addsize = if add.size < 0 {
+        return Err(HttpError::for_client_error(
+            Some("invalid".to_string()),
+            StatusCode::BAD_REQUEST,
+            format!("size {} must be >=0", add.size),
+        ));
+    } else {
+        add.size as u64
+    };
+    if add.name.contains("/") {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::BAD_REQUEST,
+            "name must not be a path".into(),
+        ));
+    }
+
+    let chunks = add
+        .chunks
+        .iter()
+        .map(|f| Ok(Ulid::from_str(f.as_str())?))
+        .collect::<Result<Vec<_>>>()
+        .or_500()?;
+
+    let fid = match c.commit_file(&job.id, &chunks, addsize) {
+        Ok(fid) => fid,
+        Err(e) => {
+            warn!(
+                log,
+                "user {} job {} upload {} size {}: {:?}",
+                owner.id,
+                job.id,
+                add.name,
+                addsize,
+                e,
+            );
+            return Err(HttpError::for_client_error(
+                Some("invalid".to_string()),
+                StatusCode::BAD_REQUEST,
+                format!("{:?}", e),
+            ));
+        }
+    };
+
+    /*
+     * Insert a record in the database for this input object and report success.
+     */
+    c.db.job_add_input(&job.id, &add.name, &fid, addsize).or_500()?;
+
+    Ok(HttpResponseCreated(()))
 }
 
 #[derive(Serialize, JsonSchema)]
