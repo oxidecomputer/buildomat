@@ -718,6 +718,19 @@ async fn bgtask_one(app: &Arc<App>) -> Result<()> {
                 )?;
                 app.db.delivery_ack(del.seq, ack)?;
             }
+            "check_suite" if &payload.action == "rerequested" => {
+                /*
+                 * XXX I think we need to return the whole check suite to the
+                 * CheckSuiteState::Created state, after first confirming that
+                 * the request is from an appropriate party.  This would be
+                 * similar to a check_run/rerequested event (see above) for the
+                 * Control run.
+                 *
+                 * For now, though, just eat the notification:
+                 */
+                app.db.delivery_ack(del.seq, ack)?;
+                continue;
+            }
             _ => {}
         }
     }
