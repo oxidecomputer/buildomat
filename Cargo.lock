@@ -2382,6 +2382,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "hiercmd",
+ "serde",
  "serde_json",
  "tokio",
  "wollongong-common",

@@ -160,18 +160,60 @@ impl Database {
             .get_results(c)?)
     }
 
-    pub fn list_deliveries_recent(&self) -> Result<Vec<Delivery>> {
+    /**
+     * Get the delivery with the earliest receive time, if one exists.  This is
+     * used for archiving.
+     */
+    pub fn delivery_earliest(&self) -> Result<Option<Delivery>> {
         use schema::delivery;
-
-        /*
-         * Define recent as within the last 24 hours.
-         */
 
         let c = &mut self.1.lock().unwrap().conn;
 
         Ok(delivery::dsl::delivery
-            .order_by(delivery::dsl::seq.asc())
+            .order_by(delivery::dsl::recvtime.asc())
+            .limit(1)
+            .get_result(c)
+            .optional()?)
+    }
+
+    /**
+     * Load all deliveries that occur on the same day as this delivery.
+     */
+    pub fn same_day_deliveries(&self, d: &Delivery) -> Result<Vec<Delivery>> {
+        use schema::delivery;
+
+        /*
+         * IsoDate fields should be in RFC3339 format, but some records written
+         * in the past had a slightly different format.  Both formats are
+         * prefixed with "%Y-%m-%d", though, so we can produce a LIKE clause
+         * that will find all the records on the same day as this one.
+         */
+        let prefix = d.recvtime.0.format("%Y-%m-%d%%").to_string();
+
+        let c = &mut self.1.lock().unwrap().conn;
+        Ok(delivery::dsl::delivery
+            .filter(delivery::dsl::recvtime.like(&prefix))
+            .order_by(delivery::dsl::recvtime.asc())
             .get_results(c)?)
+    }
+
+    pub fn remove_deliveries(&self, dels: &[Delivery]) -> Result<()> {
+        use schema::delivery;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        c.immediate_transaction(|tx| {
+            for del in dels.iter() {
+                let dc = diesel::delete(delivery::dsl::delivery)
+                    .filter(delivery::dsl::seq.eq(del.seq))
+                    .filter(delivery::dsl::uuid.eq(&del.uuid))
+                    .execute(tx)?;
+                if dc != 1 {
+                    bail!("failed to delete delivery {}", del.seq);
+                }
+            }
+            Ok(())
+        })
     }
 
     pub fn list_deliveries(&self) -> Result<Vec<Delivery>> {

@@ -28,6 +28,12 @@ pub struct Delivery {
     pub ack: Option<i64>,
 }
 
+impl Delivery {
+    pub fn recvtime_day_prefix(&self) -> String {
+        self.recvtime.0.format("%Y-%m-%d").to_string()
+    }
+}
+
 #[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
 #[table_name = "repository"]
 #[primary_key(id)]

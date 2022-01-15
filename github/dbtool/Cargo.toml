@@ -8,6 +8,7 @@ license = "MPL-2.0"
 anyhow = "1"
 chrono = { version = "0.4.19", features = ["serde"] }
 hiercmd = { git = "https://github.com/jclulow/hiercmd" }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1.8.1", features = ["full"] }
 wollongong-common = { path = "../common" }

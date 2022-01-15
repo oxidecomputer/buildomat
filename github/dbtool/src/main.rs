@@ -2,8 +2,15 @@
  * Copyright 2021 Oxide Computer Company
  */
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
+use chrono::prelude::*;
 use hiercmd::prelude::*;
+use serde::Serialize;
+use std::collections::BTreeMap;
+use std::io::Write;
+use std::os::unix::fs::DirBuilderExt;
+use std::path::PathBuf;
+use std::time::Instant;
 use wollongong_common::hooktypes;
 use wollongong_database::Database;
 
@@ -12,11 +19,21 @@ const SHORT_SHA_LEN: usize = 16;
 #[derive(Default)]
 struct Stuff {
     db: Option<Database>,
+    archive: Option<PathBuf>,
 }
 
 impl Stuff {
     fn db(&self) -> &Database {
         self.db.as_ref().unwrap()
+    }
+
+    fn archive(&self, set: &str, file: &str) -> Result<PathBuf> {
+        let mut out = self.archive.as_ref().unwrap().to_path_buf();
+        std::fs::DirBuilder::new().mode(0o700).recursive(true).create(&out)?;
+        out.push(set);
+        std::fs::DirBuilder::new().mode(0o700).recursive(true).create(&out)?;
+        out.push(&format!("{}.json", file));
+        Ok(out)
     }
 }
 
@@ -36,6 +53,123 @@ async fn do_delivery_unack(mut l: Level<Stuff>) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct DeliveryArchive {
+    v: String,
+    records: Vec<Delivery>,
+}
+
+#[derive(Debug, Serialize)]
+struct Delivery {
+    pub seq: u64,
+    pub uuid: String,
+    pub event: String,
+    pub headers: BTreeMap<String, String>,
+    pub payload: serde_json::Value,
+    pub recvtime: DateTime<Utc>,
+    pub ack: i64,
+}
+
+async fn do_delivery_archive(mut l: Level<Stuff>) -> Result<()> {
+    no_args!(l);
+
+    let mut prior: Option<String> = None;
+
+    loop {
+        let first = if let Some(f) = l.context().db().delivery_earliest()? {
+            f
+        } else {
+            println!("no deliveries?");
+            return Ok(());
+        };
+
+        let start = Instant::now();
+
+        let prefix = first.recvtime.0.format("%Y-%m-%d").to_string();
+        println!("earliest delivery day is {}", prefix);
+
+        if let Some(prior) = &prior {
+            if &prefix == prior {
+                bail!("should not see the same day twice");
+            }
+        }
+
+        /*
+         * Determine how long ago this day was:
+         */
+        let old = 14;
+        if Utc::now().signed_duration_since(first.recvtime.0).num_days() < old {
+            println!("less than {} days old, all done", old);
+            return Ok(());
+        }
+
+        let wholeday = l.context().db().same_day_deliveries(&first)?;
+
+        if wholeday.iter().any(|del| del.ack.is_none()) {
+            bail!("cannot archive a day with unacked deliveries");
+        }
+
+        let out =
+            l.context().archive("delivery", &first.recvtime_day_prefix())?;
+        println!("archive to {:?}", out);
+
+        let mut records = Vec::new();
+
+        for del in wholeday.iter() {
+            let wollongong_database::types::Delivery {
+                seq,
+                uuid,
+                event,
+                headers,
+                payload,
+                recvtime,
+                ack,
+            } = del;
+
+            println!(
+                "{} seq {} event \"{}\"",
+                recvtime.0.to_rfc3339(),
+                seq,
+                event
+            );
+
+            records.push(Delivery {
+                seq: seq.0 as u64,
+                uuid: uuid.to_string(),
+                event: event.to_string(),
+                headers: headers
+                    .0
+                    .iter()
+                    .map(|(a, b)| (a.clone(), b.clone()))
+                    .collect(),
+                payload: payload.0.clone(),
+                recvtime: recvtime.0,
+                ack: ack.unwrap(),
+            })
+        }
+
+        let mut f = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&out)
+            .with_context(|| anyhow!("creating {:?}", out))?;
+        let buf = serde_json::to_vec_pretty(&DeliveryArchive {
+            v: "1".to_string(),
+            records,
+        })?;
+        f.write_all(&buf)?;
+        f.flush()?;
+        f.sync_all()?;
+
+        l.context().db().remove_deliveries(wholeday.as_slice())?;
+
+        let delta = Instant::now().duration_since(start);
+        println!("took {} milliseconds", delta.as_millis());
+
+        prior = Some(prefix);
+    }
 }
 
 async fn do_delivery_dump(mut l: Level<Stuff>) -> Result<()> {
@@ -115,8 +249,9 @@ async fn do_delivery_list(mut l: Level<Stuff>) -> Result<()> {
 
 async fn do_delivery(mut l: Level<Stuff>) -> Result<()> {
     l.cmda("list", "ls", "list deliveries", cmd!(do_delivery_list))?;
-    l.cmda("dump", "", "inspect a delivery", cmd!(do_delivery_dump))?;
-    l.cmda("unack", "", "process a delivery again", cmd!(do_delivery_unack))?;
+    l.cmd("dump", "inspect a delivery", cmd!(do_delivery_dump))?;
+    l.cmd("unack", "process a delivery again", cmd!(do_delivery_unack))?;
+    l.cmd("archive", "archive deliveries", cmd!(do_delivery_archive))?;
 
     sel!(l).run().await
 }
@@ -208,8 +343,24 @@ async fn main() -> Result<()> {
     l.cmda("repository", "repo", "GitHub repositories", cmd!(do_repository))?;
     l.cmd("check", "GitHub checks", cmd!(do_check))?;
 
-    l.context_mut().db =
-        Some(Database::new(l.discard_logger(), "var/data.sqlite3", None)?);
+    let var = {
+        let mut var = std::env::current_dir()?;
+        var.push("var");
+        var
+    };
+
+    let db = {
+        let mut db = var.clone();
+        db.push("data.sqlite3");
+        db
+    };
+
+    l.context_mut().db = Some(Database::new(l.discard_logger(), db, None)?);
+    l.context_mut().archive = Some({
+        let mut db = var.clone();
+        db.push("archive");
+        db
+    });
 
     sel!(l).run().await
 }
