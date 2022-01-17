@@ -283,8 +283,37 @@ pub(crate) async fn run(
                 }
 
                 if ev.stream == "stdout" || ev.stream == "stderr" {
-                    p.events_tail
-                        .push_back((None, format!("| {}", ev.payload)));
+                    /*
+                     * Some commands, like "cargo build --verbose", generate
+                     * exceptionally long output lines, running into the
+                     * thousands of characters.  The long lines present two
+                     * challenges: they are not readily visible without
+                     * horizontal scrolling in the GitHub UI; the maximum status
+                     * message length GitHub will accept is 64KB, and even a
+                     * small number of long lines means our status update will
+                     * not be accepted.
+                     *
+                     * If a line is longer than 100 characters, truncate it.
+                     * Users will still be able to see the full output in our
+                     * detailed view where we get to render the whole page.
+                     */
+                    let mut line = "| ".to_string();
+                    let mut chars = ev.payload.chars();
+                    for _ in 0..100 {
+                        if let Some(c) = chars.next() {
+                            line.push(c);
+                        } else {
+                            break;
+                        }
+                    }
+                    if chars.next().is_some() {
+                        /*
+                         * If any characters remain, the string was truncated.
+                         */
+                        line.push_str(" [...]");
+                    }
+
+                    p.events_tail.push_back((None, line));
                 } else {
                     p.events_tail.push_back((
                         Some(format!("{}/{:?}", ev.stream, ev.task)),
