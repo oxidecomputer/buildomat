@@ -124,3 +124,12 @@ CREATE INDEX jobs_waiting ON job (complete, waiting)
 -- v 17
 CREATE INDEX jobs_active ON job (complete, waiting)
     WHERE complete = 0 AND waiting = 0;
+
+-- v 18
+CREATE TABLE job_tag (
+    job             TEXT    NOT NULL,
+    name            TEXT    NOT NULL,
+    value           TEXT    NOT NULL,
+
+    PRIMARY KEY (job, name)
+);

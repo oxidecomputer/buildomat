@@ -71,6 +71,7 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
         "GLOB",
     );
     l.optmulti("i", "input", "input file to pass to job", "[NAME=]FILE");
+    l.optmulti("T", "tag", "informational tag to identify job", "KEY=VALUE");
 
     l.mutually_exclusive(&[("c", "script"), ("C", "script-file")]);
 
@@ -102,6 +103,21 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
                 bad_args!(
                     l,
                     "--env (-e) requires KEY=VALUE environment variables"
+                );
+            }
+        })
+        .collect::<HashMap<String, String>>();
+    let tags = a
+        .opts()
+        .opt_strs("tag")
+        .iter()
+        .map(|val| {
+            if let Some((k, v)) = val.split_once('=') {
+                (k.to_string(), v.to_string())
+            } else {
+                bad_args!(
+                    l,
+                    "--tag (-t) requires KEY=VALUE tag specifications"
                 );
             }
         })
@@ -156,6 +172,7 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
         output_rules,
         tasks: vec![t],
         inputs: inputs.keys().cloned().collect(),
+        tags,
     };
     let x = l.context().user().job_submit(&j).await?;
 
@@ -351,11 +368,13 @@ async fn do_job_list(mut l: Level<Stuff>) -> Result<()> {
 }
 
 async fn do_job_dump(mut l: Level<Stuff>) -> Result<()> {
-    no_args!(l);
+    let a = args!(l);
 
     let c = l.context().user();
 
-    for job in c.jobs_get().await? {
+    for id in a.args() {
+        let job = c.job_get(&id).await?;
+
         println!("{:<26} {:<15} {}", job.id, job.state, job.name);
         println!("{:#?}", job);
         println!();

@@ -427,6 +427,19 @@ impl Database {
             .get_results(c)?)
     }
 
+    pub fn job_tags(&self, job: &JobId) -> Result<HashMap<String, String>> {
+        use schema::job_tag::dsl;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        Ok(dsl::job_tag
+            .select((dsl::name, dsl::value))
+            .filter(dsl::job.eq(job))
+            .get_results::<(String, String)>(c)?
+            .into_iter()
+            .collect())
+    }
+
     pub fn job_output_rules(&self, job: &JobId) -> Result<Vec<String>> {
         use schema::job_output_rule::dsl;
 
@@ -525,7 +538,7 @@ impl Database {
         Ok(dsl::job.filter(dsl::id.eq(job)).get_result(c).optional()?)
     }
 
-    pub fn job_create(
+    pub fn job_create<I>(
         &self,
         owner: &UserId,
         name: &str,
@@ -533,8 +546,12 @@ impl Database {
         tasks: Vec<CreateTask>,
         output_rules: &[String],
         inputs: &[String],
-    ) -> Result<Job> {
-        use schema::{job, job_input, job_output_rule, task};
+        tags: I,
+    ) -> Result<Job>
+    where
+        I: IntoIterator<Item = (String, String)>,
+    {
+        use schema::{job, job_input, job_output_rule, job_tag, task};
 
         if tasks.is_empty() {
             bail!("a job must have at least one task");
@@ -587,6 +604,17 @@ impl Database {
                             job_output_rule::dsl::rule.eq(rule),
                         ))
                         .execute(tx)?;
+                assert_eq!(ic, 1);
+            }
+
+            for (n, v) in tags {
+                let ic = diesel::insert_into(job_tag::dsl::job_tag)
+                    .values((
+                        job_tag::dsl::job.eq(j.id),
+                        job_tag::dsl::name.eq(n),
+                        job_tag::dsl::value.eq(v),
+                    ))
+                    .execute(tx)?;
                 assert_eq!(ic, 1);
             }
 

@@ -525,12 +525,41 @@ pub(crate) async fn run(
             script,
         });
 
+        /*
+         * Attach tags that allow us to more easily map the buildomat job back
+         * to the related GitHub activity, without needing to add a
+         * Wollongong-level lookup API.
+         */
+        let mut tags = HashMap::new();
+        tags.insert("gong.name".to_string(), cr.name.to_string());
+        tags.insert("gong.variety".to_string(), cr.variety.to_string());
+        tags.insert("gong.repo.owner".to_string(), repo.owner.to_string());
+        tags.insert("gong.repo.name".to_string(), repo.name.to_string());
+        tags.insert("gong.repo.id".to_string(), repo.id.to_string());
+        tags.insert("gong.run.id".to_string(), cr.id.to_string());
+        if let Some(ghid) = &cr.github_id {
+            tags.insert("gong.run.github_id".to_string(), ghid.to_string());
+        }
+        tags.insert("gong.suite.id".to_string(), cs.id.to_string());
+        tags.insert(
+            "gong.suite.github_id".to_string(),
+            cs.github_id.to_string(),
+        );
+        tags.insert("gong.head.sha".to_string(), cs.head_sha.to_string());
+        if let Some(branch) = &cs.head_branch {
+            tags.insert("gong.head.branch".to_string(), branch.to_string());
+        }
+        if let Some(sha) = &cs.plan_sha {
+            tags.insert("gong.plan.sha".to_string(), sha.to_string());
+        }
+
         let body = &buildomat_openapi::types::JobSubmit {
             name: format!("gong/{}", cr.id),
             output_rules: c.output_rules.clone(),
             target: c.target.as_deref().unwrap_or("default").into(),
             tasks,
             inputs: Default::default(),
+            tags,
         };
         let jsr = b.job_submit(body).await?;
 
@@ -624,10 +653,25 @@ pub(crate) async fn details(
          * Try to fetch the log output of the job itself.
          */
         let bm = app.buildomat();
+        let job = bm.job_get(jid).await?;
         let outputs = bm.job_outputs_get(jid).await?;
 
         out += &format!("<h2>Buildomat Job: {}</h2>\n", jid);
-        //out += &format!("<pre>{:#?}</pre>\n", job);
+
+        if !job.tags.is_empty() {
+            out += "<h3>Tags:</h3>\n";
+            out += "<ul>\n";
+            let mut keys = job.tags.keys().collect::<Vec<_>>();
+            keys.sort_unstable();
+            for &n in keys.iter() {
+                out += &format!(
+                    "<li><b>{}:</b> {}\n",
+                    n,
+                    job.tags.get(n).unwrap()
+                );
+            }
+            out += "</ul>\n";
+        }
 
         if !outputs.is_empty() {
             out += "<h3>Artefacts:</h3>\n";

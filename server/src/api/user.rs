@@ -182,7 +182,12 @@ fn format_task(t: &db::Task) -> Task {
     }
 }
 
-fn format_job(j: &db::Job, t: &[db::Task], output_rules: Vec<String>) -> Job {
+fn format_job(
+    j: &db::Job,
+    t: &[db::Task],
+    output_rules: Vec<String>,
+    tags: HashMap<String, String>,
+) -> Job {
     let state = if j.failed {
         "failed"
     } else if j.complete {
@@ -205,6 +210,7 @@ fn format_job(j: &db::Job, t: &[db::Task], output_rules: Vec<String>) -> Job {
         tasks,
         output_rules,
         state,
+        tags,
     }
 }
 
@@ -244,6 +250,7 @@ pub(crate) async fn job_get(
         &job,
         &tasks,
         c.db.job_output_rules(&job.id).or_500()?,
+        c.db.job_tags(&job.id).or_500()?,
     )))
 }
 
@@ -267,7 +274,8 @@ pub(crate) async fn jobs_get(
             .map(|j| {
                 let output_rules = c.db.job_output_rules(&j.id)?;
                 let tasks = c.db.job_tasks(&j.id)?;
-                Ok(format_job(j, &tasks, output_rules))
+                let tags = c.db.job_tags(&j.id)?;
+                Ok(format_job(j, &tasks, output_rules, tags))
             })
             .collect::<Result<Vec<_>>>()
             .or_500()?;
@@ -283,6 +291,7 @@ pub(crate) struct Job {
     output_rules: Vec<String>,
     tasks: Vec<Task>,
     state: String,
+    tags: HashMap<String, String>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -305,6 +314,8 @@ pub(crate) struct JobSubmit {
     tasks: Vec<TaskSubmit>,
     #[serde(default)]
     inputs: Vec<String>,
+    #[serde(default)]
+    tags: HashMap<String, String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -338,6 +349,55 @@ pub(crate) async fn job_submit(
     let owner = c.require_user(log, &req).await?;
     let new_job = new_job.into_inner();
 
+    if new_job.tasks.len() > 100 {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::BAD_REQUEST,
+            "too many tasks".into(),
+        ));
+    }
+
+    if new_job.tags.len() > 100 {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::BAD_REQUEST,
+            "too many tags".into(),
+        ));
+    }
+
+    if new_job.tags.iter().map(|(n, v)| n.len() + v.len()).sum::<usize>()
+        > 131072
+    {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::BAD_REQUEST,
+            "total size of all tags is larger than 128KB".into(),
+        ));
+    }
+
+    for n in new_job.tags.keys() {
+        /*
+         * Tag names must not be a zero-length string, and all characters must
+         * be ASCII: numbers, lowercase letters, periods, hypens, or
+         * underscores:
+         */
+        if n.is_empty()
+            || !n.chars().all(|c| {
+                c.is_ascii_digit()
+                    || c.is_ascii_lowercase()
+                    || c == '.'
+                    || c == '_'
+                    || c == '-'
+            })
+        {
+            return Err(HttpError::for_client_error(
+                None,
+                StatusCode::BAD_REQUEST,
+                "tag names must be [0-9a-z._-]+".into(),
+            ));
+        }
+    }
+
     let tasks = new_job
         .tasks
         .iter()
@@ -360,6 +420,7 @@ pub(crate) async fn job_submit(
             tasks,
             &new_job.output_rules,
             &new_job.inputs,
+            new_job.tags,
         )
         .or_500()?;
 

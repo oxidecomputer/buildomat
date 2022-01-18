@@ -26,6 +26,7 @@ pub mod types {
         pub name: String,
         pub output_rules: Vec<String>,
         pub state: String,
+        pub tags: std::collections::HashMap<String, String>,
         pub target: String,
         pub tasks: Vec<Task>,
     }
@@ -62,6 +63,11 @@ pub mod types {
         pub inputs: Vec<String>,
         pub name: String,
         pub output_rules: Vec<String>,
+        #[serde(
+            default,
+            skip_serializing_if = "std::collections::HashMap::is_empty"
+        )]
+        pub tags: std::collections::HashMap<String, String>,
         pub target: String,
         pub tasks: Vec<TaskSubmit>,
     }

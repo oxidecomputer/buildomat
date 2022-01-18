@@ -21,6 +21,14 @@ table! {
 }
 
 table! {
+    job_tag (job, name) {
+        job -> Text,
+        name -> Text,
+        value -> Text,
+    }
+}
+
+table! {
     task (job, seq) {
         job -> Text,
         seq -> Integer,
