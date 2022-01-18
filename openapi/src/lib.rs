@@ -25,6 +25,7 @@ pub mod types {
         pub id: String,
         pub name: String,
         pub output_rules: Vec<String>,
+        pub owner: String,
         pub state: String,
         pub tags: std::collections::HashMap<String, String>,
         pub target: String,
@@ -189,6 +190,8 @@ pub mod types {
         pub id: String,
         pub name: String,
         pub owner: String,
+        pub state: String,
+        pub tags: std::collections::HashMap<String, String>,
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -258,6 +261,31 @@ impl Client {
 
     pub fn client(&self) -> &reqwest::Client {
         &self.client
+    }
+
+    #[doc = "admin_jobs_get: GET /0/admin/jobs"]
+    pub async fn admin_jobs_get<'a>(&'a self) -> Result<Vec<types::Job>> {
+        let url = format!("{}/0/admin/jobs", self.baseurl,);
+        let request = self.client.get(url).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res.json().await?)
+    }
+
+    #[doc = "admin_job_get: GET /0/admin/jobs/{job}"]
+    pub async fn admin_job_get<'a>(
+        &'a self,
+        job: &'a str,
+    ) -> Result<types::Job> {
+        let url = format!(
+            "{}/0/admin/jobs/{}",
+            self.baseurl,
+            progenitor_support::encode_path(&job.to_string()),
+        );
+        let request = self.client.get(url).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res.json().await?)
     }
 
     #[doc = "control_hold: POST /0/control/hold"]

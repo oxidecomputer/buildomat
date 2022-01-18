@@ -5,7 +5,7 @@
 #![allow(unused_imports)]
 #![allow(clippy::many_single_char_names)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env::{args, var};
 use std::fs::{File, OpenOptions};
 use std::future::Future;
@@ -26,6 +26,34 @@ use rusty_ulid::Ulid;
 const WIDTH_ISODATE: usize = 20;
 
 mod config;
+
+trait IdExt {
+    fn id(&self) -> Result<Ulid>;
+}
+
+impl IdExt for Worker {
+    fn id(&self) -> Result<Ulid> {
+        to_ulid(&self.id)
+    }
+}
+
+trait UlidDateExt {
+    fn creation(&self) -> DateTime<Utc>;
+    fn age(&self) -> Duration;
+}
+
+impl UlidDateExt for Ulid {
+    fn creation(&self) -> DateTime<Utc> {
+        Utc.timestamp_millis(self.timestamp() as i64)
+    }
+
+    fn age(&self) -> Duration {
+        let when = std::time::UNIX_EPOCH
+            .checked_add(Duration::from_millis(self.timestamp()))
+            .unwrap();
+        std::time::SystemTime::now().duration_since(when).unwrap()
+    }
+}
 
 #[derive(Default)]
 struct Stuff {
@@ -502,13 +530,7 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
             continue;
         }
 
-        let id = to_ulid(&w.id)?;
-        let creation = Utc.timestamp_millis(id.timestamp() as i64);
-
-        let when = std::time::UNIX_EPOCH
-            .checked_add(Duration::from_millis(id.timestamp()))
-            .unwrap();
-        let age = std::time::SystemTime::now().duration_since(when).unwrap();
+        let id = w.id()?;
 
         let flags = format!(
             "{}{}{}{}",
@@ -522,9 +544,9 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
         r.add_str("id", &w.id);
         r.add_str(
             "creation",
-            creation.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            id.creation().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         );
-        r.add_age("age", age);
+        r.add_age("age", id.age());
         r.add_str("flags", flags);
         r.add_str("info", w.instance_id.as_deref().unwrap_or("-"));
         t.add_row(r);
@@ -565,6 +587,111 @@ async fn do_check(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
+    no_args!(l);
+
+    let s = l.context();
+
+    let mut users = s
+        .admin()?
+        .users_list()
+        .await?
+        .iter()
+        .map(|u| (u.id.to_string(), u.name.to_string()))
+        .collect::<HashMap<String, String>>();
+
+    /*
+     * Load all jobs.
+     */
+    let jobs = s.admin()?.admin_jobs_get().await?;
+
+    let mut res = s.admin()?.workers_list().await?;
+
+    fn github_url(tags: &HashMap<String, String>) -> Option<String> {
+        let owner = tags.get("gong.repo.owner")?;
+        let name = tags.get("gong.repo.name")?;
+        let checkrun = tags.get("gong.run.github_id")?;
+
+        Some(format!("https://github.com/{}/{}/runs/{}", owner, name, checkrun))
+    }
+
+    fn github_info(tags: &HashMap<String, String>) -> Option<String> {
+        let owner = tags.get("gong.repo.owner")?;
+        let name = tags.get("gong.repo.name")?;
+        let title = tags.get("gong.name")?;
+
+        let mut out = format!("{}/{}", owner, name);
+        if let Some(branch) = tags.get("gong.head.branch") {
+            out.push_str(&format!(" ({})", branch));
+        }
+        out.push_str(&format!(": {}", title));
+
+        Some(out)
+    }
+
+    fn dump_info(tags: &HashMap<String, String>) {
+        if let Some(info) = github_info(tags) {
+            println!("    {}", info);
+        }
+        if let Some(sha) = tags.get("gong.head.sha") {
+            println!("    commit: {}", sha);
+        }
+        if let Some(url) = github_url(tags) {
+            println!("    url: {}", url);
+        }
+    }
+
+    /*
+     * Display each worker, and its associated job if there is one:
+     */
+    let mut seen = HashSet::new();
+    for w in res.workers.iter() {
+        if w.deleted {
+            continue;
+        }
+
+        println!(
+            "== worker {} ({:?})\n    created {}",
+            w.id,
+            w.instance_id,
+            w.id()?.creation()
+        );
+        for job in w.jobs.iter() {
+            seen.insert(job.id.to_string());
+            dump_info(&job.tags);
+            //println!("{:#?}", j);
+        }
+        println!();
+    }
+
+    /*
+     * Display all jobs that have not been displayed already, and which are not
+     * complete.
+     */
+    for job in jobs.iter() {
+        if seen.contains(&job.id) {
+            continue;
+        }
+
+        if job.state == "completed" || job.state == "failed" {
+            continue;
+        }
+
+        println!("~~ queued job {}", job.id);
+        dump_info(&job.tags);
+        //println!("{:#?}", job);
+        println!();
+    }
+
+    Ok(())
+}
+
+async fn do_admin(mut l: Level<Stuff>) -> Result<()> {
+    l.cmda("dashboard", "dash", "summarise system state", cmd!(do_dash))?;
+
+    sel!(l).run().await
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut l = Level::new("buildomat", Stuff::default());
@@ -580,6 +707,7 @@ async fn main() -> Result<()> {
     l.cmd("job", "job management", cmd!(do_job))?;
     l.cmd("user", "user management", cmd!(do_user))?;
     l.cmd("worker", "worker management", cmd!(do_worker))?;
+    l.cmd("admin", "administrative functioons", cmd!(do_admin))?;
 
     let a = args!(l);
 

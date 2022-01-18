@@ -390,6 +390,16 @@ impl Database {
     }
 
     /**
+     * Enumerate all jobs.
+     */
+    pub fn jobs_all(&self) -> Result<Vec<Job>> {
+        use schema::job::dsl;
+
+        let c = &mut self.1.lock().unwrap().conn;
+        Ok(dsl::job.order_by(dsl::id.asc()).get_results(c)?)
+    }
+
+    /**
      * Enumerate jobs that are active; i.e., not yet complete, but not waiting.
      */
     pub fn jobs_active(&self) -> Result<Vec<Job>> {

@@ -182,13 +182,8 @@ fn format_task(t: &db::Task) -> Task {
     }
 }
 
-fn format_job(
-    j: &db::Job,
-    t: &[db::Task],
-    output_rules: Vec<String>,
-    tags: HashMap<String, String>,
-) -> Job {
-    let state = if j.failed {
+pub(crate) fn format_job_state(j: &db::Job) -> String {
+    if j.failed {
         "failed"
     } else if j.complete {
         "completed"
@@ -199,17 +194,23 @@ fn format_job(
     } else {
         "queued"
     }
-    .to_string();
+    .to_string()
+}
 
-    let tasks = t.iter().map(format_task).collect::<Vec<_>>();
-
+pub(crate) fn format_job(
+    j: &db::Job,
+    t: &[db::Task],
+    output_rules: Vec<String>,
+    tags: HashMap<String, String>,
+) -> Job {
     Job {
         id: j.id.to_string(),
         name: j.name.to_string(),
         target: j.target.to_string(),
-        tasks,
+        owner: j.owner.to_string(),
+        tasks: t.iter().map(format_task).collect::<Vec<_>>(),
         output_rules,
-        state,
+        state: format_job_state(&j),
         tags,
     }
 }
@@ -286,6 +287,7 @@ pub(crate) async fn jobs_get(
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct Job {
     id: String,
+    owner: String,
     name: String,
     target: String,
     output_rules: Vec<String>,

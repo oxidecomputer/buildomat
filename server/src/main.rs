@@ -85,6 +85,17 @@ impl<T> MakeInternalError<T> for db::OResult<T> {
 }
 
 impl<T> MakeInternalError<T>
+    for std::result::Result<T, rusty_ulid::DecodingError>
+{
+    fn or_500(self) -> SResult<T, HttpError> {
+        self.map_err(|e| {
+            let msg = format!("ID decode error: {:?}", e);
+            HttpError::for_internal_error(msg)
+        })
+    }
+}
+
+impl<T> MakeInternalError<T>
     for std::result::Result<
         T,
         rusoto_core::RusotoError<rusoto_s3::GetObjectError>,
@@ -492,6 +503,8 @@ async fn main() -> Result<()> {
     ad.register(api::admin::user_create).api_check()?;
     ad.register(api::admin::workers_list).api_check()?;
     ad.register(api::admin::workers_recycle).api_check()?;
+    ad.register(api::admin::admin_job_get).api_check()?;
+    ad.register(api::admin::admin_jobs_get).api_check()?;
     ad.register(api::user::job_events_get).api_check()?;
     ad.register(api::user::job_outputs_get).api_check()?;
     ad.register(api::user::job_output_download).api_check()?;
