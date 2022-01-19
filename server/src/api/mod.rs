@@ -19,7 +19,7 @@ mod prelude {
     pub use rusty_ulid::Ulid;
     pub use schemars::JsonSchema;
     pub use serde::{Deserialize, Serialize};
-    pub use slog::{info, warn, Logger};
+    pub use slog::{error, info, warn, Logger};
     pub use std::collections::HashMap;
     pub use std::fs;
     pub use std::io;
@@ -29,5 +29,6 @@ mod prelude {
 }
 
 pub mod admin;
+pub mod factory;
 pub mod user;
 pub mod worker;

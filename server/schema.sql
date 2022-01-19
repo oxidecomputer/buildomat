@@ -133,3 +133,50 @@ CREATE TABLE job_tag (
 
     PRIMARY KEY (job, name)
 );
+
+-- v 19
+CREATE TABLE factory (
+    id              TEXT    NOT NULL    PRIMARY KEY,
+    name            TEXT    NOT NULL    UNIQUE,
+    token           TEXT    NOT NULL    UNIQUE,
+    lastping        TEXT
+);
+
+-- v 20
+ALTER TABLE worker RENAME COLUMN instance_id TO factory_private;
+
+-- v 21
+CREATE TABLE target (
+    id              TEXT    NOT NULL    PRIMARY KEY,
+    name            TEXT    NOT NULL    UNIQUE,
+    desc            TEXT    NOT NULL,
+    redirect        TEXT
+);
+
+-- v 22
+INSERT INTO target (id, name, desc, redirect)
+    VALUES (
+        '00E82MSW0000000000000TT001',
+        'helios',
+        'Helios development image (helios-full-20210908-0)',
+        NULL);
+
+-- v 23
+INSERT INTO target (id, name, desc, redirect)
+    VALUES (
+        '00E82MSW0000000000000TT000',
+        'default',
+        'default',
+        '00E82MSW0000000000000TT001');
+
+-- v 24
+ALTER TABLE job ADD COLUMN
+    target_id       TEXT;
+
+-- v 25
+ALTER TABLE worker ADD COLUMN
+    factory         TEXT;
+
+-- v 26
+ALTER TABLE worker ADD COLUMN
+    target          TEXT;

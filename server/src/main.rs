@@ -34,7 +34,6 @@ use buildomat_common::*;
 
 mod api;
 mod archive;
-mod aws;
 mod chunks;
 mod db;
 mod jobs;
@@ -135,16 +134,21 @@ struct FileResponse {
 
 #[derive(Deserialize, Debug)]
 struct ConfigFile {
-    pub aws: ConfigFileAws,
     pub admin: ConfigFileAdmin,
     pub general: ConfigFileGeneral,
     pub storage: ConfigFileStorage,
     pub sqlite: ConfigFileSqlite,
+    pub job: ConfigFileJob,
 }
 
 #[derive(Deserialize, Debug)]
 struct ConfigFileGeneral {
     pub baseurl: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct ConfigFileJob {
+    pub max_runtime: u64,
 }
 
 #[derive(Deserialize, Debug)]
@@ -171,27 +175,9 @@ struct ConfigFileStorage {
     region: String,
 }
 
-#[derive(Deserialize, Debug)]
-struct ConfigFileAws {
-    access_key_id: String,
-    secret_access_key: String,
-    region: String,
-    vpc: String,
-    subnet: String,
-    tag: String,
-    key: String,
-    instance_type: String,
-    root_size_gb: i64,
-    ami: String,
-    security_group: String,
-    limit_spares: usize,
-    limit_total: usize,
-    max_runtime: u64,
-}
-
 struct CentralInner {
     hold: bool,
-    needfree: usize,
+    leases: jobs::Leases,
 }
 
 struct Central {
@@ -286,6 +272,21 @@ impl Central {
             Ok(u) => Ok(u),
             Err(e) => {
                 warn!(log, "worker auth failure: {:?}", e);
+                unauth_response()
+            }
+        }
+    }
+
+    async fn require_factory(
+        &self,
+        log: &Logger,
+        req: &Request<Body>,
+    ) -> SResult<db::Factory, HttpError> {
+        let t = self._int_auth_token(log, req).await?;
+        match self.db.factory_auth(&t) {
+            Ok(u) => Ok(u),
+            Err(e) => {
+                warn!(log, "factory auth failure: {:?}", e);
                 unauth_response()
             }
         }
@@ -505,6 +506,8 @@ async fn main() -> Result<()> {
     ad.register(api::admin::workers_recycle).api_check()?;
     ad.register(api::admin::admin_job_get).api_check()?;
     ad.register(api::admin::admin_jobs_get).api_check()?;
+    ad.register(api::admin::factory_create).api_check()?;
+    ad.register(api::admin::target_create).api_check()?;
     ad.register(api::user::job_events_get).api_check()?;
     ad.register(api::user::job_outputs_get).api_check()?;
     ad.register(api::user::job_output_download).api_check()?;
@@ -523,6 +526,14 @@ async fn main() -> Result<()> {
     ad.register(api::worker::worker_job_input_download).api_check()?;
     ad.register(api::worker::worker_task_append).api_check()?;
     ad.register(api::worker::worker_task_complete).api_check()?;
+    ad.register(api::factory::factory_workers).api_check()?;
+    ad.register(api::factory::factory_worker_get).api_check()?;
+    ad.register(api::factory::factory_ping).api_check()?;
+    ad.register(api::factory::factory_worker_create).api_check()?;
+    ad.register(api::factory::factory_worker_associate).api_check()?;
+    ad.register(api::factory::factory_worker_destroy).api_check()?;
+    ad.register(api::factory::factory_lease).api_check()?;
+    ad.register(api::factory::factory_lease_renew).api_check()?;
 
     if let Some(s) = p.opt_str("S") {
         let mut f = std::fs::OpenOptions::new()
@@ -574,18 +585,12 @@ async fn main() -> Result<()> {
     let c = Arc::new(Central {
         inner: Mutex::new(CentralInner {
             hold: config.admin.hold,
-            needfree: 0,
+            leases: Default::default(),
         }),
         config,
         datadir,
         db,
         s3,
-    });
-
-    let c0 = Arc::clone(&c);
-    let log0 = log.clone();
-    let t_aws = tokio::task::spawn(async move {
-        aws::aws_worker(log0, c0).await.context("AWS worker task failure")
     });
 
     let c0 = Arc::clone(&c);
@@ -629,13 +634,12 @@ async fn main() -> Result<()> {
         c,
         &log,
     )
-    .context("server startup failure")?;
+    .map_err(|e| anyhow!("server startup failure: {:?}", e))?;
 
     let server_task = server.start();
 
     loop {
         tokio::select! {
-            _ = t_aws => bail!("AWS task stopped early"),
             _ = t_assign => bail!("task assignment task stopped early"),
             _ = t_chunks => bail!("chunk cleanup task stopped early"),
             _ = t_archive => bail!("archive task stopped early"),

@@ -83,6 +83,21 @@ impl Database {
         Ok(dsl::worker.order_by(dsl::id.asc()).get_results(c)?)
     }
 
+    pub fn workers_for_factory(
+        &self,
+        factory: &Factory,
+    ) -> Result<Vec<Worker>> {
+        let c = &mut self.1.lock().unwrap().conn;
+
+        use schema::worker::dsl;
+
+        Ok(dsl::worker
+            .filter(dsl::factory.nullable().eq(factory.id))
+            .filter(dsl::deleted.eq(false))
+            .order_by(dsl::id.asc())
+            .get_results(c)?)
+    }
+
     pub fn worker_jobs(&self, worker: &WorkerId) -> Result<Vec<Job>> {
         let c = &mut self.1.lock().unwrap().conn;
 
@@ -156,76 +171,83 @@ impl Database {
             > 0)
     }
 
-    pub fn worker_assign_job(
+    pub fn i_worker_assign_job(
         &self,
-        wid: &WorkerId,
-        jid: &JobId,
+        tx: &mut SqliteConnection,
+        w: &Worker,
+        jid: JobId,
     ) -> OResult<()> {
+        use schema::job;
+
+        let j: Job = job::dsl::job.find(jid).get_result(tx)?;
+        if let Some(jw) = j.worker.as_ref() {
+            conflict!("job {} already assigned to worker {}", j.id, jw);
+        }
+
+        let c: i64 = job::dsl::job
+            .filter(job::dsl::worker.eq(w.id))
+            .count()
+            .get_result(tx)?;
+        if c > 0 {
+            conflict!("worker {} already has {} jobs assigned", w.id, c);
+        }
+
+        let uc = diesel::update(job::dsl::job)
+            .filter(job::dsl::id.eq(j.id))
+            .set(job::dsl::worker.eq(w.id))
+            .execute(tx)?;
+        assert_eq!(uc, 1);
+
+        /*
+         * Estimate how long the job was waiting in the queue for a worker.
+         */
+        let wait = if let Ok(dur) =
+            Utc::now().signed_duration_since(j.id.datetime()).to_std()
+        {
+            let mut out = String::new();
+            let mut secs = dur.as_secs();
+            let hours = secs / 3600;
+            if hours > 0 {
+                secs -= hours * 3600;
+                out += &format!(" {} h", hours);
+            }
+            let minutes = secs / 60;
+            if minutes > 0 || hours > 0 {
+                secs -= minutes * 60;
+                out += &format!(" {} m", minutes);
+            }
+            out += &format!(" {} s", secs);
+
+            format!(" (queued for{})", out)
+        } else {
+            "".to_string()
+        };
+
+        self.i_job_event_insert(
+            tx,
+            &j.id,
+            None,
+            "control",
+            Utc::now(),
+            None,
+            &format!("job assigned to worker {}{}", w.id, wait),
+        )?;
+
+        Ok(())
+    }
+
+    pub fn worker_assign_job(&self, wid: WorkerId, jid: JobId) -> OResult<()> {
         let c = &mut self.1.lock().unwrap().conn;
 
         c.immediate_transaction(|tx| {
-            use schema::{job, worker};
+            use schema::worker;
 
             let w: Worker = worker::dsl::worker.find(wid).get_result(tx)?;
             if w.deleted || w.recycle {
                 conflict!("worker {} already deleted, cannot assign job", w.id);
             }
 
-            let j: Job = job::dsl::job.find(jid).get_result(tx)?;
-            if let Some(jw) = j.worker.as_ref() {
-                conflict!("job {} already assigned to worker {}", j.id, jw);
-            }
-
-            let c: i64 = job::dsl::job
-                .filter(job::dsl::worker.eq(w.id))
-                .count()
-                .get_result(tx)?;
-            if c > 0 {
-                conflict!("worker {} already has {} jobs assigned", wid, c);
-            }
-
-            let uc = diesel::update(job::dsl::job)
-                .filter(job::dsl::id.eq(j.id))
-                .set(job::dsl::worker.eq(w.id))
-                .execute(tx)?;
-            assert_eq!(uc, 1);
-
-            /*
-             * Estimate how long the job was waiting in the queue for a worker.
-             */
-            let wait = if let Ok(dur) =
-                Utc::now().signed_duration_since(j.id.datetime()).to_std()
-            {
-                let mut out = String::new();
-                let mut secs = dur.as_secs();
-                let hours = secs / 3600;
-                if hours > 0 {
-                    secs -= hours * 3600;
-                    out += &format!(" {} h", hours);
-                }
-                let minutes = secs / 60;
-                if minutes > 0 || hours > 0 {
-                    secs -= minutes * 60;
-                    out += &format!(" {} m", minutes);
-                }
-                out += &format!(" {} s", secs);
-
-                format!(" (queued for{})", out)
-            } else {
-                "".to_string()
-            };
-
-            self.i_job_event_insert(
-                tx,
-                &j.id,
-                None,
-                "control",
-                Utc::now(),
-                None,
-                &format!("job assigned to worker {}{}", w.id, wait),
-            )?;
-
-            Ok(())
+            self.i_worker_assign_job(tx, &w, jid)
         })
     }
 
@@ -252,7 +274,7 @@ impl Database {
                 return Ok(None);
             }
 
-            if w.instance_id.is_none() {
+            if w.factory_private.is_none() {
                 error!(
                     log,
                     "worker {} has no instance, cannot bootstrap", w.id
@@ -298,7 +320,7 @@ impl Database {
     pub fn worker_associate(
         &self,
         wid: &WorkerId,
-        instance_id: &str,
+        factory_private: &str,
     ) -> OResult<()> {
         let c = &mut self.1.lock().unwrap().conn;
 
@@ -310,8 +332,8 @@ impl Database {
                 conflict!("worker {} already deleted, cannot associate", w.id);
             }
 
-            if let Some(current) = w.instance_id.as_deref() {
-                if current == instance_id {
+            if let Some(current) = w.factory_private.as_deref() {
+                if current == factory_private {
                     /*
                      * Everything is as expected.
                      */
@@ -323,7 +345,7 @@ impl Database {
                         "worker {} already associated with instance {} not {}",
                         w.id,
                         current,
-                        instance_id
+                        factory_private
                     );
                 }
             } else {
@@ -332,7 +354,7 @@ impl Database {
                  */
                 let count = diesel::update(worker::dsl::worker)
                     .filter(worker::dsl::id.eq(w.id))
-                    .set(worker::dsl::instance_id.eq(instance_id))
+                    .set(worker::dsl::factory_private.eq(factory_private))
                     .execute(tx)?;
                 assert_eq!(count, 1);
             }
@@ -341,11 +363,18 @@ impl Database {
         })
     }
 
-    pub fn worker_get(&self, id: &WorkerId) -> Result<Worker> {
+    pub fn worker_get(&self, id: WorkerId) -> Result<Worker> {
         use schema::worker::dsl;
 
         let c = &mut self.1.lock().unwrap().conn;
         Ok(dsl::worker.find(id).get_result(c)?)
+    }
+
+    pub fn worker_get_opt(&self, id: WorkerId) -> Result<Option<Worker>> {
+        use schema::worker::dsl;
+
+        let c = &mut self.1.lock().unwrap().conn;
+        Ok(dsl::worker.find(id).get_result(c).optional()?)
     }
 
     pub fn worker_auth(&self, token: &str) -> Result<Worker> {
@@ -367,26 +396,49 @@ impl Database {
         }
     }
 
-    pub fn worker_create(&self) -> Result<Worker> {
+    pub fn worker_create(
+        &self,
+        factory: &Factory,
+        target: &Target,
+        job: Option<JobId>,
+    ) -> Result<Worker> {
         use schema::worker;
 
         let w = Worker {
             id: WorkerId::generate(),
             bootstrap: genkey(64),
-            instance_id: None,
+            factory_private: None,
             token: None,
             deleted: false,
             recycle: false,
             lastping: None,
+            factory: Some(factory.id),
+            target: Some(target.id),
         };
 
         let c = &mut self.1.lock().unwrap().conn;
 
-        let count =
-            diesel::insert_into(worker::dsl::worker).values(&w).execute(c)?;
-        assert_eq!(count, 1);
+        c.immediate_transaction(|tx| {
+            let count = diesel::insert_into(worker::dsl::worker)
+                .values(&w)
+                .execute(tx)?;
+            assert_eq!(count, 1);
 
-        Ok(w)
+            /*
+             * If this is a concrete target, we will be given the job ID at
+             * worker creation time.  This allows the factory to reserve the
+             * specific job and use the job configuration for target-specific
+             * pre-setup.
+             *
+             * If no job was specified, this will be an ephemeral target that
+             * will be assigned later by the job assignment task.
+             */
+            if let Some(job) = job {
+                self.i_worker_assign_job(tx, &w, job)?;
+            }
+
+            Ok(w)
+        })
     }
 
     /**
@@ -552,7 +604,8 @@ impl Database {
         &self,
         owner: &UserId,
         name: &str,
-        target: &str,
+        target_name: &str,
+        target: TargetId,
         tasks: Vec<CreateTask>,
         output_rules: &[String],
         inputs: &[String],
@@ -577,7 +630,8 @@ impl Database {
             id: JobId::generate(),
             owner: *owner,
             name: name.to_string(),
-            target: target.to_string(),
+            target: target_name.to_string(),
+            target_id: Some(target),
             waiting,
             complete: false,
             failed: false,
@@ -840,7 +894,7 @@ impl Database {
         })
     }
 
-    pub fn job_complete(&self, job: &JobId, failed: bool) -> Result<bool> {
+    pub fn job_complete(&self, job: JobId, failed: bool) -> Result<bool> {
         use schema::{job, task};
 
         let c = &mut self.1.lock().unwrap().conn;
@@ -1054,6 +1108,116 @@ impl Database {
             (Some(u), None) => {
                 assert_eq!(&u.token, token);
                 Ok(u)
+            }
+        }
+    }
+
+    pub fn factory_create(&self, name: &str) -> Result<Factory> {
+        let f = Factory {
+            id: FactoryId::generate(),
+            name: name.to_string(),
+            token: genkey(64),
+            lastping: None,
+        };
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        use schema::factory::dsl;
+
+        diesel::insert_into(dsl::factory).values(&f).execute(c)?;
+
+        Ok(f)
+    }
+
+    pub fn factory_auth(&self, token: &str) -> Result<Factory> {
+        use schema::factory;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let mut rows: Vec<Factory> = factory::dsl::factory
+            .filter(factory::dsl::token.eq(token))
+            .get_results(c)?;
+
+        match (rows.pop(), rows.pop()) {
+            (None, _) => bail!("auth failure"),
+            (Some(u), Some(x)) => bail!("token error ({}, {})", u.id, x.id),
+            (Some(u), None) => {
+                assert_eq!(u.token.as_str(), token);
+                Ok(u)
+            }
+        }
+    }
+
+    pub fn factory_ping(&self, id: FactoryId) -> Result<bool> {
+        use schema::factory::dsl;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let now = models::IsoDate(Utc::now());
+        Ok(diesel::update(dsl::factory)
+            .filter(dsl::id.eq(id))
+            .set(dsl::lastping.eq(now))
+            .execute(c)?
+            > 0)
+    }
+
+    pub fn target_get(&self, id: TargetId) -> Result<Target> {
+        use schema::target::dsl;
+
+        let c = &mut self.1.lock().unwrap().conn;
+        Ok(dsl::target.find(id).get_result(c)?)
+    }
+
+    pub fn target_create(&self, name: &str, desc: &str) -> Result<Target> {
+        let t = Target {
+            id: TargetId::generate(),
+            name: name.to_string(),
+            desc: desc.to_string(),
+            redirect: None,
+        };
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        use schema::target::dsl;
+
+        diesel::insert_into(dsl::target).values(&t).execute(c)?;
+
+        Ok(t)
+    }
+
+    pub fn target_resolve(&self, name: &str) -> Result<Option<Target>> {
+        use schema::target::dsl;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        /*
+         * Use the target name to look up the initial target match:
+         */
+        let mut target: Target = if let Some(target) =
+            dsl::target.filter(dsl::name.eq(name)).get_result(c).optional()?
+        {
+            target
+        } else {
+            return Ok(None);
+        };
+
+        let mut count = 0;
+        loop {
+            if count > 32 {
+                bail!("too many target redirects starting from {:?}", name);
+            }
+            count += 1;
+
+            if let Some(redirect) = &target.redirect {
+                target = if let Some(target) =
+                    dsl::target.find(redirect).get_result(c).optional()?
+                {
+                    target
+                } else {
+                    return Ok(None);
+                };
+            } else {
+                return Ok(Some(target));
             }
         }
     }

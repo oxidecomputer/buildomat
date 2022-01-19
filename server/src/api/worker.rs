@@ -315,7 +315,7 @@ pub(crate) async fn worker_job_complete(
     w.owns(log, &j)?;
 
     info!(log, "worker {} complete job {}", w.id, j.id);
-    c.db.job_complete(&j.id, b.failed).or_500()?;
+    c.db.job_complete(j.id, b.failed).or_500()?;
 
     Ok(HttpResponseOk(()))
 }

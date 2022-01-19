@@ -21,6 +21,68 @@ mod progenitor_support {
 pub mod types {
     use serde::{Deserialize, Serialize};
     #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct FactoryCreate {
+        pub name: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct FactoryCreateResult {
+        pub id: String,
+        pub name: String,
+        pub token: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct FactoryLease {
+        pub job: String,
+        pub target: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct FactoryLeaseResult {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub lease: Option<FactoryLease>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct FactoryPingResult {
+        pub ok: bool,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct FactoryWhatsNext {
+        pub supported_targets: Vec<String>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct FactoryWorker {
+        pub bootstrap: String,
+        pub id: String,
+        pub online: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub private: Option<String>,
+        pub recycle: bool,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct FactoryWorkerAssociate {
+        pub private: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct FactoryWorkerCreate {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub job: Option<String>,
+        pub target: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct FactoryWorkerResult {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub worker: Option<FactoryWorker>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct Job {
         pub id: String,
         pub name: String,
@@ -29,6 +91,7 @@ pub mod types {
         pub state: String,
         pub tags: std::collections::HashMap<String, String>,
         pub target: String,
+        pub target_real: String,
         pub tasks: Vec<Task>,
     }
 
@@ -75,6 +138,17 @@ pub mod types {
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct JobSubmitResult {
+        pub id: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct TargetCreate {
+        pub desc: String,
+        pub name: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct TargetCreateResult {
         pub id: String,
     }
 
@@ -141,13 +215,15 @@ pub mod types {
     pub struct Worker {
         pub bootstrap: bool,
         pub deleted: bool,
-        pub id: String,
+        pub factory: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub instance_id: Option<String>,
+        pub factory_private: Option<String>,
+        pub id: String,
         pub jobs: Vec<WorkerJob>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub lastping: Option<chrono::DateTime<chrono::offset::Utc>>,
         pub recycle: bool,
+        pub target: String,
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -263,6 +339,18 @@ impl Client {
         &self.client
     }
 
+    #[doc = "factory_create: POST /0/admin/factory"]
+    pub async fn factory_create<'a>(
+        &'a self,
+        body: &'a types::FactoryCreate,
+    ) -> Result<types::FactoryCreateResult> {
+        let url = format!("{}/0/admin/factory", self.baseurl,);
+        let request = self.client.post(url).json(body).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res.json().await?)
+    }
+
     #[doc = "admin_jobs_get: GET /0/admin/jobs"]
     pub async fn admin_jobs_get<'a>(&'a self) -> Result<Vec<types::Job>> {
         let url = format!("{}/0/admin/jobs", self.baseurl,);
@@ -288,6 +376,18 @@ impl Client {
         Ok(res.json().await?)
     }
 
+    #[doc = "target_create: POST /0/admin/target"]
+    pub async fn target_create<'a>(
+        &'a self,
+        body: &'a types::TargetCreate,
+    ) -> Result<types::TargetCreateResult> {
+        let url = format!("{}/0/admin/target", self.baseurl,);
+        let request = self.client.post(url).json(body).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res.json().await?)
+    }
+
     #[doc = "control_hold: POST /0/control/hold"]
     pub async fn control_hold<'a>(&'a self) -> Result<reqwest::Response> {
         let url = format!("{}/0/control/hold", self.baseurl,);
@@ -304,6 +404,117 @@ impl Client {
         let result = self.client.execute(request).await;
         let res = result?.error_for_status()?;
         Ok(res)
+    }
+
+    #[doc = "factory_lease: POST /0/factory/lease"]
+    pub async fn factory_lease<'a>(
+        &'a self,
+        body: &'a types::FactoryWhatsNext,
+    ) -> Result<types::FactoryLeaseResult> {
+        let url = format!("{}/0/factory/lease", self.baseurl,);
+        let request = self.client.post(url).json(body).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res.json().await?)
+    }
+
+    #[doc = "factory_lease_renew: POST /0/factory/lease/{job}"]
+    pub async fn factory_lease_renew<'a>(
+        &'a self,
+        job: &'a str,
+    ) -> Result<bool> {
+        let url = format!(
+            "{}/0/factory/lease/{}",
+            self.baseurl,
+            progenitor_support::encode_path(&job.to_string()),
+        );
+        let request = self.client.post(url).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res.json().await?)
+    }
+
+    #[doc = "factory_ping: GET /0/factory/ping"]
+    pub async fn factory_ping<'a>(
+        &'a self,
+    ) -> Result<types::FactoryPingResult> {
+        let url = format!("{}/0/factory/ping", self.baseurl,);
+        let request = self.client.get(url).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res.json().await?)
+    }
+
+    #[doc = "factory_worker_create: POST /0/factory/worker"]
+    pub async fn factory_worker_create<'a>(
+        &'a self,
+        body: &'a types::FactoryWorkerCreate,
+    ) -> Result<types::FactoryWorker> {
+        let url = format!("{}/0/factory/worker", self.baseurl,);
+        let request = self.client.post(url).json(body).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res.json().await?)
+    }
+
+    #[doc = "factory_worker_get: GET /0/factory/worker/{worker}"]
+    pub async fn factory_worker_get<'a>(
+        &'a self,
+        worker: &'a str,
+    ) -> Result<types::FactoryWorkerResult> {
+        let url = format!(
+            "{}/0/factory/worker/{}",
+            self.baseurl,
+            progenitor_support::encode_path(&worker.to_string()),
+        );
+        let request = self.client.get(url).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res.json().await?)
+    }
+
+    #[doc = "factory_worker_destroy: DELETE /0/factory/worker/{worker}"]
+    pub async fn factory_worker_destroy<'a>(
+        &'a self,
+        worker: &'a str,
+    ) -> Result<bool> {
+        let url = format!(
+            "{}/0/factory/worker/{}",
+            self.baseurl,
+            progenitor_support::encode_path(&worker.to_string()),
+        );
+        let request = self.client.delete(url).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res.json().await?)
+    }
+
+    #[doc = "factory_worker_associate: PATCH /0/factory/worker/{worker}"]
+    pub async fn factory_worker_associate<'a>(
+        &'a self,
+        worker: &'a str,
+        body: &'a types::FactoryWorkerAssociate,
+    ) -> Result<reqwest::Response> {
+        let url = format!(
+            "{}/0/factory/worker/{}",
+            self.baseurl,
+            progenitor_support::encode_path(&worker.to_string()),
+        );
+        let request = self.client.patch(url).json(body).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res)
+    }
+
+    #[doc = "factory_workers: GET /0/factory/workers"]
+    pub async fn factory_workers<'a>(
+        &'a self,
+    ) -> Result<Vec<types::FactoryWorker>> {
+        let url = format!("{}/0/factory/workers", self.baseurl,);
+        let request = self.client.get(url).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res.json().await?)
     }
 
     #[doc = "job_get: GET /0/job/{job}"]

@@ -548,7 +548,7 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
         );
         r.add_age("age", id.age());
         r.add_str("flags", flags);
-        r.add_str("info", w.instance_id.as_deref().unwrap_or("-"));
+        r.add_str("info", w.factory_private.as_deref().unwrap_or("-"));
         t.add_row(r);
     }
 
@@ -587,12 +587,63 @@ async fn do_check(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_factory_create(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("NAME"));
+
+    let a = args!(l);
+
+    if a.args().len() != 1 {
+        bad_args!(l, "specify name of factory");
+    }
+    let name = a.args()[0].to_string();
+
+    let res =
+        l.context().admin()?.factory_create(&FactoryCreate { name }).await?;
+
+    println!("{}", res.token);
+    Ok(())
+}
+
+async fn do_factory(mut l: Level<Stuff>) -> Result<()> {
+    l.cmd("create", "create a factory", cmd!(do_factory_create))?;
+
+    sel!(l).run().await
+}
+
+async fn do_target_create(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("NAME"));
+    l.reqopt("d", "desc", "target description", "DESC");
+
+    let a = args!(l);
+
+    if a.args().len() != 1 {
+        bad_args!(l, "specify name of target");
+    }
+    let name = a.args()[0].to_string();
+    let desc = a.opts().opt_str("d").unwrap();
+
+    let res = l
+        .context()
+        .admin()?
+        .target_create(&TargetCreate { name, desc })
+        .await?;
+
+    println!("{}", res.id);
+    Ok(())
+}
+
+async fn do_target(mut l: Level<Stuff>) -> Result<()> {
+    l.cmd("create", "create a target", cmd!(do_target_create))?;
+
+    sel!(l).run().await
+}
+
 async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
     no_args!(l);
 
     let s = l.context();
 
-    let mut users = s
+    let users = s
         .admin()?
         .users_list()
         .await?
@@ -605,7 +656,7 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
      */
     let jobs = s.admin()?.admin_jobs_get().await?;
 
-    let mut res = s.admin()?.workers_list().await?;
+    let res = s.admin()?.workers_list().await?;
 
     fn github_url(tags: &HashMap<String, String>) -> Option<String> {
         let owner = tags.get("gong.repo.owner")?;
@@ -653,7 +704,7 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
         println!(
             "== worker {} ({:?})\n    created {}",
             w.id,
-            w.instance_id,
+            w.factory_private,
             w.id()?.creation()
         );
         for job in w.jobs.iter() {
@@ -687,6 +738,8 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
 }
 
 async fn do_admin(mut l: Level<Stuff>) -> Result<()> {
+    l.cmd("factory", "factory management", cmd!(do_factory))?;
+    l.cmd("target", "target management", cmd!(do_target))?;
     l.cmda("dashboard", "dash", "summarise system state", cmd!(do_dash))?;
 
     sel!(l).run().await
@@ -707,7 +760,7 @@ async fn main() -> Result<()> {
     l.cmd("job", "job management", cmd!(do_job))?;
     l.cmd("user", "user management", cmd!(do_user))?;
     l.cmd("worker", "worker management", cmd!(do_worker))?;
-    l.cmd("admin", "administrative functioons", cmd!(do_admin))?;
+    l.cmda("admin", "a", "administrative functioons", cmd!(do_admin))?;
 
     let a = args!(l);
 

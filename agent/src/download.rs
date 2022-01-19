@@ -2,9 +2,6 @@
  * Copyright 2021 Oxide Computer Company
  */
 
-use std::collections::HashSet;
-use std::fs;
-use std::io::Read;
 use std::path::PathBuf;
 use std::sync::mpsc;
 

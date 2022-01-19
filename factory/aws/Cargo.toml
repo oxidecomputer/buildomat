@@ -1,0 +1,21 @@
+[package]
+name = "buildomat-factory-aws"
+version = "0.0.0"
+edition = "2018"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow = "1"
+rusoto_core = "0.47.0"
+rusoto_credential = "0.47.0"
+rusoto_ec2 = "0.47.0"
+rusty_ulid = "0.11"
+slog = "2.7"
+slog-term = "2.7"
+base64 = "0.13"
+tokio = { version = "1", features = [ "full" ] }
+serde = { version = "1", features = [ "derive" ] }
+toml = "0.5"
+buildomat-openapi = { path = "../../openapi" }
+buildomat-common = { path = "../../common" }
+getopts = "0.2"

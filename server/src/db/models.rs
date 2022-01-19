@@ -17,6 +17,8 @@ ulid_new_type!(JobId);
 ulid_new_type!(JobFileId);
 ulid_new_type!(TaskId);
 ulid_new_type!(WorkerId);
+ulid_new_type!(FactoryId);
+ulid_new_type!(TargetId);
 
 #[derive(Debug, Queryable, Insertable, Identifiable)]
 #[table_name = "user"]
@@ -138,10 +140,12 @@ pub struct Worker {
     pub id: WorkerId,
     pub bootstrap: String,
     pub token: Option<String>,
-    pub instance_id: Option<String>,
+    pub factory_private: Option<String>,
     pub deleted: bool,
     pub recycle: bool,
     pub lastping: Option<IsoDate>,
+    pub factory: Option<FactoryId>,
+    pub target: Option<TargetId>,
 }
 
 impl Worker {
@@ -160,6 +164,28 @@ impl Worker {
             .to_std()
             .unwrap_or_else(|_| Duration::from_secs(0))
     }
+
+    pub fn factory(&self) -> FactoryId {
+        self.factory.unwrap_or_else(|| {
+            /*
+             * XXX No new workers will be created without a factory, but but old
+             * records might not have had one.  This is the ID of a made up
+             * factory that does not otherwise exist:
+             */
+            FactoryId::from_str("00E82MSW0000000000000FF000").unwrap()
+        })
+    }
+
+    pub fn target(&self) -> TargetId {
+        self.target.unwrap_or_else(|| {
+            /*
+             * XXX No new records should be created without a resolved target
+             * ID, but old records might not have had one.  This is the ID of
+             * the canned "default" target:
+             */
+            TargetId::from_str("00E82MSW0000000000000TT000").unwrap()
+        })
+    }
 }
 
 #[derive(Clone, Debug, Queryable, Insertable, Identifiable)]
@@ -174,6 +200,7 @@ pub struct Job {
     pub failed: bool,
     pub worker: Option<WorkerId>,
     pub waiting: bool,
+    pub target_id: Option<TargetId>,
 }
 
 impl Job {
@@ -181,4 +208,35 @@ impl Job {
     pub fn time_submit(&self) -> DateTime<Utc> {
         self.id.datetime()
     }
+
+    pub fn target(&self) -> TargetId {
+        self.target_id.unwrap_or_else(|| {
+            /*
+             * XXX No new records should be created without a resolved target
+             * ID, but old records might not have had one.  This is the ID of
+             * the canned "default" target:
+             */
+            TargetId::from_str("00E82MSW0000000000000TT000").unwrap()
+        })
+    }
+}
+
+#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
+#[table_name = "factory"]
+#[primary_key(id)]
+pub struct Factory {
+    pub id: FactoryId,
+    pub name: String,
+    pub token: String,
+    pub lastping: Option<IsoDate>,
+}
+
+#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
+#[table_name = "target"]
+#[primary_key(id)]
+pub struct Target {
+    pub id: TargetId,
+    pub name: String,
+    pub desc: String,
+    pub redirect: Option<TargetId>,
 }

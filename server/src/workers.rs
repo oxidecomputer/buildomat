@@ -45,14 +45,14 @@ async fn worker_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
                     .find(|jev| jev.stream == "control")
                     .cloned();
             if let Some(control) = control {
-                if control.age().as_secs() > c.config.aws.max_runtime {
+                if control.age().as_secs() > c.config.job.max_runtime {
                     warn!(
                         log,
                         "job {} duration {} exceeds {} seconds; \
                         recycling worker {}",
                         j.id,
                         control.age().as_secs(),
-                        c.config.aws.max_runtime,
+                        c.config.job.max_runtime,
                         w.id,
                     );
                     c.db.job_append_event(
@@ -64,7 +64,7 @@ async fn worker_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
                         &format!(
                             "job duration {} exceeds {} seconds; aborting",
                             control.age().as_secs(),
-                            c.config.aws.max_runtime,
+                            c.config.job.max_runtime,
                         ),
                     )?;
                     c.db.worker_recycle(&w.id)?;

@@ -202,11 +202,13 @@ pub(crate) fn format_job(
     t: &[db::Task],
     output_rules: Vec<String>,
     tags: HashMap<String, String>,
+    target: &db::Target,
 ) -> Job {
     Job {
         id: j.id.to_string(),
         name: j.name.to_string(),
         target: j.target.to_string(),
+        target_real: target.name.to_string(),
         owner: j.owner.to_string(),
         tasks: t.iter().map(format_task).collect::<Vec<_>>(),
         output_rules,
@@ -252,6 +254,7 @@ pub(crate) async fn job_get(
         &tasks,
         c.db.job_output_rules(&job.id).or_500()?,
         c.db.job_tags(&job.id).or_500()?,
+        &c.db.target_get(job.target()).or_500()?,
     )))
 }
 
@@ -276,7 +279,8 @@ pub(crate) async fn jobs_get(
                 let output_rules = c.db.job_output_rules(&j.id)?;
                 let tasks = c.db.job_tasks(&j.id)?;
                 let tags = c.db.job_tags(&j.id)?;
-                Ok(format_job(j, &tasks, output_rules, tags))
+                let target = c.db.target_get(j.target())?;
+                Ok(format_job(j, &tasks, output_rules, tags, &target))
             })
             .collect::<Result<Vec<_>>>()
             .or_500()?;
@@ -290,6 +294,7 @@ pub(crate) struct Job {
     owner: String,
     name: String,
     target: String,
+    target_real: String,
     output_rules: Vec<String>,
     tasks: Vec<Task>,
     state: String,
@@ -400,6 +405,23 @@ pub(crate) async fn job_submit(
         }
     }
 
+    /*
+     * Resolve the target name to a specific target.  We store both so that it
+     * is subsequently clear what we were asked, and what we actually delivered.
+     */
+    let target = match c.db.target_resolve(&new_job.target).or_500()? {
+        Some(target) => target,
+        None => {
+            info!(log, "could not resolve target name {:?}", new_job.target,);
+            return Err(HttpError::for_client_error(
+                None,
+                StatusCode::BAD_REQUEST,
+                format!("could not resolve target name {:?}", new_job.target),
+            ));
+        }
+    };
+    info!(log, "resolved target name {:?} to {:?}", new_job.target, target,);
+
     let tasks = new_job
         .tasks
         .iter()
@@ -419,6 +441,7 @@ pub(crate) async fn job_submit(
             &owner.id,
             &new_job.name,
             &new_job.target,
+            target.id,
             tasks,
             &new_job.output_rules,
             &new_job.inputs,

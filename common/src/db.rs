@@ -169,6 +169,8 @@ macro_rules! ulid_new_type {
             Copy,
             PartialEq,
             Eq,
+            PartialOrd,
+            Ord,
             Hash,
             Debug,
             FromSqlRow,

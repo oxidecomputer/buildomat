@@ -17,6 +17,7 @@ table! {
         failed -> Bool,
         worker -> Nullable<Text>,
         waiting -> Bool,
+        target_id -> Nullable<Text>,
     }
 }
 
@@ -100,12 +101,32 @@ table! {
         id -> Text,
         bootstrap -> Text,
         token -> Nullable<Text>,
-        instance_id -> Nullable<Text>,
+        factory_private -> Nullable<Text>,
         deleted -> Bool,
         recycle -> Bool,
         lastping -> Nullable<Text>,
+        factory -> Nullable<Text>,
+        target -> Nullable<Text>,
     }
 }
 
 joinable!(job -> worker (worker));
 allow_tables_to_appear_in_same_query!(job, worker);
+
+table! {
+    factory (id) {
+        id -> Text,
+        name -> Text,
+        token -> Text,
+        lastping -> Nullable<Text>,
+    }
+}
+
+table! {
+    target (id) {
+        id -> Text,
+        name -> Text,
+        desc -> Text,
+        redirect -> Nullable<Text>,
+    }
+}

@@ -102,6 +102,7 @@ pub(crate) async fn admin_jobs_get(
                     &c.db.job_tasks(&job.id)?,
                     c.db.job_output_rules(&job.id)?,
                     c.db.job_tags(&job.id)?,
+                    &c.db.target_get(job.target())?,
                 ))
             })
             .collect::<Result<Vec<_>>>()
@@ -131,6 +132,7 @@ pub(crate) async fn admin_job_get(
         &c.db.job_tasks(&job.id).or_500()?,
         c.db.job_output_rules(&job.id).or_500()?,
         c.db.job_tags(&job.id).or_500()?,
+        &c.db.target_get(job.target()).or_500()?,
     )))
 }
 #[endpoint {
@@ -183,7 +185,9 @@ struct WorkerJob {
 #[derive(Serialize, JsonSchema)]
 struct Worker {
     pub id: String,
-    pub instance_id: Option<String>,
+    pub factory: String,
+    pub factory_private: Option<String>,
+    pub target: String,
     pub bootstrap: bool,
     pub deleted: bool,
     pub recycle: bool,
@@ -227,7 +231,9 @@ pub(crate) async fn workers_list(
                     .collect::<Vec<_>>();
             Some(Worker {
                 id: w.id.to_string(),
-                instance_id: w.instance_id.clone(),
+                factory: w.factory().to_string(),
+                factory_private: w.factory_private.clone(),
+                target: w.target().to_string(),
                 bootstrap: w.token.is_some(),
                 deleted: w.deleted,
                 recycle: w.recycle,
@@ -256,4 +262,78 @@ pub(crate) async fn workers_recycle(
     c.db.worker_recycle_all().or_500()?;
 
     Ok(HttpResponseOk(()))
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct FactoryCreate {
+    name: String,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct FactoryCreateResult {
+    id: String,
+    name: String,
+    token: String,
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/admin/factory",
+}]
+pub(crate) async fn factory_create(
+    rqctx: Arc<RequestContext<Arc<Central>>>,
+    new_fac: TypedBody<FactoryCreate>,
+) -> SResult<HttpResponseCreated<FactoryCreateResult>, HttpError> {
+    let c = rqctx.context();
+    let req = rqctx.request.lock().await;
+    let log = &rqctx.log;
+
+    c.require_admin(log, &req).await?;
+
+    let new_fac = new_fac.into_inner();
+    let f = c.db.factory_create(&new_fac.name).or_500()?;
+
+    Ok(HttpResponseCreated(FactoryCreateResult {
+        id: f.id.to_string(),
+        name: f.name.to_string(),
+        token: f.token,
+    }))
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct TargetCreate {
+    name: String,
+    desc: String,
+    // redirect: Option<String>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct TargetCreateResult {
+    id: String,
+}
+
+impl TargetCreateResult {
+    fn new(target: db::TargetId) -> TargetCreateResult {
+        TargetCreateResult { id: target.to_string() }
+    }
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/admin/target",
+}]
+pub(crate) async fn target_create(
+    rqctx: Arc<RequestContext<Arc<Central>>>,
+    new_targ: TypedBody<TargetCreate>,
+) -> SResult<HttpResponseCreated<TargetCreateResult>, HttpError> {
+    let c = rqctx.context();
+    let req = rqctx.request.lock().await;
+    let log = &rqctx.log;
+
+    c.require_admin(log, &req).await?;
+
+    let new_targ = new_targ.into_inner();
+    let t = c.db.target_create(&new_targ.name, &new_targ.desc).or_500()?;
+
+    Ok(HttpResponseCreated(TargetCreateResult::new(t.id)))
 }

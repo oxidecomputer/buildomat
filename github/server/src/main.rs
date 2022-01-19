@@ -207,7 +207,9 @@ impl App {
                     .with_context(|| {
                         anyhow!("loading {:?} from repository", &ent.path)
                     })?
-                    .ok_or_else(|| anyhow!("{:?} missing from repository?!"))?;
+                    .ok_or_else(|| {
+                        anyhow!("{:?} missing from repository?!", &ent.path)
+                    })?;
 
                 let mut lines = f.lines();
 

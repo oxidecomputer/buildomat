@@ -3,6 +3,7 @@ members = [
 	"agent",
 	"client",
 	"common",
+	"factory/aws",
 	"github/common",
 	"github/database",
 	"github/dbtool",

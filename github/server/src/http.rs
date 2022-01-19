@@ -284,7 +284,8 @@ pub(crate) async fn server(
     api.register(artefact).unwrap();
 
     let log = app.log.clone();
-    let s = dropshot::HttpServerStarter::new(&cd, api, app, &log)?;
+    let s = dropshot::HttpServerStarter::new(&cd, api, app, &log)
+        .map_err(|e| anyhow!("server starter error: {:?}", e))?;
 
     s.start().await.map_err(|e| anyhow!("HTTP server failure: {}", e))?;
     bail!("HTTP server exited unexpectedly");

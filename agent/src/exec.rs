@@ -78,7 +78,6 @@ pub struct OutputDetails {
     stream: String,
     msg: String,
     time: DateTime<Utc>,
-    instant: Instant,
 }
 
 impl OutputDetails {
@@ -111,7 +110,6 @@ impl Activity {
             stream: stream.to_string(),
             msg: msg.to_string(),
             time: Utc::now(),
-            instant: Instant::now(),
         })
     }
 
@@ -120,7 +118,6 @@ impl Activity {
             stream: "error".to_string(),
             msg: msg.to_string(),
             time: Utc::now(),
-            instant: Instant::now(),
         })
     }
 }

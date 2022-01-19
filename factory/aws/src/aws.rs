@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Result};
+use buildomat_openapi::types::*;
 use rusoto_core::{HttpClient, Region};
 use rusoto_credential::StaticProvider;
 use rusoto_ec2::{
@@ -16,16 +17,18 @@ use rusoto_ec2::{
     RunInstancesRequest, Tag, TagSpecification, TerminateInstancesRequest,
 };
 use rusty_ulid::Ulid;
-use slog::{debug, error, info, warn, Logger};
+use slog::{debug, error, info, o, warn, Logger};
 
-use super::{db, Central, ConfigFile};
+use super::{config::ConfigFileAwsTarget, Central, ConfigFile};
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct Instance {
     id: String,
     state: String,
     ip: Option<String>,
-    worker_id: Option<db::WorkerId>,
+    worker_id: Option<Ulid>,
+    lease_id: Option<Ulid>,
 }
 
 trait TagExtractor {
@@ -67,7 +70,9 @@ async fn create_instance(
     log: &Logger,
     ec2: &Ec2Client,
     config: &ConfigFile,
-    worker: &db::Worker,
+    target: &ConfigFileAwsTarget,
+    worker: &FactoryWorker,
+    lease_id: &str,
 ) -> Result<String> {
     let id = worker.id.to_string();
     let mut script = String::new();
@@ -101,8 +106,8 @@ async fn create_instance(
     info!(log, "creating an instance (worker {})...", id);
     let res = ec2
         .run_instances(RunInstancesRequest {
-            image_id: Some(config.aws.ami.to_string()),
-            instance_type: Some(config.aws.instance_type.to_string()),
+            image_id: Some(target.ami.to_string()),
+            instance_type: Some(target.instance_type.to_string()),
             key_name: Some(config.aws.key.to_string()),
             min_count: 1,
             max_count: 1,
@@ -121,12 +126,16 @@ async fn create_instance(
                         key: Some(format!("{}-worker_id", config.aws.tag)),
                         value: Some(id),
                     },
+                    Tag {
+                        key: Some(format!("{}-lease_id", config.aws.tag)),
+                        value: Some(lease_id.to_string()),
+                    },
                 ]),
             }]),
             block_device_mappings: Some(vec![BlockDeviceMapping {
                 device_name: Some("/dev/sda1".to_string()),
                 ebs: Some(EbsBlockDevice {
-                    volume_size: Some(config.aws.root_size_gb),
+                    volume_size: Some(target.root_size_gb),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -204,14 +213,19 @@ async fn instances(
                         .tags
                         .tag(&format!("{}-worker_id", tag))
                         .map(|s| Ulid::from_str(&s).ok())
-                        .unwrap_or_default()
-                        .map(|id| db::WorkerId(id));
+                        .unwrap_or_default();
+
+                    let lease_id = i
+                        .tags
+                        .tag(&format!("{}-lease_id", tag))
+                        .map(|s| Ulid::from_str(&s).ok())
+                        .unwrap_or_default();
 
                     let ip = i.private_ip_address.clone();
 
                     out.insert(
                         id.to_string(),
-                        Instance { id, state, worker_id, ip },
+                        Instance { id, state, worker_id, lease_id, ip },
                     );
                 }
             }
@@ -242,17 +256,18 @@ async fn aws_worker_one(
     for i in insts.values() {
         let destroy = if let Some(id) = &i.worker_id {
             /*
-             * Load the worker record from the database:
+             * Request information about this worker from the core server.
              */
-            match c.db.worker_get(id) {
-                Ok(w) => {
+            let w = c.client.factory_worker_get(&id.to_string()).await?;
+            match w.worker {
+                Some(w) => {
                     debug!(log, "instance {} is for worker {}", i.id, w.id);
 
-                    if let Some(expected) = w.instance_id.as_deref() {
+                    if let Some(expected) = w.private.as_deref() {
                         if expected != i.id {
                             error!(
                                 log,
-                                "instance {} for job {} does not \
+                                "instance {} for worker {} does not \
                                 match expected instance ID {} from DB",
                                 i.id,
                                 w.id,
@@ -271,7 +286,14 @@ async fn aws_worker_one(
                             i.id,
                             w.id
                         );
-                        c.db.worker_associate(&w.id, &i.id)?;
+                        c.client
+                            .factory_worker_associate(
+                                &w.id,
+                                &FactoryWorkerAssociate {
+                                    private: i.id.to_string(),
+                                },
+                            )
+                            .await?;
                     }
 
                     if w.recycle {
@@ -288,38 +310,51 @@ async fn aws_worker_one(
                          */
                         warn!(log, "instance {} stopped, destroying!", i.id);
                         true
-                    } else if w.token.is_none() && w.age().as_secs() > 1800 {
-                        /*
-                         * This worker has existed for half an hour but has not
-                         * completed bootstrap.  We should recycle it so that we
-                         * can create a new one.
-                         */
-                        warn!(
-                            log,
-                            "instance {} never bootstrapped, destroying!", i.id
-                        );
-                        true
                     } else {
                         /*
                          * Otherwise, this is a regular active worker that does
                          * not need to be destroyed.
                          */
+                        if !w.online {
+                            if let Some(lid) = &i.lease_id {
+                                /*
+                                 * If the worker has not yet bootstrapped, and
+                                 * we have a lease on file for this instance,
+                                 * try to renew it with the core server.  This
+                                 * should prevent duplicate instance creation
+                                 * when creation or bootstrap is taking longer
+                                 * than expected.
+                                 */
+                                info!(
+                                    log,
+                                    "renew lease {} for worker {}", lid, w.id
+                                );
+                                c.client
+                                    .factory_lease_renew(&lid.to_string())
+                                    .await?;
+                            }
+                        }
                         false
                     }
                 }
-                Err(e) => {
+                None => {
                     warn!(
                         log,
                         "instance {} is worker {} which no longer \
-                        exists: {:?}",
+                        exists",
                         i.id,
                         id,
-                        e
                     );
                     true
                 }
             }
         } else {
+            /*
+             * This should not happen, and likely represents a serious problem:
+             * either this software is not correctly tracking instances, or the
+             * operator is creating instances in the AWS account that was set
+             * aside for unprivileged build VMs.
+             */
             warn!(log, "instance {} has no worker id; ignoring...", i.id);
             continue;
         };
@@ -335,29 +370,18 @@ async fn aws_worker_one(
      * instance, they must be scrubbed from the database as detritus from prior
      * failed runs.
      */
-    for w in c.db.workers()?.iter() {
-        if w.deleted {
-            continue;
-        }
-
-        if !w.recycle {
+    for w in c.client.factory_workers().await? {
+        let rm = if let Some(instance_id) = w.private.as_deref() {
             /*
-             * Check to see if this worker has been assigned a job which has
-             * completed.
+             * There is a record of a particular instance ID for this worker.
+             * Check to see if that instance exists.
              */
-            let jobs = c.db.worker_jobs(&w.id)?;
-            if !jobs.is_empty() && jobs.iter().all(|j| j.complete) {
-                info!(
-                    log,
-                    "worker {} assigned jobs are complete, recycle", w.id
-                );
-                c.db.worker_recycle(&w.id)?;
-            }
-        }
-
-        let rm = if let Some(instance_id) = w.instance_id.as_deref() {
             if let Some(i) = insts.get(&instance_id.to_string()) {
                 if i.state == "terminated" {
+                    /*
+                     * The instance exists, but is terminated.  Delete the
+                     * worker.
+                     */
                     info!(
                         log,
                         "deleting worker {} for terminated instance {}",
@@ -366,9 +390,17 @@ async fn aws_worker_one(
                     );
                     true
                 } else {
+                    /*
+                     * The instance exists but is not yet terminated.
+                     */
                     false
                 }
             } else {
+                /*
+                 * The instance does not exist.  Make this a warning unless we
+                 * were already instructed by the core server to recycle the
+                 * worker.
+                 */
                 if w.recycle {
                     info!(
                         log,
@@ -388,73 +420,19 @@ async fn aws_worker_one(
                 true
             }
         } else {
+            /*
+             * The worker record was never associated with an instance.  This
+             * generally should not happen -- we would have associated the
+             * worker with an instance that was created for it if we found one
+             * earlier.
+             */
             warn!(log, "clearing old worker {} with no instance", w.id);
             true
         };
 
         if rm {
-            c.db.worker_destroy(&w.id)?;
+            c.client.factory_worker_destroy(&w.id).await?;
         }
-    }
-
-    /*
-     * Workers move through several relevant states in their life cycle.  First,
-     * a worker database entry is created.  This records the intent to create a
-     * particular virtual machine.  Once created, the instance ID is recorded
-     * against that worker.  Once booted, the agent in that instance bootstraps
-     * itself and we have bidirectional communication.
-     *
-     * Only once bootstrapped is the worker prepared to receive a job, but
-     * billing begins as soon as we provision.  An idle bootstrapped agent that
-     * sits for 12 hours doing nothing is not a great use of money -- unless low
-     * latency from job scheduling to execution starting is more important than
-     * cost.
-     *
-     * We track the notion of "pending" workers: those that have not yet been
-     * assigned to a job, regardless of where they are in the provisioning life
-     * cycle.
-     *
-     * Once assigned a job, the worker is "active".  The worker will execute
-     * the job script and post results.  Eventually the job will complete or
-     * time out and the instance will be shut down and destroyed.  A request to
-     * destroy the worker may have been made (recycle is set), but the worker
-     * still costs money until it is fully destroyed so we consider
-     * pre-destruction recycled workers active for capping purposes.
-     *
-     * Once destroyed, a worker no longer costs money and it is "complete".
-     * Eventually we will archive all records relating to a worker so that they
-     * are no longer in the database. (XXX)
-     */
-    let mut c_pending = 0usize;
-    let mut c_active = 0usize;
-    let mut c_complete = 0usize;
-    for w in c.db.workers()?.iter() {
-        if w.deleted {
-            c_complete += 1;
-            continue;
-        }
-
-        if w.recycle {
-            /*
-             * Any worker that is marked to be recycled but not yet destroyed is
-             * considered "active", whether it has had a job assigned or not.
-             * This frees up a slot in the spare pool if we recycle a spare
-             * worker, without impacting our total cap accounting.
-             */
-            c_active += 1;
-            continue;
-        }
-
-        let jobs = c.db.worker_jobs(&w.id)?;
-        if jobs.is_empty() {
-            /*
-             * This worker has not yet been assigned a job.
-             */
-            c_pending += 1;
-            continue;
-        }
-
-        c_active += 1;
     }
 
     /*
@@ -464,90 +442,76 @@ async fn aws_worker_one(
     let c_insts = insts.values().filter(|i| &i.state != "terminated").count();
 
     /*
-     * Get an estimate of the number of jobs that have been created but not yet
-     * assigned to a worker.
-     */
-    let needfree = c.inner.lock().unwrap().needfree;
-
-    /*
      * Calculate the total number of workers we are willing to create if
-     * required.  The hard limit on total instances includes both pending
-     * and active workers.
+     * required.  The hard limit on total instances includes all instances
+     * regardless of where they are in the worker lifecycle.
      */
-    let freeslots = config
-        .aws
-        .limit_total
-        .saturating_sub(c_active)
-        .saturating_sub(c_pending);
-
-    /*
-     * Determine how many pending workers we require based on pressure
-     * from two sources:
-     *  - the number of outstanding jobs not yet assigned to a worker
-     *  - the configured size of the pool of spare workers
-     */
-    let needpending = needfree.saturating_add(config.aws.limit_spares);
-
-    /*
-     * Determine how many workers to create to bring the pending pool size
-     * up to the desired size, without exceeding the absolute limit on
-     * instances:
-     */
-    let ncreate = freeslots.min(needpending.saturating_sub(c_pending));
+    let freeslots = config.aws.limit_total.saturating_sub(c_insts);
 
     info!(log, "worker stats";
-        "pending" => c_pending,
-        "active" => c_active,
-        "complete" => c_complete,
         "instances" => c_insts,
-        "needfree" => needfree,
-        "needpending" => needpending,
         "freeslots" => freeslots,
-        "ncreate" => ncreate,
     );
 
-    if c_insts > c_pending + c_active {
-        /*
-         * There should never be more instances than workers.  If there are, we
-         * are not correctly tracking things and should create no new instances.
-         */
-        bail!(
-            "only {} active/pending workers, but {} active instances",
-            c_pending + c_active,
-            c_insts
-        );
-    }
-
     let mut created = 0;
-    while created < ncreate {
-        if c.inner.lock().unwrap().hold {
-            /*
-             * The operator has requested that we not create any new workers.
-             */
+    while created < freeslots {
+        /*
+         * Check to see if the server requires any new workers.
+         */
+        let res = c
+            .client
+            .factory_lease(&FactoryWhatsNext {
+                supported_targets: c.targets.clone(),
+            })
+            .await?;
+
+        let lease = if let Some(lease) = res.lease {
+            lease
+        } else {
             break;
-        }
+        };
 
         /*
-         * Create workers to fill the standby battery.  Start by assigning a
-         * worker ID and bootstrap token:
+         * Locate target-specific configuration.
          */
-        let w = c.db.worker_create()?;
+        let t = if let Some(t) = c.config.target.get(&lease.target) {
+            t
+        } else {
+            error!(log, "server wants target we do not support: {:?}", lease);
+            break;
+        };
 
-        let instance_id = create_instance(log, ec2, config, &w).await?;
+        let w = c
+            .client
+            .factory_worker_create(&FactoryWorkerCreate {
+                target: lease.target.to_string(),
+                job: None,
+            })
+            .await?;
+
+        let instance_id =
+            create_instance(log, ec2, config, t, &w, &lease.job).await?;
         created += 1;
         info!(log, "created instance: {}", instance_id);
 
         /*
          * Record the instance ID against the worker for which it was created:
          */
-        c.db.worker_associate(&w.id, &instance_id)?;
+        c.client
+            .factory_worker_associate(
+                &w.id,
+                &FactoryWorkerAssociate { private: instance_id.to_string() },
+            )
+            .await?;
     }
 
     info!(log, "worker pass complete");
     Ok(())
 }
 
-pub(crate) async fn aws_worker(log: Logger, c: Arc<Central>) -> Result<()> {
+pub(crate) async fn aws_worker(c: Arc<Central>) -> Result<()> {
+    let log = c.log.new(o!("component" => "worker"));
+
     let credprov = StaticProvider::new_minimal(
         c.config.aws.access_key_id.clone(),
         c.config.aws.secret_access_key.clone(),
@@ -561,10 +525,6 @@ pub(crate) async fn aws_worker(log: Logger, c: Arc<Central>) -> Result<()> {
     let delay = Duration::from_secs(7);
 
     info!(log, "start AWS worker task");
-
-    /*
-     * First, look for any instances with the specified tag.
-     */
 
     loop {
         if let Err(e) = aws_worker_one(&log, &c, &ec2, &c.config).await {
