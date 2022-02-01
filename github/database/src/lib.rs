@@ -224,6 +224,20 @@ impl Database {
         })
     }
 
+    pub fn list_deliveries_recent(&self, n: usize) -> Result<Vec<DeliverySeq>> {
+        use schema::delivery;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let res: Vec<(DeliverySeq,)> = delivery::dsl::delivery
+            .select((delivery::dsl::seq,))
+            .order_by(delivery::dsl::seq.desc())
+            .limit(n.try_into().unwrap())
+            .get_results(c)?;
+
+        Ok(res.iter().map(|r| r.0).rev().collect())
+    }
+
     pub fn list_deliveries(&self) -> Result<Vec<DeliverySeq>> {
         use schema::delivery;
 

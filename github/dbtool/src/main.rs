@@ -208,10 +208,19 @@ async fn do_delivery_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("uuid", 36, false);
     l.add_column("sender", 36, false);
 
-    let a = no_args!(l);
+    l.optopt("n", "", "limit to this many of the most recent entries", "N");
+
+    let a = args!(l);
+
     let mut t = a.table();
 
-    for seq in l.context().db().list_deliveries()? {
+    let seqs = if let Some(n) = a.opts().opt_str("n") {
+        l.context().db().list_deliveries_recent(n.parse()?)?
+    } else {
+        l.context().db().list_deliveries()?
+    };
+
+    for &seq in seqs.iter() {
         let del = l.context().db().delivery_load(seq)?;
 
         let mut r = Row::default();
