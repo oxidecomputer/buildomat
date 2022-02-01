@@ -113,6 +113,14 @@ impl Database {
         })
     }
 
+    pub fn delivery_load(&self, seq: DeliverySeq) -> Result<Delivery> {
+        use schema::delivery;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        Ok(delivery::dsl::delivery.find(seq).get_result(c)?)
+    }
+
     pub fn delivery_ack(&self, seq: DeliverySeq, ack: u64) -> Result<()> {
         use schema::delivery;
 
@@ -216,14 +224,17 @@ impl Database {
         })
     }
 
-    pub fn list_deliveries(&self) -> Result<Vec<Delivery>> {
+    pub fn list_deliveries(&self) -> Result<Vec<DeliverySeq>> {
         use schema::delivery;
 
         let c = &mut self.1.lock().unwrap().conn;
 
-        Ok(delivery::dsl::delivery
+        let res: Vec<(DeliverySeq,)> = delivery::dsl::delivery
+            .select((delivery::dsl::seq,))
             .order_by(delivery::dsl::seq.asc())
-            .get_results(c)?)
+            .get_results(c)?;
+
+        Ok(res.iter().map(|r| r.0).collect())
     }
 
     pub fn load_check_run(&self, id: &CheckRunId) -> Result<CheckRun> {

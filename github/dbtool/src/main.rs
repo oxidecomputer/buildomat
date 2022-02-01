@@ -211,7 +211,9 @@ async fn do_delivery_list(mut l: Level<Stuff>) -> Result<()> {
     let a = no_args!(l);
     let mut t = a.table();
 
-    for del in l.context().db().list_deliveries()? {
+    for seq in l.context().db().list_deliveries()? {
+        let del = l.context().db().delivery_load(seq)?;
+
         let mut r = Row::default();
         r.add_u64("seq", del.seq.0 as u64);
         r.add_str("uuid", &del.uuid);
