@@ -180,3 +180,15 @@ ALTER TABLE worker ADD COLUMN
 -- v 26
 ALTER TABLE worker ADD COLUMN
     target          TEXT;
+
+-- v 27
+CREATE TABLE user_privilege (
+    user            TEXT    NOT NULL,
+    privilege       TEXT    NOT NULL,
+
+    PRIMARY KEY (user, privilege)
+);
+
+-- v 28
+ALTER TABLE target ADD COLUMN
+    privilege       TEXT;

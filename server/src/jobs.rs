@@ -87,7 +87,7 @@ async fn job_assignment_one(log: &Logger, c: &Central) -> Result<()> {
                 );
 
                 c.db.job_append_event(
-                    &j.id,
+                    j.id,
                     None,
                     "control",
                     Utc::now(),
@@ -116,7 +116,7 @@ async fn job_waiters_one(log: &Logger, c: &Central) -> Result<()> {
     for j in c.db.jobs_waiting()?.iter() {
         assert!(j.waiting);
 
-        let inputs = c.db.job_inputs(&j.id)?;
+        let inputs = c.db.job_inputs(j.id)?;
         if inputs.iter().any(|(_, f)| f.is_none()) {
             /*
              * At least one input file is not yet uploaded.
@@ -125,7 +125,7 @@ async fn job_waiters_one(log: &Logger, c: &Central) -> Result<()> {
         }
 
         info!(log, "waking up job {}", j.id);
-        c.db.job_wakeup(&j.id)?;
+        c.db.job_wakeup(j.id)?;
     }
 
     Ok(())
@@ -154,14 +154,14 @@ async fn recycle_on_complete_one(log: &Logger, c: &Central) -> Result<()> {
                 w.factory(),
                 w.factory_private,
             );
-            c.db.worker_recycle(&w.id)?;
+            c.db.worker_recycle(w.id)?;
             continue;
         }
 
-        let jobs = c.db.worker_jobs(&w.id)?;
+        let jobs = c.db.worker_jobs(w.id)?;
         if !jobs.is_empty() && jobs.iter().all(|j| j.complete) {
             info!(log, "worker {} assigned jobs are complete, recycle", w.id,);
-            c.db.worker_recycle(&w.id)?;
+            c.db.worker_recycle(w.id)?;
         }
     }
 
@@ -172,7 +172,7 @@ async fn lease_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
     /*
      * Clean up the lease table.
      */
-    let leases = c
+    let mut leases = c
         .inner
         .lock()
         .unwrap()
@@ -182,10 +182,10 @@ async fn lease_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
         .copied()
         .collect::<Vec<_>>();
     let remove = leases
-        .iter()
+        .drain(..)
         .map(|id| Ok((id, c.db.job_by_id_opt(id)?)))
         .collect::<Result<Vec<_>>>()?
-        .iter()
+        .drain(..)
         .filter(|(_, job)| {
             if let Some(job) = job {
                 /*
@@ -200,7 +200,7 @@ async fn lease_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
                 true
             }
         })
-        .map(|(id, _)| **id)
+        .map(|(id, _)| id)
         .collect::<Vec<_>>();
     let now = Instant::now();
     c.inner.lock().unwrap().leases.leases.retain(|id, lease| {

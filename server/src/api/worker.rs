@@ -91,13 +91,13 @@ pub(crate) async fn worker_ping(
 
     info!(log, "worker ping!"; "id" => w.id.to_string());
 
-    c.db.worker_ping(&w.id).or_500()?;
+    c.db.worker_ping(w.id).or_500()?;
 
-    let job = c.db.worker_job(&w.id).or_500()?;
+    let job = c.db.worker_job(w.id).or_500()?;
     let job = if let Some(job) = job {
-        let output_rules = c.db.job_output_rules(&job.id).or_500()?;
+        let output_rules = c.db.job_output_rules(job.id).or_500()?;
         let tasks =
-            c.db.job_tasks(&job.id)
+            c.db.job_tasks(job.id)
                 .or_500()?
                 .iter()
                 .enumerate()
@@ -113,7 +113,7 @@ pub(crate) async fn worker_ping(
                 })
                 .collect::<Vec<_>>();
         let inputs =
-            c.db.job_inputs(&job.id)
+            c.db.job_inputs(job.id)
                 .or_500()?
                 .iter()
                 .map(|(ji, _)| WorkerPingInput {
@@ -160,7 +160,7 @@ pub(crate) async fn worker_job_input_download(
     let mut res = Response::builder();
     res = res.header(CONTENT_TYPE, "application/octet-stream");
 
-    let fr = c.file_response(&j.id, i.id.as_ref().unwrap()).await.or_500()?;
+    let fr = c.file_response(j.id, i.id.unwrap()).await.or_500()?;
     info!(
         log,
         "worker {} job {} input {} name {:?} is in the {}",
@@ -190,7 +190,7 @@ pub(crate) async fn worker_job_append(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<JobPath>,
     append: TypedBody<WorkerAppendJob>,
-) -> SResult<HttpResponseCreated<()>, HttpError> {
+) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -204,7 +204,7 @@ pub(crate) async fn worker_job_append(
     info!(log, "worker {} append to job {} stream {}", w.id, j.id, a.stream);
 
     c.db.job_append_event(
-        &j.id,
+        j.id,
         None,
         &a.stream,
         Utc::now(),
@@ -213,7 +213,7 @@ pub(crate) async fn worker_job_append(
     )
     .or_500()?;
 
-    Ok(HttpResponseCreated(()))
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 #[endpoint {
@@ -224,7 +224,7 @@ pub(crate) async fn worker_task_append(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<JobTaskPath>,
     append: TypedBody<WorkerAppendJob>,
-) -> SResult<HttpResponseCreated<()>, HttpError> {
+) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -246,7 +246,7 @@ pub(crate) async fn worker_task_append(
     );
 
     c.db.job_append_event(
-        &j.id,
+        j.id,
         Some(p.task),
         &a.stream,
         Utc::now(),
@@ -255,7 +255,7 @@ pub(crate) async fn worker_task_append(
     )
     .or_500()?;
 
-    Ok(HttpResponseCreated(()))
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -271,7 +271,7 @@ pub(crate) async fn worker_task_complete(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<JobTaskPath>,
     body: TypedBody<WorkerCompleteTask>,
-) -> SResult<HttpResponseOk<()>, HttpError> {
+) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -284,9 +284,9 @@ pub(crate) async fn worker_task_complete(
     w.owns(log, &j)?;
 
     info!(log, "worker {} complete job {} task {}", w.id, j.id, p.task);
-    c.db.task_complete(&j.id, p.task, b.failed).or_500()?;
+    c.db.task_complete(j.id, p.task, b.failed).or_500()?;
 
-    Ok(HttpResponseOk(()))
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -302,7 +302,7 @@ pub(crate) async fn worker_job_complete(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<JobPath>,
     body: TypedBody<WorkerCompleteJob>,
-) -> SResult<HttpResponseOk<()>, HttpError> {
+) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -317,7 +317,7 @@ pub(crate) async fn worker_job_complete(
     info!(log, "worker {} complete job {}", w.id, j.id);
     c.db.job_complete(j.id, b.failed).or_500()?;
 
-    Ok(HttpResponseOk(()))
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -342,7 +342,7 @@ pub(crate) async fn worker_job_upload_chunk(
     let j = c.db.job_by_str(&path.into_inner().job).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
-    let cid = c.write_chunk(&j.id, chunk.as_bytes()).or_500()?;
+    let cid = c.write_chunk(j.id, chunk.as_bytes()).or_500()?;
     info!(
         log,
         "worker {} wrote chunk {} for job {}, size {}",
@@ -370,7 +370,7 @@ pub(crate) async fn worker_job_add_output(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<JobPath>,
     add: TypedBody<WorkerAddOutput>,
-) -> SResult<HttpResponseCreated<()>, HttpError> {
+) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -396,7 +396,7 @@ pub(crate) async fn worker_job_add_output(
         .collect::<Result<Vec<_>>>()
         .or_500()?;
 
-    let fid = match c.commit_file(&j.id, &chunks, addsize) {
+    let fid = match c.commit_file(j.id, &chunks, addsize) {
         Ok(fid) => fid,
         Err(e) => {
             warn!(
@@ -420,9 +420,9 @@ pub(crate) async fn worker_job_add_output(
      * Insert a record in the database for this output object and report
      * success.
      */
-    c.db.job_add_output(&j.id, &add.path, &fid, addsize).or_500()?;
+    c.db.job_add_output(j.id, &add.path, fid, addsize).or_500()?;
 
-    Ok(HttpResponseCreated(()))
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

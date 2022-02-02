@@ -2,7 +2,7 @@
  * Copyright 2021 Oxide Computer Company
  */
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use buildomat_common::db::*;
 use buildomat_common::*;
 use chrono::prelude::*;
@@ -98,7 +98,7 @@ impl Database {
 
             let ic = diesel::insert_into(delivery::dsl::delivery)
                 .values(Delivery {
-                    seq: seq.clone(),
+                    seq,
                     uuid: uuid.to_string(),
                     event: event.to_string(),
                     headers: Dictionary(headers.clone()),
@@ -327,27 +327,18 @@ impl Database {
         Ok(install::dsl::install.find(id).get_result(c)?)
     }
 
-    pub fn store_install(
-        &self,
-        id: i64,
-        owner: i64,
-    ) -> DBResult<()> {
+    pub fn store_install(&self, id: i64, owner: i64) -> DBResult<()> {
         use schema::install;
 
         let c = &mut self.1.lock().unwrap().conn;
 
-        let i = Install {
-            id,
-            owner,
-        };
+        let i = Install { id, owner };
 
         diesel::insert_into(install::dsl::install)
             .values(&i)
             .on_conflict(install::dsl::id)
             .do_update()
-            .set((
-                install::dsl::owner.eq(i.owner),
-            ))
+            .set((install::dsl::owner.eq(i.owner),))
             .execute(c)?;
 
         Ok(())

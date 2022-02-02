@@ -72,9 +72,9 @@ macro_rules! json_new_type {
             }
         }
 
-        impl Into<$mytype> for $name {
-            fn into(self) -> $mytype {
-                self.0
+        impl From<$name> for $mytype {
+            fn from(t: $name) -> Self {
+                t.0
             }
         }
 
@@ -152,9 +152,9 @@ macro_rules! integer_new_type {
             }
         }
 
-        impl Into<$mytype> for $name {
-            fn into(self) -> $mytype {
-                self.0
+        impl From<$name> for $mytype {
+            fn from(val: $name) -> Self {
+                val.0
             }
         }
     };
@@ -286,9 +286,9 @@ where
     }
 }
 
-impl Into<DateTime<Utc>> for IsoDate {
-    fn into(self) -> DateTime<Utc> {
-        self.0.clone()
+impl From<IsoDate> for DateTime<Utc> {
+    fn from(val: IsoDate) -> Self {
+        val.0
     }
 }
 

@@ -43,6 +43,14 @@ pub async fn sleep_ms(ms: u64) {
     tokio::time::sleep(Duration::from_millis(ms)).await;
 }
 
+fn headers_client(dh: HeaderMap) -> Result<reqwest::Client> {
+    Ok(ClientBuilder::new()
+        .timeout(Duration::from_secs(15))
+        .connect_timeout(Duration::from_secs(15))
+        .default_headers(dh)
+        .build()?)
+}
+
 pub fn bearer_client(token: &str) -> Result<reqwest::Client> {
     let mut dh = HeaderMap::new();
     dh.insert(
@@ -50,11 +58,18 @@ pub fn bearer_client(token: &str) -> Result<reqwest::Client> {
         HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
     );
 
-    Ok(ClientBuilder::new()
-        .timeout(Duration::from_secs(15))
-        .connect_timeout(Duration::from_secs(15))
-        .default_headers(dh)
-        .build()?)
+    headers_client(dh)
+}
+
+pub fn delegated_client(token: &str, user: &str) -> Result<reqwest::Client> {
+    let mut dh = HeaderMap::new();
+    dh.insert(
+        AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+    );
+    dh.insert("X-Buildomat-Delegate", HeaderValue::from_str(user).unwrap());
+
+    headers_client(dh)
 }
 
 pub fn genkey(len: usize) -> String {

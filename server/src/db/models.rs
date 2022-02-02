@@ -31,6 +31,34 @@ pub struct User {
 }
 
 #[derive(Debug, Queryable, Insertable, Identifiable)]
+#[table_name = "user_privilege"]
+#[primary_key(user, privilege)]
+pub struct Privilege {
+    pub user: UserId,
+    pub privilege: String,
+}
+
+#[derive(Debug)]
+pub struct AuthUser {
+    pub user: User,
+    pub privileges: Vec<String>,
+}
+
+impl AuthUser {
+    pub fn has_privilege(&self, privilege: &str) -> bool {
+        self.privileges.iter().any(|s| privilege == s)
+    }
+}
+
+impl std::ops::Deref for AuthUser {
+    type Target = User;
+
+    fn deref(&self) -> &Self::Target {
+        &self.user
+    }
+}
+
+#[derive(Debug, Queryable, Insertable, Identifiable)]
 #[table_name = "task"]
 #[primary_key(job, seq)]
 pub struct Task {
@@ -56,8 +84,8 @@ impl Task {
             script: ct.script.to_string(),
             env_clear: ct.env_clear,
             env: Dictionary(ct.env.clone()),
-            user_id: ct.user_id.map(|uid| UnixUid(uid)),
-            group_id: ct.group_id.map(|gid| UnixGid(gid)),
+            user_id: ct.user_id.map(UnixUid),
+            group_id: ct.group_id.map(UnixGid),
             workdir: ct.workdir.clone(),
             complete: false,
             failed: false,
@@ -239,4 +267,5 @@ pub struct Target {
     pub name: String,
     pub desc: String,
     pub redirect: Option<TargetId>,
+    pub privilege: Option<String>,
 }

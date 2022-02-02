@@ -233,6 +233,7 @@ pub(crate) async fn run(
     cr: &mut CheckRun,
 ) -> Result<bool> {
     let db = &app.db;
+    let repo = db.load_repository(cs.repo)?;
 
     let c: BasicConfig = cr.get_config()?;
 
@@ -252,7 +253,7 @@ pub(crate) async fn run(
         return Ok(false);
     };
 
-    let b = app.buildomat();
+    let b = app.buildomat(&repo);
     if let Some(jid) = &p.buildomat_id {
         /*
          * We have submitted the task to buildomat already, so just try
@@ -362,8 +363,6 @@ pub(crate) async fn run(
             }
         }
     } else {
-        let repo = db.load_repository(cs.repo)?;
-
         /*
          * We will need to provide the user program with an access token
          * that allows them to check out what may well be a private
@@ -376,6 +375,12 @@ pub(crate) async fn run(
          * before handing control to the user program.
          */
         let mut tasks = Vec::new();
+
+        /*
+         * Set up a non-root user with which to run the build job, with a work
+         * area at "/work".  The user will have the right to escalate to root
+         * privileges via pfexec(1).
+         */
         tasks.push(buildomat_openapi::types::TaskSubmit {
             name: "setup".into(),
             env: Default::default(),
@@ -588,7 +593,7 @@ pub(crate) async fn run(
 
 pub(crate) async fn artefact(
     app: &Arc<App>,
-    _cs: &CheckSuite,
+    cs: &CheckSuite,
     cr: &CheckRun,
     output: &str,
     name: &str,
@@ -596,7 +601,7 @@ pub(crate) async fn artefact(
     let p: BasicPrivate = cr.get_private()?;
 
     if let Some(id) = &p.buildomat_id {
-        let bm = app.buildomat();
+        let bm = app.buildomat(&app.db.load_repository(cs.repo)?);
 
         let backend = bm.job_output_download(id, output).await?;
 
@@ -658,7 +663,7 @@ pub(crate) async fn details(
         /*
          * Try to fetch the log output of the job itself.
          */
-        let bm = app.buildomat();
+        let bm = app.buildomat(&app.db.load_repository(cs.repo)?);
         let job = bm.job_get(jid).await?;
         let outputs = bm.job_outputs_get(jid).await?;
 

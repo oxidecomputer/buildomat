@@ -3,6 +3,7 @@
  */
 
 #![allow(clippy::many_single_char_names)]
+#![allow(clippy::too_many_arguments)]
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -197,7 +198,23 @@ pub(crate) fn unauth_response<T>() -> SResult<T, HttpError> {
 }
 
 impl Central {
-    async fn _int_auth_token(
+    fn _int_delegate_username(
+        &self,
+        _log: &Logger,
+        req: &Request<Body>,
+    ) -> SResult<Option<String>, HttpError> {
+        Ok(if let Some(h) = req.headers().get("x-buildomat-delegate") {
+            if let Ok(v) = h.to_str() {
+                Some(v.trim().to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        })
+    }
+
+    fn _int_auth_token(
         &self,
         log: &Logger,
         req: &Request<Body>,
@@ -238,7 +255,7 @@ impl Central {
         log: &Logger,
         req: &Request<Body>,
     ) -> SResult<(), HttpError> {
-        let t = self._int_auth_token(log, req).await?;
+        let t = self._int_auth_token(log, req)?;
         if t == self.config.admin.token {
             Ok(())
         } else {
@@ -251,14 +268,49 @@ impl Central {
         &self,
         log: &Logger,
         req: &Request<Body>,
-    ) -> SResult<db::User, HttpError> {
-        let t = self._int_auth_token(log, req).await?;
-        match self.db.user_auth(&t) {
-            Ok(u) => Ok(u),
+    ) -> SResult<db::AuthUser, HttpError> {
+        /*
+         * First, use the bearer token to authenticate the user making the
+         * request:
+         */
+        let t = self._int_auth_token(log, req)?;
+        let u = match self.db.user_auth(&t) {
+            Ok(u) => u,
             Err(e) => {
                 warn!(log, "user auth failure: {:?}", e);
+                return unauth_response();
+            }
+        };
+
+        /*
+         * Now check to see if the authenticated user is requesting delegated
+         * authentication to act as another user:
+         */
+        if let Some(delegate) = self._int_delegate_username(log, req)? {
+            if u.has_privilege("delegate") {
+                /*
+                 * The authenticated user is allowed to impersonate other users
+                 * in the system, and if the requested user does not exist we
+                 * will create it for them.  This is used by Wollongong to
+                 * create a user per GitHub repository to house the jobs for
+                 * that repository.
+                 */
+                info!(log, "user {} delegated auth as {:?}", u.name, delegate);
+                Ok(self.db.user_ensure(&delegate).or_500()?)
+            } else {
+                /*
+                 * This user is not allowed to act as another user.
+                 */
+                warn!(
+                    log,
+                    "user {} tried to use delegated auth as {:?}",
+                    u.name,
+                    delegate
+                );
                 unauth_response()
             }
+        } else {
+            Ok(u)
         }
     }
 
@@ -267,7 +319,7 @@ impl Central {
         log: &Logger,
         req: &Request<Body>,
     ) -> SResult<db::Worker, HttpError> {
-        let t = self._int_auth_token(log, req).await?;
+        let t = self._int_auth_token(log, req)?;
         match self.db.worker_auth(&t) {
             Ok(u) => Ok(u),
             Err(e) => {
@@ -282,7 +334,7 @@ impl Central {
         log: &Logger,
         req: &Request<Body>,
     ) -> SResult<db::Factory, HttpError> {
-        let t = self._int_auth_token(log, req).await?;
+        let t = self._int_auth_token(log, req)?;
         match self.db.factory_auth(&t) {
             Ok(u) => Ok(u),
             Err(e) => {
@@ -299,7 +351,7 @@ impl Central {
         Ok(p)
     }
 
-    fn chunk_path(&self, job: &JobId, chunk: &Ulid) -> Result<PathBuf> {
+    fn chunk_path(&self, job: JobId, chunk: Ulid) -> Result<PathBuf> {
         let mut p = self.chunk_dir()?;
         p.push(job.to_string());
         std::fs::create_dir_all(&p)?;
@@ -314,7 +366,7 @@ impl Central {
         Ok(p)
     }
 
-    fn file_path(&self, job: &JobId, file: &JobFileId) -> Result<PathBuf> {
+    fn file_path(&self, job: JobId, file: JobFileId) -> Result<PathBuf> {
         let mut p = self.file_dir()?;
         p.push(job.to_string());
         std::fs::create_dir_all(&p)?;
@@ -322,7 +374,7 @@ impl Central {
         Ok(p)
     }
 
-    fn file_object_key(&self, job: &JobId, file: &JobFileId) -> String {
+    fn file_object_key(&self, job: JobId, file: JobFileId) -> String {
         /*
          * Object keys begin with a prefix string so that we can have more than
          * one scheme, or more than one buildomat, using the same bucket without
@@ -331,13 +383,13 @@ impl Central {
         format!("{}/output/{}/{}", self.config.storage.prefix, job, file)
     }
 
-    fn write_chunk(&self, job: &JobId, chunk: &[u8]) -> Result<Ulid> {
+    fn write_chunk(&self, job: JobId, chunk: &[u8]) -> Result<Ulid> {
         /*
          * Assign an ID for this chunk and determine where will store it in the
          * file system.
          */
         let cid = Ulid::generate();
-        let p = self.chunk_path(job, &cid)?;
+        let p = self.chunk_path(job, cid)?;
         let f = std::fs::OpenOptions::new()
             .create_new(true)
             .write(true)
@@ -351,7 +403,7 @@ impl Central {
 
     fn commit_file(
         &self,
-        job: &JobId,
+        job: JobId,
         chunks: &[Ulid],
         expected_size: u64,
     ) -> Result<JobFileId> {
@@ -362,7 +414,7 @@ impl Central {
         let files = chunks
             .iter()
             .map(|cid| {
-                let f = self.chunk_path(job, cid)?;
+                let f = self.chunk_path(job, *cid)?;
                 let md = f.metadata()?;
                 Ok((f, md.len()))
             })
@@ -383,7 +435,7 @@ impl Central {
          * the file system.
          */
         let fid = db::JobFileId::generate();
-        let fp = self.file_path(job, &fid)?;
+        let fp = self.file_path(job, fid)?;
         let mut fout = std::fs::OpenOptions::new()
             .create_new(true)
             .write(true)
@@ -420,8 +472,8 @@ impl Central {
 
     async fn file_response(
         &self,
-        job: &JobId,
-        file: &JobFileId,
+        job: JobId,
+        file: JobFileId,
     ) -> Result<FileResponse> {
         let op = self.file_path(job, file)?;
 
@@ -501,13 +553,19 @@ async fn main() -> Result<()> {
     ad.register(api::admin::control_hold).api_check()?;
     ad.register(api::admin::control_resume).api_check()?;
     ad.register(api::admin::users_list).api_check()?;
+    ad.register(api::admin::user_get).api_check()?;
     ad.register(api::admin::user_create).api_check()?;
+    ad.register(api::admin::user_privilege_grant).api_check()?;
+    ad.register(api::admin::user_privilege_revoke).api_check()?;
     ad.register(api::admin::workers_list).api_check()?;
     ad.register(api::admin::workers_recycle).api_check()?;
     ad.register(api::admin::admin_job_get).api_check()?;
     ad.register(api::admin::admin_jobs_get).api_check()?;
     ad.register(api::admin::factory_create).api_check()?;
     ad.register(api::admin::target_create).api_check()?;
+    ad.register(api::admin::targets_list).api_check()?;
+    ad.register(api::admin::target_require_privilege).api_check()?;
+    ad.register(api::admin::target_require_no_privilege).api_check()?;
     ad.register(api::user::job_events_get).api_check()?;
     ad.register(api::user::job_outputs_get).api_check()?;
     ad.register(api::user::job_output_download).api_check()?;
@@ -570,7 +628,7 @@ async fn main() -> Result<()> {
     let mut dbfile = datadir.clone();
     dbfile.push("data.sqlite3");
     let db =
-        db::Database::new(log.clone(), dbfile, config.sqlite.cache_kb.clone())?;
+        db::Database::new(log.clone(), dbfile, config.sqlite.cache_kb)?;
 
     let credprov = rusoto_credential::StaticProvider::new_minimal(
         config.storage.access_key_id.clone(),

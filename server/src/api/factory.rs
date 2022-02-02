@@ -169,7 +169,7 @@ pub(crate) async fn factory_worker_associate(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<WorkerPath>,
     body: TypedBody<FactoryWorkerAssociate>,
-) -> SResult<HttpResponseOk<()>, HttpError> {
+) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let log = &rqctx.log;
     let req = rqctx.request.lock().await;
@@ -182,7 +182,7 @@ pub(crate) async fn factory_worker_associate(
     let w = c.db.worker_get(p.worker()?).or_500()?;
     f.owns(log, &w)?;
 
-    if let Err(e) = c.db.worker_associate(&w.id, &b.private) {
+    if let Err(e) = c.db.worker_associate(w.id, &b.private) {
         error!(
             log,
             "factory {} worker {} associate failure: {:?}: {:?}",
@@ -194,7 +194,7 @@ pub(crate) async fn factory_worker_associate(
         unauth_response()
     } else {
         info!(log, "factory {} worker {} associate: {:?}", f.id, w.id, b);
-        Ok(HttpResponseOk(()))
+        Ok(HttpResponseUpdatedNoContent())
     }
 }
 
@@ -217,7 +217,7 @@ pub(crate) async fn factory_worker_destroy(
     let w = c.db.worker_get(p.worker()?).or_500()?;
     f.owns(log, &w)?;
 
-    if let Err(e) = c.db.worker_destroy(&w.id) {
+    if let Err(e) = c.db.worker_destroy(w.id) {
         error!(
             log,
             "factory {} worker {} destroy failure: {:?}", f.id, w.id, e

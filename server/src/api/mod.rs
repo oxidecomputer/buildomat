@@ -7,9 +7,9 @@ mod prelude {
     pub use anyhow::{anyhow, Result};
     pub use chrono::prelude::*;
     pub use dropshot::{
-        endpoint, HttpError, HttpResponseCreated, HttpResponseOk,
-        Path as TypedPath, Query as TypedQuery, RequestContext, TypedBody,
-        UntypedBody,
+        endpoint, HttpError, HttpResponseCreated, HttpResponseDeleted,
+        HttpResponseOk, HttpResponseUpdatedNoContent, Path as TypedPath,
+        Query as TypedQuery, RequestContext, TypedBody, UntypedBody,
     };
     pub use hyper::header::{CONTENT_LENGTH, CONTENT_TYPE};
     pub use hyper::StatusCode;
@@ -26,6 +26,8 @@ mod prelude {
     pub use std::result::Result as SResult;
     pub use std::str::FromStr;
     pub use std::sync::Arc;
+
+    pub type DSResult<T> = std::result::Result<T, HttpError>;
 }
 
 pub mod admin;

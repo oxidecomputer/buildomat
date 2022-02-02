@@ -22,7 +22,7 @@ async fn worker_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
             continue;
         }
 
-        let jobs = c.db.worker_jobs(&w.id)?;
+        let jobs = c.db.worker_jobs(w.id)?;
         if jobs.is_empty() {
             continue;
         }
@@ -40,7 +40,7 @@ async fn worker_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
              * timestamp on the first control event.
              */
             let control =
-                c.db.job_events(&j.id, 0)?
+                c.db.job_events(j.id, 0)?
                     .iter()
                     .find(|jev| jev.stream == "control")
                     .cloned();
@@ -56,7 +56,7 @@ async fn worker_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
                         w.id,
                     );
                     c.db.job_append_event(
-                        &j.id,
+                        j.id,
                         None,
                         "control",
                         Utc::now(),
@@ -67,7 +67,7 @@ async fn worker_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
                             c.config.job.max_runtime,
                         ),
                     )?;
-                    c.db.worker_recycle(&w.id)?;
+                    c.db.worker_recycle(w.id)?;
                 }
             }
         }

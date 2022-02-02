@@ -98,7 +98,7 @@ impl Database {
             .get_results(c)?)
     }
 
-    pub fn worker_jobs(&self, worker: &WorkerId) -> Result<Vec<Job>> {
+    pub fn worker_jobs(&self, worker: WorkerId) -> Result<Vec<Job>> {
         let c = &mut self.1.lock().unwrap().conn;
 
         use schema::job::dsl;
@@ -134,7 +134,7 @@ impl Database {
             .execute(c)?)
     }
 
-    pub fn worker_recycle(&self, id: &WorkerId) -> Result<bool> {
+    pub fn worker_recycle(&self, id: WorkerId) -> Result<bool> {
         use schema::worker::dsl;
 
         let c = &mut self.1.lock().unwrap().conn;
@@ -146,7 +146,7 @@ impl Database {
             > 0)
     }
 
-    pub fn worker_destroy(&self, id: &WorkerId) -> Result<bool> {
+    pub fn worker_destroy(&self, id: WorkerId) -> Result<bool> {
         use schema::worker::dsl;
 
         let c = &mut self.1.lock().unwrap().conn;
@@ -158,7 +158,7 @@ impl Database {
             > 0)
     }
 
-    pub fn worker_ping(&self, id: &WorkerId) -> Result<bool> {
+    pub fn worker_ping(&self, id: WorkerId) -> Result<bool> {
         use schema::worker::dsl;
 
         let c = &mut self.1.lock().unwrap().conn;
@@ -225,7 +225,7 @@ impl Database {
 
         self.i_job_event_insert(
             tx,
-            &j.id,
+            j.id,
             None,
             "control",
             Utc::now(),
@@ -319,7 +319,7 @@ impl Database {
 
     pub fn worker_associate(
         &self,
-        wid: &WorkerId,
+        wid: WorkerId,
         factory_private: &str,
     ) -> OResult<()> {
         let c = &mut self.1.lock().unwrap().conn;
@@ -479,7 +479,7 @@ impl Database {
             .get_results(c)?)
     }
 
-    pub fn job_tasks(&self, job: &JobId) -> Result<Vec<Task>> {
+    pub fn job_tasks(&self, job: JobId) -> Result<Vec<Task>> {
         use schema::task::dsl;
 
         let c = &mut self.1.lock().unwrap().conn;
@@ -489,7 +489,7 @@ impl Database {
             .get_results(c)?)
     }
 
-    pub fn job_tags(&self, job: &JobId) -> Result<HashMap<String, String>> {
+    pub fn job_tags(&self, job: JobId) -> Result<HashMap<String, String>> {
         use schema::job_tag::dsl;
 
         let c = &mut self.1.lock().unwrap().conn;
@@ -502,7 +502,7 @@ impl Database {
             .collect())
     }
 
-    pub fn job_output_rules(&self, job: &JobId) -> Result<Vec<String>> {
+    pub fn job_output_rules(&self, job: JobId) -> Result<Vec<String>> {
         use schema::job_output_rule::dsl;
 
         let c = &mut self.1.lock().unwrap().conn;
@@ -515,7 +515,7 @@ impl Database {
 
     pub fn job_inputs(
         &self,
-        job: &JobId,
+        job: JobId,
     ) -> Result<Vec<(JobInput, Option<JobFile>)>> {
         use schema::{job_file, job_input};
 
@@ -534,7 +534,7 @@ impl Database {
 
     pub fn job_outputs(
         &self,
-        job: &JobId,
+        job: JobId,
     ) -> Result<Vec<(JobOutput, JobFile)>> {
         use schema::{job_file, job_output};
 
@@ -553,8 +553,8 @@ impl Database {
 
     pub fn job_file_by_id_opt(
         &self,
-        job: &JobId,
-        file: &JobFileId,
+        job: JobId,
+        file: JobFileId,
     ) -> Result<Option<JobFile>> {
         let c = &mut self.1.lock().unwrap().conn;
         use schema::job_file::dsl;
@@ -567,7 +567,7 @@ impl Database {
 
     pub fn job_events(
         &self,
-        job: &JobId,
+        job: JobId,
         minseq: usize,
     ) -> Result<Vec<JobEvent>> {
         use schema::job_event::dsl;
@@ -588,13 +588,13 @@ impl Database {
     }
 
     #[allow(dead_code)]
-    pub fn job_by_id(&self, job: &JobId) -> Result<Job> {
+    pub fn job_by_id(&self, job: JobId) -> Result<Job> {
         let c = &mut self.1.lock().unwrap().conn;
         use schema::job::dsl;
         Ok(dsl::job.filter(dsl::id.eq(job)).get_result(c)?)
     }
 
-    pub fn job_by_id_opt(&self, job: &JobId) -> Result<Option<Job>> {
+    pub fn job_by_id_opt(&self, job: JobId) -> Result<Option<Job>> {
         let c = &mut self.1.lock().unwrap().conn;
         use schema::job::dsl;
         Ok(dsl::job.filter(dsl::id.eq(job)).get_result(c).optional()?)
@@ -602,7 +602,7 @@ impl Database {
 
     pub fn job_create<I>(
         &self,
-        owner: &UserId,
+        owner: UserId,
         name: &str,
         target_name: &str,
         target: TargetId,
@@ -628,7 +628,7 @@ impl Database {
 
         let j = Job {
             id: JobId::generate(),
-            owner: *owner,
+            owner,
             name: name.to_string(),
             target: target_name.to_string(),
             target_id: Some(target),
@@ -720,9 +720,9 @@ impl Database {
 
     pub fn job_add_output(
         &self,
-        job: &JobId,
+        job: JobId,
         path: &str,
-        id: &JobFileId,
+        id: JobFileId,
         size: u64,
     ) -> OResult<()> {
         use schema::{job, job_file, job_output};
@@ -737,8 +737,8 @@ impl Database {
 
             let ic = diesel::insert_into(job_file::dsl::job_file)
                 .values(JobFile {
-                    job: job.clone(),
-                    id: *id,
+                    job,
+                    id,
                     size: DataSize(size),
                     time_archived: None,
                 })
@@ -747,9 +747,9 @@ impl Database {
 
             let ic = diesel::insert_into(job_output::dsl::job_output)
                 .values(JobOutput {
-                    job: job.clone(),
+                    job,
                     path: path.to_string(),
-                    id: id.clone(),
+                    id,
                 })
                 .execute(tx)?;
             assert_eq!(ic, 1);
@@ -760,14 +760,14 @@ impl Database {
 
     pub fn job_add_input(
         &self,
-        job: &JobId,
+        job: JobId,
         name: &str,
-        id: &JobFileId,
+        id: JobFileId,
         size: u64,
     ) -> OResult<()> {
         use schema::{job, job_file, job_input};
 
-        if name.contains("/") {
+        if name.contains('/') {
             return Err(anyhow!("name cannot be a path").into());
         }
 
@@ -781,8 +781,8 @@ impl Database {
 
             let ic = diesel::insert_into(job_file::dsl::job_file)
                 .values(JobFile {
-                    job: job.clone(),
-                    id: *id,
+                    job,
+                    id,
                     size: DataSize(size),
                     time_archived: None,
                 })
@@ -843,7 +843,7 @@ impl Database {
 
     pub fn job_append_event(
         &self,
-        job: &JobId,
+        job: JobId,
         task: Option<u32>,
         stream: &str,
         time: DateTime<Utc>,
@@ -862,7 +862,7 @@ impl Database {
 
             Ok(self.i_job_event_insert(
                 tx,
-                &j.id,
+                j.id,
                 task,
                 stream,
                 time,
@@ -872,7 +872,7 @@ impl Database {
         })
     }
 
-    pub fn job_wakeup(&self, job: &JobId) -> OResult<()> {
+    pub fn job_wakeup(&self, job: JobId) -> OResult<()> {
         use schema::job;
 
         let c = &mut self.1.lock().unwrap().conn;
@@ -927,7 +927,7 @@ impl Database {
 
                 self.i_job_event_insert(
                     tx,
-                    &j.id,
+                    j.id,
                     None,
                     "control",
                     Utc::now(),
@@ -956,7 +956,7 @@ impl Database {
                  */
                 self.i_job_event_insert(
                     tx,
-                    &j.id,
+                    j.id,
                     None,
                     "control",
                     Utc::now(),
@@ -981,7 +981,7 @@ impl Database {
 
     pub fn task_complete(
         &self,
-        job: &JobId,
+        job: JobId,
         seq: u32,
         failed: bool,
     ) -> Result<bool> {
@@ -1015,7 +1015,7 @@ impl Database {
     fn i_job_event_insert(
         &self,
         tx: &mut SqliteConnection,
-        job: &JobId,
+        job: JobId,
         task: Option<u32>,
         stream: &str,
         time: DateTime<Utc>,
@@ -1031,12 +1031,12 @@ impl Database {
 
         let ic = diesel::insert_into(job_event::dsl::job_event)
             .values(JobEvent {
-                job: job.clone(),
+                job,
                 task: task.map(|n| n as i32),
                 seq: max.unwrap_or(0) + 1,
                 stream: stream.to_string(),
                 time: IsoDate(time),
-                time_remote: time_remote.map(|t| IsoDate(t)),
+                time_remote: time_remote.map(IsoDate),
                 payload: payload.to_string(),
             })
             .execute(tx)?;
@@ -1045,7 +1045,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn user_jobs(&self, owner: &UserId) -> Result<Vec<Job>> {
+    pub fn user_jobs(&self, owner: UserId) -> Result<Vec<Job>> {
         use schema::job;
 
         let c = &mut self.1.lock().unwrap().conn;
@@ -1053,7 +1053,7 @@ impl Database {
         Ok(job::dsl::job.filter(job::dsl::owner.eq(owner)).get_results(c)?)
     }
 
-    pub fn worker_job(&self, worker: &WorkerId) -> Result<Option<Job>> {
+    pub fn worker_job(&self, worker: WorkerId) -> Result<Option<Job>> {
         use schema::job;
 
         let c = &mut self.1.lock().unwrap().conn;
@@ -1068,15 +1068,132 @@ impl Database {
         }
     }
 
-    pub fn users(&self) -> Result<Vec<User>> {
+    pub fn user_get_by_id(&self, id: UserId) -> Result<Option<AuthUser>> {
         use schema::user::dsl;
 
         let c = &mut self.1.lock().unwrap().conn;
 
-        Ok(dsl::user.get_results(c)?)
+        dsl::user
+            .find(id)
+            .get_result::<User>(c)
+            .optional()?
+            .map::<Result<_>, _>(|u| {
+                Ok(AuthUser {
+                    privileges: self.user_privileges(u.id, c)?,
+                    user: u,
+                })
+            })
+            .transpose()
     }
 
-    pub fn user_create(&self, name: &str) -> Result<User> {
+    pub fn users(&self) -> Result<Vec<AuthUser>> {
+        use schema::user::dsl;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        dsl::user
+            .get_results::<User>(c)?
+            .drain(..)
+            .map(|u| {
+                Ok(AuthUser {
+                    privileges: self.user_privileges(u.id, c)?,
+                    user: u,
+                })
+            })
+            .collect::<Result<Vec<_>>>()
+    }
+
+    fn user_privileges(
+        &self,
+        user: UserId,
+        tx: &mut SqliteConnection,
+    ) -> Result<Vec<String>> {
+        use schema::user_privilege::dsl;
+
+        Ok(dsl::user_privilege
+            .select((dsl::privilege,))
+            .filter(dsl::user.eq(user))
+            .order_by(dsl::privilege.asc())
+            .get_results::<(String,)>(tx)?
+            .drain(..)
+            .map(|(s,)| s)
+            .collect::<Vec<_>>())
+    }
+
+    pub fn user_privilege_grant(
+        &self,
+        u: UserId,
+        privilege: &str,
+    ) -> Result<bool> {
+        use schema::{user, user_privilege};
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        if privilege.is_empty()
+            || !privilege.chars().all(|c| {
+                c.is_ascii_digit()
+                    || c.is_ascii_lowercase()
+                    || c == '-'
+                    || c == '_'
+                    || c == '/'
+                    || c == '.'
+            })
+        {
+            bail!("invalid privilege name");
+        }
+
+        c.immediate_transaction(|tx| {
+            /*
+             * Confirm that the user exists before creating privilege records:
+             */
+            let u: User = user::dsl::user.find(u).get_result(tx)?;
+
+            let ic = diesel::insert_into(user_privilege::dsl::user_privilege)
+                .values(Privilege {
+                    user: u.id,
+                    privilege: privilege.to_string(),
+                })
+                .on_conflict_do_nothing()
+                .execute(tx)?;
+            assert!(ic == 0 || ic == 1);
+
+            Ok(ic != 0)
+        })
+    }
+
+    pub fn user_privilege_revoke(
+        &self,
+        u: UserId,
+        privilege: &str,
+    ) -> Result<bool> {
+        use schema::{user, user_privilege};
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        c.immediate_transaction(|tx| {
+            /*
+             * Confirm that the user exists before trying to remove privilege
+             * records:
+             */
+            let u: User = user::dsl::user.find(u).get_result(tx)?;
+
+            let dc = diesel::delete(user_privilege::dsl::user_privilege)
+                .filter(user_privilege::dsl::user.eq(u.id))
+                .filter(user_privilege::dsl::privilege.eq(privilege))
+                .execute(tx)?;
+            assert!(dc == 0 || dc == 1);
+
+            Ok(dc != 0)
+        })
+    }
+
+    fn i_user_create(
+        &self,
+        name: &str,
+        tx: &mut SqliteConnection,
+    ) -> Result<User> {
+        use schema::user::dsl;
+
         let u = User {
             id: UserId::generate(),
             name: name.to_string(),
@@ -1084,16 +1201,45 @@ impl Database {
             time_create: Utc::now().into(),
         };
 
-        let c = &mut self.1.lock().unwrap().conn;
-
-        use schema::user::dsl;
-
-        diesel::insert_into(dsl::user).values(&u).execute(c)?;
+        diesel::insert_into(dsl::user).values(&u).execute(tx)?;
 
         Ok(u)
     }
 
-    pub fn user_auth(&self, token: &str) -> Result<User> {
+    pub fn user_create(&self, name: &str) -> Result<User> {
+        let c = &mut self.1.lock().unwrap().conn;
+
+        self.i_user_create(name, c)
+    }
+
+    pub fn user_ensure(&self, name: &str) -> Result<AuthUser> {
+        use schema::user::dsl;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        c.immediate_transaction(|tx| {
+            let user = if let Some(user) = dsl::user
+                .filter(dsl::name.eq(name))
+                .get_result::<User>(tx)
+                .optional()?
+            {
+                user
+            } else {
+                /*
+                 * The user does not exist already, so a new one must be
+                 * created:
+                 */
+                self.i_user_create(name, tx)?
+            };
+
+            Ok(AuthUser {
+                privileges: self.user_privileges(user.id, tx)?,
+                user,
+            })
+        })
+    }
+
+    pub fn user_auth(&self, token: &str) -> Result<AuthUser> {
         use schema::user;
 
         let c = &mut self.1.lock().unwrap().conn;
@@ -1107,7 +1253,10 @@ impl Database {
             (Some(u), Some(x)) => bail!("token error ({}, {})", u.id, x.id),
             (Some(u), None) => {
                 assert_eq!(&u.token, token);
-                Ok(u)
+                Ok(AuthUser {
+                    privileges: self.user_privileges(u.id, c)?,
+                    user: u,
+                })
             }
         }
     }
@@ -1161,6 +1310,13 @@ impl Database {
             > 0)
     }
 
+    pub fn targets(&self) -> Result<Vec<Target>> {
+        use schema::target::dsl;
+
+        let c = &mut self.1.lock().unwrap().conn;
+        Ok(dsl::target.order_by(dsl::id.asc()).get_results(c)?)
+    }
+
     pub fn target_get(&self, id: TargetId) -> Result<Target> {
         use schema::target::dsl;
 
@@ -1174,6 +1330,7 @@ impl Database {
             name: name.to_string(),
             desc: desc.to_string(),
             redirect: None,
+            privilege: None,
         };
 
         let c = &mut self.1.lock().unwrap().conn;
@@ -1220,5 +1377,23 @@ impl Database {
                 return Ok(Some(target));
             }
         }
+    }
+
+    pub fn target_require(
+        &self,
+        id: TargetId,
+        privilege: Option<&str>,
+    ) -> Result<()> {
+        use schema::target::dsl;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let uc = diesel::update(dsl::target)
+            .filter(dsl::id.eq(id))
+            .set(dsl::privilege.eq(privilege))
+            .execute(c)?;
+        assert!(uc == 1);
+
+        Ok(())
     }
 }

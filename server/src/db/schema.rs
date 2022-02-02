@@ -128,5 +128,13 @@ table! {
         name -> Text,
         desc -> Text,
         redirect -> Nullable<Text>,
+        privilege -> Nullable<Text>,
+    }
+}
+
+table! {
+    user_privilege (user, privilege) {
+        user -> Text,
+        privilege -> Text,
     }
 }

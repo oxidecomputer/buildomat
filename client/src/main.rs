@@ -401,7 +401,7 @@ async fn do_job_dump(mut l: Level<Stuff>) -> Result<()> {
     let c = l.context().user();
 
     for id in a.args() {
-        let job = c.job_get(&id).await?;
+        let job = c.job_get(id).await?;
 
         println!("{:<26} {:<15} {}", job.id, job.state, job.name);
         println!("{:#?}", job);
@@ -480,6 +480,36 @@ async fn do_user_create(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_user_grant(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("USER_ID PRIVILEGE"));
+
+    let a = args!(l);
+
+    if a.args().len() != 2 {
+        bad_args!(l, "specify ID of user and name of privilege");
+    }
+    let id = a.args()[0].to_string();
+    let privilege = a.args()[1].to_string();
+
+    l.context().admin()?.user_privilege_grant(&id, &privilege).await?;
+    Ok(())
+}
+
+async fn do_user_revoke(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("USER_ID PRIVILEGE"));
+
+    let a = args!(l);
+
+    if a.args().len() != 2 {
+        bad_args!(l, "specify ID of user and name of privilege");
+    }
+    let id = a.args()[0].to_string();
+    let privilege = a.args()[1].to_string();
+
+    l.context().admin()?.user_privilege_revoke(&id, &privilege).await?;
+    Ok(())
+}
+
 async fn do_user_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("id", 26, true);
     l.add_column("name", 30, true);
@@ -504,9 +534,37 @@ async fn do_user_list(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_user_show(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("USER_ID"));
+
+    let a = args!(l);
+
+    if a.args().len() != 1 {
+        bad_args!(l, "specify ID of user");
+    }
+    let id = a.args()[0].to_string();
+
+    let res = l.context().admin()?.user_get(&id).await?;
+
+    println!("id:          {}", res.id);
+    println!("name:        {}", res.name);
+    println!("created at:  {}", res.time_create);
+    if !res.privileges.is_empty() {
+        println!("privileges:");
+        for privilege in res.privileges.iter() {
+            println!("    * {}", privilege);
+        }
+    }
+
+    Ok(())
+}
+
 async fn do_user(mut l: Level<Stuff>) -> Result<()> {
     l.cmda("list", "ls", "list users", cmd!(do_user_list))?;
     l.cmd("create", "create a user", cmd!(do_user_create))?;
+    l.cmd("show", "examine a particular user", cmd!(do_user_show))?;
+    l.cmd("grant", "grant a privilege to a user", cmd!(do_user_grant))?;
+    l.cmd("revoke", "revoke a privilege from a user", cmd!(do_user_revoke))?;
 
     sel!(l).run().await
 }
@@ -632,8 +690,73 @@ async fn do_target_create(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_target_list(mut l: Level<Stuff>) -> Result<()> {
+    l.add_column("id", 26, true);
+    l.add_column("name", 14, true);
+    l.add_column("description", 38, true);
+    l.add_column("redirect", 26, false);
+    l.add_column("privilege", 14, false);
+
+    let a = no_args!(l);
+
+    let mut t = a.table();
+
+    for targ in l.context().admin()?.targets_list().await? {
+        let mut r = Row::default();
+        r.add_str("id", &targ.id);
+        r.add_str("name", &targ.name);
+        r.add_str("description", &targ.desc);
+        r.add_str("redirect", targ.redirect.as_deref().unwrap_or("-"));
+        r.add_str("privilege", targ.privilege.as_deref().unwrap_or("-"));
+        t.add_row(r);
+    }
+
+    print!("{}", t.output()?);
+    Ok(())
+}
+
+async fn do_target_restrict(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("TARGET_ID PRIVILEGE"));
+
+    let a = args!(l);
+
+    if a.args().len() != 2 {
+        bad_args!(l, "specify ID of target and name of privilege");
+    }
+    let id = a.args()[0].to_string();
+    let privilege = a.args()[1].to_string();
+
+    l.context().admin()?.target_require_privilege(&id, &privilege).await?;
+    Ok(())
+}
+
+async fn do_target_unrestrict(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("TARGET_ID"));
+
+    let a = args!(l);
+
+    if a.args().len() != 1 {
+        bad_args!(l, "specify ID of target");
+    }
+    let id = a.args()[0].to_string();
+
+    l.context().admin()?.target_require_no_privilege(&id).await?;
+    Ok(())
+}
+
 async fn do_target(mut l: Level<Stuff>) -> Result<()> {
+    l.cmda("list", "ls", "list targets", cmd!(do_target_list))?;
     l.cmd("create", "create a target", cmd!(do_target_create))?;
+    l.cmd(
+        "restrict",
+        "require a privilege to use this target",
+        cmd!(do_target_restrict),
+    )?;
+    l.cmd(
+        "unrestrict",
+        "require no privileges to use this target",
+        cmd!(do_target_unrestrict),
+    )?;
 
     sel!(l).run().await
 }
@@ -709,8 +832,11 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
         );
         for job in w.jobs.iter() {
             seen.insert(job.id.to_string());
+
+            let owner = users.get(&job.owner).unwrap_or(&job.owner);
+            println!("    job: {} (user {})", job.id, owner);
+
             dump_info(&job.tags);
-            //println!("{:#?}", j);
         }
         println!();
     }
@@ -728,9 +854,10 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
             continue;
         }
 
-        println!("~~ queued job {}", job.id);
+        let owner = users.get(&job.owner).unwrap_or(&job.owner);
+
+        println!("~~ queued job {} (user {})", job.id, owner);
         dump_info(&job.tags);
-        //println!("{:#?}", job);
         println!();
     }
 
@@ -738,6 +865,7 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
 }
 
 async fn do_admin(mut l: Level<Stuff>) -> Result<()> {
+    l.cmd("user", "user management", cmd!(do_user))?;
     l.cmd("factory", "factory management", cmd!(do_factory))?;
     l.cmd("target", "target management", cmd!(do_target))?;
     l.cmda("dashboard", "dash", "summarise system state", cmd!(do_dash))?;
@@ -749,6 +877,7 @@ async fn do_admin(mut l: Level<Stuff>) -> Result<()> {
 async fn main() -> Result<()> {
     let mut l = Level::new("buildomat", Stuff::default());
     l.optopt("p", "profile", "authentication and server profile", "PROFILE");
+    l.optopt("D", "delegate", "act as another user account", "USERNAME");
 
     l.hcmd("check", "confirm profile is valid", cmd!(do_check))?;
     l.cmd(
@@ -758,7 +887,6 @@ async fn main() -> Result<()> {
     )?;
     l.cmd("control", "server control functions", cmd!(do_control))?;
     l.cmd("job", "job management", cmd!(do_job))?;
-    l.cmd("user", "user management", cmd!(do_user))?;
     l.cmd("worker", "worker management", cmd!(do_worker))?;
     l.cmda("admin", "a", "administrative functioons", cmd!(do_admin))?;
 
@@ -775,7 +903,11 @@ async fn main() -> Result<()> {
 
     l.context_mut().client_user = Some(Client::new_with_client(
         &profile.url,
-        bearer_client(profile.secret.as_str())?,
+        if let Some(delegate) = a.opts().opt_str("D") {
+            delegated_client(profile.secret.as_str(), &delegate)?
+        } else {
+            bearer_client(profile.secret.as_str())?
+        },
     ));
 
     l.context_mut().profile = Some(profile);

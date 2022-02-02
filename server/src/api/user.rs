@@ -66,7 +66,7 @@ pub(crate) async fn job_events_get(
         ));
     }
 
-    let jevs = c.db.job_events(&j.id, q.minseq.unwrap_or(0)).or_500()?;
+    let jevs = c.db.job_events(j.id, q.minseq.unwrap_or(0)).or_500()?;
 
     Ok(HttpResponseOk(
         jevs.iter()
@@ -107,7 +107,7 @@ pub(crate) async fn job_outputs_get(
         ));
     }
 
-    let jops = c.db.job_outputs(&j.id).or_500()?;
+    let jops = c.db.job_outputs(j.id).or_500()?;
 
     Ok(HttpResponseOk(
         jops.iter()
@@ -150,7 +150,7 @@ pub(crate) async fn job_output_download(
     let mut res = Response::builder();
     res = res.header(CONTENT_TYPE, "application/octet-stream");
 
-    let fr = c.file_response(&t.id, &o.id).await.or_500()?;
+    let fr = c.file_response(t.id, o.id).await.or_500()?;
     info!(
         log,
         "job {} output {} path {:?} is in the {}", t.id, o.id, o.path, fr.info
@@ -212,7 +212,7 @@ pub(crate) fn format_job(
         owner: j.owner.to_string(),
         tasks: t.iter().map(format_task).collect::<Vec<_>>(),
         output_rules,
-        state: format_job_state(&j),
+        state: format_job_state(j),
         tags,
     }
 }
@@ -247,13 +247,13 @@ pub(crate) async fn job_get(
         ));
     }
 
-    let tasks = c.db.job_tasks(&job.id).or_500()?;
+    let tasks = c.db.job_tasks(job.id).or_500()?;
 
     Ok(HttpResponseOk(format_job(
         &job,
         &tasks,
-        c.db.job_output_rules(&job.id).or_500()?,
-        c.db.job_tags(&job.id).or_500()?,
+        c.db.job_output_rules(job.id).or_500()?,
+        c.db.job_tags(job.id).or_500()?,
         &c.db.target_get(job.target()).or_500()?,
     )))
 }
@@ -272,13 +272,13 @@ pub(crate) async fn jobs_get(
     let owner = c.require_user(log, &req).await?;
 
     let jobs =
-        c.db.user_jobs(&owner.id)
+        c.db.user_jobs(owner.id)
             .or_500()?
             .iter()
             .map(|j| {
-                let output_rules = c.db.job_output_rules(&j.id)?;
-                let tasks = c.db.job_tasks(&j.id)?;
-                let tags = c.db.job_tags(&j.id)?;
+                let output_rules = c.db.job_output_rules(j.id)?;
+                let tasks = c.db.job_tasks(j.id)?;
+                let tags = c.db.job_tags(j.id)?;
                 let target = c.db.target_get(j.target())?;
                 Ok(format_job(j, &tasks, output_rules, tags, &target))
             })
@@ -412,7 +412,7 @@ pub(crate) async fn job_submit(
     let target = match c.db.target_resolve(&new_job.target).or_500()? {
         Some(target) => target,
         None => {
-            info!(log, "could not resolve target name {:?}", new_job.target,);
+            info!(log, "could not resolve target name {:?}", new_job.target);
             return Err(HttpError::for_client_error(
                 None,
                 StatusCode::BAD_REQUEST,
@@ -421,6 +421,27 @@ pub(crate) async fn job_submit(
         }
     };
     info!(log, "resolved target name {:?} to {:?}", new_job.target, target,);
+
+    /*
+     * Confirm that the authenticated user is allowed to create jobs using the
+     * resolved target.
+     */
+    if let Some(required) = target.privilege.as_deref() {
+        if !owner.has_privilege(required) {
+            warn!(
+                log,
+                "user {} denied the use of target {:?} ({:?})",
+                owner.id,
+                target.name,
+                new_job.target,
+            );
+            return Err(HttpError::for_client_error(
+                None,
+                StatusCode::FORBIDDEN,
+                "you are not allowed to use that target".into(),
+            ));
+        }
+    }
 
     let tasks = new_job
         .tasks
@@ -438,7 +459,7 @@ pub(crate) async fn job_submit(
 
     let t =
         c.db.job_create(
-            &owner.id,
+            owner.id,
             &new_job.name,
             &new_job.target,
             target.id,
@@ -486,7 +507,7 @@ pub(crate) async fn job_upload_chunk(
         ));
     }
 
-    let cid = c.write_chunk(&job.id, chunk.as_bytes()).or_500()?;
+    let cid = c.write_chunk(job.id, chunk.as_bytes()).or_500()?;
     info!(
         log,
         "user {} wrote chunk {} for job {}, size {}",
@@ -514,7 +535,7 @@ pub(crate) async fn job_add_input(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<JobsPath>,
     add: TypedBody<JobAddInput>,
-) -> SResult<HttpResponseCreated<()>, HttpError> {
+) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -550,7 +571,7 @@ pub(crate) async fn job_add_input(
     } else {
         add.size as u64
     };
-    if add.name.contains("/") {
+    if add.name.contains('/') {
         return Err(HttpError::for_client_error(
             None,
             StatusCode::BAD_REQUEST,
@@ -565,7 +586,7 @@ pub(crate) async fn job_add_input(
         .collect::<Result<Vec<_>>>()
         .or_500()?;
 
-    let fid = match c.commit_file(&job.id, &chunks, addsize) {
+    let fid = match c.commit_file(job.id, &chunks, addsize) {
         Ok(fid) => fid,
         Err(e) => {
             warn!(
@@ -588,9 +609,9 @@ pub(crate) async fn job_add_input(
     /*
      * Insert a record in the database for this input object and report success.
      */
-    c.db.job_add_input(&job.id, &add.name, &fid, addsize).or_500()?;
+    c.db.job_add_input(job.id, &add.name, fid, addsize).or_500()?;
 
-    Ok(HttpResponseCreated(()))
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -612,5 +633,5 @@ pub(crate) async fn whoami(
 
     let u = c.require_user(log, &req).await?;
 
-    Ok(HttpResponseOk(WhoamiResult { id: u.id.to_string(), name: u.name }))
+    Ok(HttpResponseOk(WhoamiResult { id: u.id.to_string(), name: u.user.name }))
 }

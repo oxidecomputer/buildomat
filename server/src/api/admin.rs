@@ -9,11 +9,67 @@ pub struct User {
     id: String,
     name: String,
     time_create: DateTime<Utc>,
+    privileges: Vec<String>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct Target {
+    id: String,
+    name: String,
+    desc: String,
+    redirect: Option<String>,
+    privilege: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct JobPath {
     job: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct UserPath {
+    user: String,
+}
+
+impl UserPath {
+    fn user(&self) -> SResult<db::UserId, HttpError> {
+        db::UserId::from_str(&self.user).or_500()
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct TargetPath {
+    target: String,
+}
+
+impl TargetPath {
+    fn target(&self) -> SResult<db::TargetId, HttpError> {
+        db::TargetId::from_str(&self.target).or_500()
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct TargetPrivilegePath {
+    target: String,
+    privilege: String,
+}
+
+impl TargetPrivilegePath {
+    fn target(&self) -> SResult<db::TargetId, HttpError> {
+        db::TargetId::from_str(&self.target).or_500()
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct UserPrivilegePath {
+    user: String,
+    privilege: String,
+}
+
+impl UserPrivilegePath {
+    fn user(&self) -> SResult<db::UserId, HttpError> {
+        db::UserId::from_str(&self.user).or_500()
+    }
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -58,7 +114,7 @@ pub(crate) async fn user_create(
 }]
 pub(crate) async fn users_list(
     rqctx: Arc<RequestContext<Arc<Central>>>,
-) -> SResult<HttpResponseCreated<Vec<User>>, HttpError> {
+) -> SResult<HttpResponseOk<Vec<User>>, HttpError> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -68,15 +124,90 @@ pub(crate) async fn users_list(
     let out =
         c.db.users()
             .or_500()?
-            .iter()
+            .drain(..)
             .map(|u| User {
-                id: u.id.to_string(),
-                name: u.name.to_string(),
-                time_create: u.time_create.into(),
+                id: u.user.id.to_string(),
+                name: u.user.name,
+                time_create: u.user.time_create.into(),
+                privileges: u.privileges,
             })
             .collect::<Vec<_>>();
 
-    Ok(HttpResponseCreated(out))
+    Ok(HttpResponseOk(out))
+}
+
+#[endpoint {
+    method = GET,
+    path = "/0/users/{user}",
+}]
+pub(crate) async fn user_get(
+    rqctx: Arc<RequestContext<Arc<Central>>>,
+    path: TypedPath<UserPath>,
+) -> SResult<HttpResponseOk<User>, HttpError> {
+    let c = rqctx.context();
+    let req = rqctx.request.lock().await;
+    let log = &rqctx.log;
+
+    c.require_admin(log, &req).await?;
+
+    if let Some(u) = c.db.user_get_by_id(path.into_inner().user()?).or_500()? {
+        Ok(HttpResponseOk(User {
+            id: u.user.id.to_string(),
+            name: u.user.name,
+            time_create: u.user.time_create.into(),
+            privileges: u.privileges,
+        }))
+    } else {
+        Err(HttpError::for_not_found(None, "user not found".into()))
+    }
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/0/users/{user}/privilege/{privilege}"
+}]
+pub(crate) async fn user_privilege_grant(
+    rqctx: Arc<RequestContext<Arc<Central>>>,
+    path: TypedPath<UserPrivilegePath>,
+) -> DSResult<HttpResponseUpdatedNoContent> {
+    let c = rqctx.context();
+    let req = rqctx.request.lock().await;
+    let log = &rqctx.log;
+
+    c.require_admin(log, &req).await?;
+
+    let path = path.into_inner();
+    let u = path.user()?;
+
+    c.db.user_privilege_grant(u, &path.privilege).or_500()?;
+
+    info!(log, "user {:?} privilege {:?} added", u, path.privilege);
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = DELETE,
+    path = "/0/users/{user}/privilege/{privilege}"
+}]
+pub(crate) async fn user_privilege_revoke(
+    rqctx: Arc<RequestContext<Arc<Central>>>,
+    path: TypedPath<UserPrivilegePath>,
+) -> DSResult<HttpResponseDeleted> {
+    let c = rqctx.context();
+    let req = rqctx.request.lock().await;
+    let log = &rqctx.log;
+
+    c.require_admin(log, &req).await?;
+
+    let path = path.into_inner();
+    let u = path.user()?;
+
+    c.db.user_privilege_revoke(u, &path.privilege).or_500()?;
+
+    info!(log, "user {:?} privilege {:?} removed", u, path.privilege);
+
+    Ok(HttpResponseDeleted())
 }
 
 #[endpoint {
@@ -98,10 +229,10 @@ pub(crate) async fn admin_jobs_get(
             .iter()
             .map(|job| {
                 Ok(super::user::format_job(
-                    &job,
-                    &c.db.job_tasks(&job.id)?,
-                    c.db.job_output_rules(&job.id)?,
-                    c.db.job_tags(&job.id)?,
+                    job,
+                    &c.db.job_tasks(job.id)?,
+                    c.db.job_output_rules(job.id)?,
+                    c.db.job_tags(job.id)?,
                     &c.db.target_get(job.target())?,
                 ))
             })
@@ -125,13 +256,13 @@ pub(crate) async fn admin_job_get(
     c.require_admin(log, &req).await?;
 
     let id = path.into_inner().job.parse::<db::JobId>().or_500()?;
-    let job = c.db.job_by_id(&id).or_500()?;
+    let job = c.db.job_by_id(id).or_500()?;
 
     Ok(HttpResponseOk(super::user::format_job(
         &job,
-        &c.db.job_tasks(&job.id).or_500()?,
-        c.db.job_output_rules(&job.id).or_500()?,
-        c.db.job_tags(&job.id).or_500()?,
+        &c.db.job_tasks(job.id).or_500()?,
+        c.db.job_output_rules(job.id).or_500()?,
+        c.db.job_tags(job.id).or_500()?,
         &c.db.target_get(job.target()).or_500()?,
     )))
 }
@@ -141,7 +272,7 @@ pub(crate) async fn admin_job_get(
 }]
 pub(crate) async fn control_hold(
     rqctx: Arc<RequestContext<Arc<Central>>>,
-) -> SResult<HttpResponseOk<()>, HttpError> {
+) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -151,7 +282,7 @@ pub(crate) async fn control_hold(
     info!(log, "ADMIN: HOLD NEW VM CREATION");
     c.inner.lock().unwrap().hold = true;
 
-    Ok(HttpResponseOk(()))
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 #[endpoint {
@@ -160,7 +291,7 @@ pub(crate) async fn control_hold(
 }]
 pub(crate) async fn control_resume(
     rqctx: Arc<RequestContext<Arc<Central>>>,
-) -> SResult<HttpResponseOk<()>, HttpError> {
+) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -170,7 +301,7 @@ pub(crate) async fn control_resume(
     info!(log, "ADMIN: RESUME NEW VM CREATION");
     c.inner.lock().unwrap().hold = false;
 
-    Ok(HttpResponseOk(()))
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -216,20 +347,20 @@ pub(crate) async fn workers_list(
     let w = c.db.workers().or_500()?;
     let workers = w
         .iter()
-        .filter_map(|w| {
+        .map(|w| {
             let jobs =
-                c.db.worker_jobs(&w.id)
+                c.db.worker_jobs(w.id)
                     .unwrap_or_else(|_| vec![])
                     .iter()
                     .map(|j| WorkerJob {
                         id: j.id.to_string(),
                         name: j.name.to_string(),
                         owner: j.owner.to_string(),
-                        state: super::user::format_job_state(&j),
-                        tags: c.db.job_tags(&j.id).unwrap_or_default(),
+                        state: super::user::format_job_state(j),
+                        tags: c.db.job_tags(j.id).unwrap_or_default(),
                     })
                     .collect::<Vec<_>>();
-            Some(Worker {
+            Worker {
                 id: w.id.to_string(),
                 factory: w.factory().to_string(),
                 factory_private: w.factory_private.clone(),
@@ -239,7 +370,7 @@ pub(crate) async fn workers_list(
                 recycle: w.recycle,
                 lastping: w.lastping.map(|x| x.into()),
                 jobs,
-            })
+            }
         })
         .collect::<Vec<_>>();
 
@@ -252,7 +383,7 @@ pub(crate) async fn workers_list(
 }]
 pub(crate) async fn workers_recycle(
     rqctx: Arc<RequestContext<Arc<Central>>>,
-) -> SResult<HttpResponseOk<()>, HttpError> {
+) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -261,7 +392,7 @@ pub(crate) async fn workers_recycle(
 
     c.db.worker_recycle_all().or_500()?;
 
-    Ok(HttpResponseOk(()))
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -336,4 +467,77 @@ pub(crate) async fn target_create(
     let t = c.db.target_create(&new_targ.name, &new_targ.desc).or_500()?;
 
     Ok(HttpResponseCreated(TargetCreateResult::new(t.id)))
+}
+
+#[endpoint {
+    method = GET,
+    path = "/0/admin/targets",
+}]
+pub(crate) async fn targets_list(
+    rqctx: Arc<RequestContext<Arc<Central>>>,
+) -> SResult<HttpResponseOk<Vec<Target>>, HttpError> {
+    let c = rqctx.context();
+    let req = rqctx.request.lock().await;
+    let log = &rqctx.log;
+
+    c.require_admin(log, &req).await?;
+
+    let out =
+        c.db.targets()
+            .or_500()?
+            .drain(..)
+            .map(|t| Target {
+                id: t.id.to_string(),
+                name: t.name,
+                desc: t.desc,
+                redirect: t.redirect.map(|id| id.to_string()),
+                privilege: t.privilege,
+            })
+            .collect::<Vec<_>>();
+
+    Ok(HttpResponseOk(out))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/0/admin/targets/{target}/require/{privilege}",
+}]
+pub(crate) async fn target_require_privilege(
+    rqctx: Arc<RequestContext<Arc<Central>>>,
+    path: TypedPath<TargetPrivilegePath>,
+) -> SResult<HttpResponseUpdatedNoContent, HttpError> {
+    let c = rqctx.context();
+    let req = rqctx.request.lock().await;
+    let log = &rqctx.log;
+
+    c.require_admin(log, &req).await?;
+
+    let path = path.into_inner();
+    let t = c.db.target_get(path.target()?).or_500()?;
+
+    c.db.target_require(t.id, Some(&path.privilege)).or_500()?;
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = DELETE,
+    path = "/0/admin/targets/{target}/require",
+}]
+pub(crate) async fn target_require_no_privilege(
+    rqctx: Arc<RequestContext<Arc<Central>>>,
+    path: TypedPath<TargetPath>,
+) -> SResult<HttpResponseUpdatedNoContent, HttpError> {
+    let c = rqctx.context();
+    let req = rqctx.request.lock().await;
+    let log = &rqctx.log;
+
+    c.require_admin(log, &req).await?;
+
+    let path = path.into_inner();
+    let t = c.db.target_get(path.target()?).or_500()?;
+
+    c.db.target_require(t.id, None).or_500()?;
+
+    Ok(HttpResponseUpdatedNoContent())
 }

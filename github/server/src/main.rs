@@ -2,6 +2,8 @@
  * Copyright 2021 Oxide Computer Company
  */
 
+#![allow(clippy::vec_init_then_push)]
+
 use anyhow::{anyhow, bail, Context, Result};
 use dropshot::ConfigLogging;
 use serde::{Deserialize, Serialize};
@@ -314,8 +316,22 @@ impl App {
         }
     }
 
-    fn buildomat(&self) -> buildomat_openapi::Client {
+    fn buildomat(&self, repo: &Repository) -> buildomat_openapi::Client {
         use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
+
+        /*
+         * Use a separate buildomat user for each GitHub repository.  These are
+         * created on demand, and we access them via delegation rather than
+         * using real per-user credentials.  In this way, we can provide access
+         * to expensive or security sensitive targets (e.g., hardware lab
+         * resources) on a per-repository basis, while leaving low-cost or
+         * unprivileged targets (e.g., ephemeral AWS instances) for public use.
+         *
+         * We use the GitHub repository ID to construct the buildomat username
+         * in the hope that this will remain invariant across future changes in
+         * the name and organisational ownership of the repository.
+         */
+        let username = format!("gong-{}", repo.id);
 
         let mut dh = HeaderMap::new();
         dh.insert(
@@ -325,6 +341,10 @@ impl App {
                 &self.config.buildomat.token
             ))
             .unwrap(),
+        );
+        dh.insert(
+            "X-Buildomat-Delegate",
+            HeaderValue::from_str(&username).unwrap(),
         );
 
         let rwc = reqwest::ClientBuilder::new()
@@ -1827,7 +1847,7 @@ async fn main() -> Result<()> {
         db: wollongong_database::Database::new(
             log.new(o!("component" => "db")),
             "var/data.sqlite3",
-            config.sqlite.cache_kb.clone(),
+            config.sqlite.cache_kb,
         )?,
         config,
     });

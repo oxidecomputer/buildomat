@@ -20,7 +20,7 @@ async fn archive_files_one(
     s3: &rusoto_s3::S3Client,
 ) -> Result<()> {
     while let Some(jf) = c.db.job_file_next_unarchived()? {
-        let key = c.file_object_key(&jf.job, &jf.id);
+        let key = c.file_object_key(jf.job, jf.id);
         info!(
             log,
             "uploading file {} from job {} at {}:{}",
@@ -35,7 +35,7 @@ async fn archive_files_one(
          * total size to include in the put request, and confirm that the size
          * in the database matches the local file size.
          */
-        let p = c.file_path(&jf.job, &jf.id)?;
+        let p = c.file_path(jf.job, jf.id)?;
 
         let f = tokio::fs::File::open(&p).await?;
         let file_size = f.metadata().await?.len();
@@ -110,7 +110,7 @@ async fn clean_files_one(log: &Logger, c: &Central) -> Result<()> {
         /*
          * Look up the job to see if it is complete.
          */
-        let job = if let Some(job) = c.db.job_by_id_opt(&jid)? {
+        let job = if let Some(job) = c.db.job_by_id_opt(jid)? {
             if !job.complete {
                 /*
                  * Ignore present-but-incomplete jobs.
@@ -162,7 +162,7 @@ async fn clean_files_one(log: &Logger, c: &Central) -> Result<()> {
                 };
 
             let file =
-                if let Some(file) = c.db.job_file_by_id_opt(&jid, &fid)? {
+                if let Some(file) = c.db.job_file_by_id_opt(jid, fid)? {
                     if file.time_archived.is_none() {
                         /*
                          * Ignore files not yet archived to the object store.

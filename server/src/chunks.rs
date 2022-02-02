@@ -48,7 +48,7 @@ async fn chunk_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
             continue;
         };
 
-        match c.db.job_by_id_opt(&id) {
+        match c.db.job_by_id_opt(id) {
             Ok(Some(job)) => {
                 if !job.complete {
                     continue;

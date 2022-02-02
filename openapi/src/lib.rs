@@ -1,3 +1,5 @@
+#![allow(clippy::needless_lifetimes)]
+
 use anyhow::Result;
 mod progenitor_support {
     use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
@@ -142,6 +144,17 @@ pub mod types {
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct Target {
+        pub desc: String,
+        pub id: String,
+        pub name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub privilege: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub redirect: Option<String>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct TargetCreate {
         pub desc: String,
         pub name: String,
@@ -190,6 +203,7 @@ pub mod types {
     pub struct User {
         pub id: String,
         pub name: String,
+        pub privileges: Vec<String>,
         pub time_create: chrono::DateTime<chrono::offset::Utc>,
     }
 
@@ -386,6 +400,49 @@ impl Client {
         let result = self.client.execute(request).await;
         let res = result?.error_for_status()?;
         Ok(res.json().await?)
+    }
+
+    #[doc = "targets_list: GET /0/admin/targets"]
+    pub async fn targets_list<'a>(&'a self) -> Result<Vec<types::Target>> {
+        let url = format!("{}/0/admin/targets", self.baseurl,);
+        let request = self.client.get(url).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res.json().await?)
+    }
+
+    #[doc = "target_require_no_privilege: DELETE /0/admin/targets/{target}/require"]
+    pub async fn target_require_no_privilege<'a>(
+        &'a self,
+        target: &'a str,
+    ) -> Result<reqwest::Response> {
+        let url = format!(
+            "{}/0/admin/targets/{}/require",
+            self.baseurl,
+            progenitor_support::encode_path(&target.to_string()),
+        );
+        let request = self.client.delete(url).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res)
+    }
+
+    #[doc = "target_require_privilege: PUT /0/admin/targets/{target}/require/{privilege}"]
+    pub async fn target_require_privilege<'a>(
+        &'a self,
+        target: &'a str,
+        privilege: &'a str,
+    ) -> Result<reqwest::Response> {
+        let url = format!(
+            "{}/0/admin/targets/{}/require/{}",
+            self.baseurl,
+            progenitor_support::encode_path(&target.to_string()),
+            progenitor_support::encode_path(&privilege.to_string()),
+        );
+        let request = self.client.put(url).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res)
     }
 
     #[doc = "control_hold: POST /0/control/hold"]
@@ -660,6 +717,55 @@ impl Client {
         let result = self.client.execute(request).await;
         let res = result?.error_for_status()?;
         Ok(res.json().await?)
+    }
+
+    #[doc = "user_get: GET /0/users/{user}"]
+    pub async fn user_get<'a>(&'a self, user: &'a str) -> Result<types::User> {
+        let url = format!(
+            "{}/0/users/{}",
+            self.baseurl,
+            progenitor_support::encode_path(&user.to_string()),
+        );
+        let request = self.client.get(url).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res.json().await?)
+    }
+
+    #[doc = "user_privilege_grant: PUT /0/users/{user}/privilege/{privilege}"]
+    pub async fn user_privilege_grant<'a>(
+        &'a self,
+        user: &'a str,
+        privilege: &'a str,
+    ) -> Result<reqwest::Response> {
+        let url = format!(
+            "{}/0/users/{}/privilege/{}",
+            self.baseurl,
+            progenitor_support::encode_path(&user.to_string()),
+            progenitor_support::encode_path(&privilege.to_string()),
+        );
+        let request = self.client.put(url).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res)
+    }
+
+    #[doc = "user_privilege_revoke: DELETE /0/users/{user}/privilege/{privilege}"]
+    pub async fn user_privilege_revoke<'a>(
+        &'a self,
+        user: &'a str,
+        privilege: &'a str,
+    ) -> Result<reqwest::Response> {
+        let url = format!(
+            "{}/0/users/{}/privilege/{}",
+            self.baseurl,
+            progenitor_support::encode_path(&user.to_string()),
+            progenitor_support::encode_path(&privilege.to_string()),
+        );
+        let request = self.client.delete(url).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res)
     }
 
     #[doc = "whoami: GET /0/whoami"]
