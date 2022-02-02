@@ -2,7 +2,7 @@
  * Copyright 2021 Oxide Computer Company
  */
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use buildomat_common::db::*;
 use buildomat_common::*;
 use chrono::prelude::*;
@@ -319,6 +319,83 @@ impl Database {
             .get_results(c)?)
     }
 
+    pub fn load_install(&self, id: i64) -> DBResult<Install> {
+        use schema::install;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        Ok(install::dsl::install.find(id).get_result(c)?)
+    }
+
+    pub fn store_install(
+        &self,
+        id: i64,
+        owner: i64,
+    ) -> DBResult<()> {
+        use schema::install;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let i = Install {
+            id,
+            owner,
+        };
+
+        diesel::insert_into(install::dsl::install)
+            .values(&i)
+            .on_conflict(install::dsl::id)
+            .do_update()
+            .set((
+                install::dsl::owner.eq(i.owner),
+            ))
+            .execute(c)?;
+
+        Ok(())
+    }
+
+    pub fn load_user(&self, id: i64) -> DBResult<User> {
+        use schema::user;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        Ok(user::dsl::user.find(id).get_result(c)?)
+    }
+
+    pub fn store_user(
+        &self,
+        id: i64,
+        login: &str,
+        usertype: UserType,
+        name: Option<&str>,
+        email: Option<&str>,
+    ) -> DBResult<()> {
+        use schema::user;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let u = User {
+            id,
+            login: login.to_string(),
+            usertype,
+            name: name.map(|s| s.to_string()),
+            email: email.map(|s| s.to_string()),
+        };
+
+        diesel::insert_into(user::dsl::user)
+            .values(&u)
+            .on_conflict(user::dsl::id)
+            .do_update()
+            .set((
+                user::dsl::login.eq(&u.login),
+                user::dsl::name.eq(&u.name),
+                user::dsl::email.eq(&u.email),
+                user::dsl::usertype.eq(u.usertype),
+            ))
+            .execute(c)?;
+
+        Ok(())
+    }
+
     pub fn list_check_suites(&self) -> Result<Vec<CheckSuite>> {
         use schema::check_suite;
 
@@ -396,6 +473,9 @@ impl Database {
                 state: CheckSuiteState::Created,
                 plan: None,
                 plan_sha: None,
+                pr_by: None,
+                requested_by: None,
+                approved_by: None,
             };
 
             let ic = diesel::insert_into(dsl::check_suite)
@@ -434,6 +514,9 @@ impl Database {
                     dsl::state.eq(&check_suite.state),
                     dsl::plan.eq(&check_suite.plan),
                     dsl::plan_sha.eq(&check_suite.plan_sha),
+                    dsl::pr_by.eq(&check_suite.pr_by),
+                    dsl::requested_by.eq(&check_suite.requested_by),
+                    dsl::approved_by.eq(&check_suite.approved_by),
                 ))
                 .execute(tx)?;
             assert_eq!(uc, 1);

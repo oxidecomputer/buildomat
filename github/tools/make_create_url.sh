@@ -65,5 +65,6 @@ add 'checks'		'write'
 add 'contents'		'read'
 add 'metadata'		'read'
 add 'pull_requests'	'read'
+add 'members'		'read'
 
 printf '%s\n' "$url"

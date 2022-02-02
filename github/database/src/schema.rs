@@ -30,6 +30,9 @@ table! {
         plan -> Nullable<Text>,
         plan_sha -> Nullable<Text>,
         url_key -> Text,
+        pr_by -> Nullable<BigInt>,
+        requested_by -> Nullable<BigInt>,
+        approved_by -> Nullable<BigInt>,
     }
 }
 
@@ -50,3 +53,20 @@ table! {
 
 joinable!(check_run -> check_suite (check_suite));
 allow_tables_to_appear_in_same_query!(check_run, check_suite);
+
+table! {
+    install (id) {
+        id -> BigInt,
+        owner -> BigInt,
+    }
+}
+
+table! {
+    user (id) {
+        id -> BigInt,
+        login -> Text,
+        usertype -> Text,
+        name -> Nullable<Text>,
+        email -> Nullable<Text>,
+    }
+}

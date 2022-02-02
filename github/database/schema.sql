@@ -50,3 +50,30 @@ CREATE TABLE check_run (
 
 -- v 5
 CREATE INDEX delivery_ack ON delivery (ack);
+
+-- v 6
+CREATE TABLE install (
+    id              INTEGER             PRIMARY KEY,
+    owner           INTEGER NOT NULL
+);
+
+-- v 7
+CREATE TABLE user (
+    id              INTEGER             PRIMARY KEY,
+    login           TEXT    NOT NULL,
+    usertype        TEXT    NOT NULL,
+    name            TEXT,
+    email           TEXT
+);
+
+-- v 8
+ALTER TABLE check_suite ADD COLUMN
+    pr_by           INTEGER;
+
+-- v 9
+ALTER TABLE check_suite ADD COLUMN
+    requested_by    INTEGER;
+
+-- v 10
+ALTER TABLE check_suite ADD COLUMN
+    approved_by     INTEGER;

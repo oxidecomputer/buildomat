@@ -171,6 +171,7 @@ pub(crate) async fn flush(
                 summary: format!("{}Flagrant Error: {}", summary, e),
                 detail,
                 state: FlushState::Failure,
+                actions: Default::default(),
             }
         } else if p.job_state.as_deref().unwrap() == "completed" {
             FlushOut {
@@ -178,6 +179,7 @@ pub(crate) async fn flush(
                 summary: format!("{}The requested job was completed.", summary),
                 detail,
                 state: FlushState::Success,
+                actions: Default::default(),
             }
         } else {
             FlushOut {
@@ -188,6 +190,7 @@ pub(crate) async fn flush(
                 ),
                 detail,
                 state: FlushState::Failure,
+                actions: Default::default(),
             }
         }
     } else if let Some(ts) = p.job_state.as_deref() {
@@ -197,6 +200,7 @@ pub(crate) async fn flush(
                 summary: format!("{}The job is in line to run.", summary),
                 detail,
                 state: FlushState::Queued,
+                actions: Default::default(),
             }
         } else {
             FlushOut {
@@ -204,6 +208,7 @@ pub(crate) async fn flush(
                 summary: format!("{}The job is running now!", summary),
                 detail,
                 state: FlushState::Running,
+                actions: Default::default(),
             }
         }
     } else {
@@ -212,6 +217,7 @@ pub(crate) async fn flush(
             summary: format!("{}The job is in line to run.", summary),
             detail,
             state: FlushState::Queued,
+            actions: Default::default(),
         }
     })
 }

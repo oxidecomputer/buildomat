@@ -19,9 +19,21 @@ mod variety;
 
 const CONTROL_RUN_NAME: &str = "*control";
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct RepoConfig {
+    /**
+     * Repository-level control for enabling or disabling all buildomat
+     * activity.
+     */
     pub enable: bool,
+
+    /**
+     * Should we require that users submitting jobs be members of the
+     * organisation that owns the repository?  Users outside that organisation
+     * will require approval from a user inside the organisation.
+     */
+    #[serde(default)]
+    pub org_only: bool,
 }
 
 #[derive(Deserialize)]
@@ -298,7 +310,7 @@ impl App {
             /*
              * Treat the absence of the file as if checks were disabled.
              */
-            Ok(LoadedFromSha { sha, loaded: RepoConfig { enable: false } })
+            Ok(LoadedFromSha { sha, loaded: RepoConfig::default() })
         }
     }
 
@@ -329,7 +341,7 @@ impl App {
     }
 }
 
-async fn bgtask_one(app: &Arc<App>) -> Result<()> {
+async fn process_deliveries(app: &Arc<App>) -> Result<()> {
     let log = &app.log;
 
     /*
@@ -373,7 +385,54 @@ async fn bgtask_one(app: &Arc<App>) -> Result<()> {
             }
         };
 
+        /*
+         * Cache user information from the event sender in the database.
+         */
+        app.db.store_user(
+            payload.sender.id,
+            &payload.sender.login,
+            UserType::from_github(payload.sender.type_),
+            payload.sender.name.as_deref(),
+            payload.sender.email.as_deref(),
+        )?;
+
         match del.event.as_str() {
+            "installation" if &payload.action == "created" => {
+                let inst = if let Some(inst) = &payload.installation {
+                    inst
+                } else {
+                    error!(
+                        log,
+                        "delivery {} missing installation information", del.seq
+                    );
+                    app.db.delivery_ack(del.seq, ack)?;
+                    continue;
+                };
+
+                let owner = if let Some(acc) = &inst.account {
+                    acc
+                } else {
+                    error!(
+                        log,
+                        "delivery {} missing installation account", del.seq
+                    );
+                    app.db.delivery_ack(del.seq, ack)?;
+                    continue;
+                };
+
+                /*
+                 * Store the user that owns the installation and then the
+                 * installation itself:
+                 */
+                app.db.store_user(
+                    owner.id,
+                    &owner.login,
+                    UserType::from_github(owner.type_),
+                    owner.name.as_deref(),
+                    owner.email.as_deref(),
+                )?;
+                app.db.store_install(inst.id, owner.id)?;
+            }
             "installation" | "installation_repositories" => {
                 /*
                  * XXX Skip this for right now.  Probably need to keep track of
@@ -565,7 +624,7 @@ async fn bgtask_one(app: &Arc<App>) -> Result<()> {
                  * Make sure we have a local record of the check suite we found
                  * or created.
                  */
-                let cs = app.db.ensure_check_suite(
+                let mut cs = app.db.ensure_check_suite(
                     pr.base.repo.id,
                     instid,
                     suite_id,
@@ -575,6 +634,16 @@ async fn bgtask_one(app: &Arc<App>) -> Result<()> {
                      */
                     None,
                 )?;
+
+                /*
+                 * Record the user who triggered this pull request event so that
+                 * we can do authorisation checks later.
+                 */
+                if cs.pr_by.is_none() {
+                    cs.pr_by = Some(payload.sender.id);
+                    app.db.update_check_suite(&cs)?;
+                }
+
                 info!(
                     log,
                     "delivery {}: check suite {} -> {}",
@@ -594,10 +663,134 @@ async fn bgtask_one(app: &Arc<App>) -> Result<()> {
                 continue;
             }
             "check_run" if &payload.action == "requested_action" => {
+                if let Some(ra) = &payload.requested_action {
+                    if ra.identifier != "auth" {
+                        /*
+                         * Authorisation is the only action we know how to do
+                         * for now.
+                         */
+                        error!(
+                            log,
+                            "delivery {} check run action {:?} unexpected",
+                            del.seq,
+                            ra.identifier,
+                        );
+                        app.db.delivery_ack(del.seq, ack)?;
+                        continue;
+                    }
+                } else {
+                    error!(
+                        log,
+                        "delivery {} missing requested action", del.seq,
+                    );
+                    continue;
+                };
+
+                let crid = if let Some(cr) = &payload.check_run {
+                    if let Ok(id) = cr.external_id.parse() {
+                        id
+                    } else {
+                        error!(
+                            log,
+                            "delivery {} invalid check run ID", del.seq
+                        );
+                        continue;
+                    }
+                } else {
+                    error!(log, "delivery {} missing check run", del.seq);
+                    continue;
+                };
+
+                let mut cr = if let Ok(cr) = app.db.load_check_run(&crid) {
+                    cr
+                } else {
+                    error!(
+                        log,
+                        "delivery {} could not load check run", del.seq
+                    );
+                    continue;
+                };
+                let mut cs = app.db.load_check_suite(&cr.check_suite)?;
+
                 /*
-                 * XXX Someone clicked a button we provided.  Don't provide any
-                 * buttons for now...
+                 * The "Authorise" button should only appear on the Control
+                 * check run.
                  */
+                if !cr.variety.is_control() {
+                    warn!(
+                        log,
+                        "delivery {} for non-control check run", del.seq
+                    );
+                    app.db.delivery_ack(del.seq, ack)?;
+                    continue;
+                }
+
+                /*
+                 * Determine whether this check suite still requires
+                 * authorisation.
+                 */
+                if cs.approved_by.is_some() {
+                    info!(
+                        log,
+                        "delivery {} was for check suite already authorised",
+                        del.seq
+                    );
+                    app.db.delivery_ack(del.seq, ack)?;
+                    continue;
+                }
+                if !cs.state.is_parked() {
+                    warn!(
+                        log,
+                        "delivery {} for check suite not parked", del.seq
+                    );
+                    app.db.delivery_ack(del.seq, ack)?;
+                    continue;
+                }
+
+                /*
+                 * The sender of the webhook should be the user who pressed the
+                 * "Authorise" button on the check run.  Determine if they are a
+                 * member of organisation that owns this installation.
+                 */
+                let u = app.db.load_user(payload.sender.id)?;
+                let inst = app.db.load_install(cs.install)?;
+                let org = app.db.load_user(inst.owner)?;
+
+                let gh = app.install_client(inst.id);
+
+                let res = gh
+                    .orgs()
+                    .check_membership_for_user(&org.login, &u.login)
+                    .await;
+                if res.is_ok() {
+                    info!(log, "delivery {} authorisation is OK", del.seq);
+                } else {
+                    warn!(log, "delivery {} authorisation failure", del.seq);
+                    app.db.delivery_ack(del.seq, ack)?;
+                    continue;
+                }
+
+                /*
+                 * Mark the check suite as authorised by this user and send it
+                 * back through the creation phase.
+                 */
+                cr.active = false;
+                app.db.update_check_run(&cr)?;
+                assert!(cs.approved_by.is_none());
+                cs.approved_by = Some(u.id);
+                assert!(matches!(cs.state, CheckSuiteState::Parked));
+                cs.state = CheckSuiteState::Created;
+                app.db.update_check_suite(&cs)?;
+
+                info!(
+                    log,
+                    "delivery {} authorised suite {} by user {}",
+                    del.seq,
+                    cs.id,
+                    u.login
+                );
+
+                app.db.delivery_ack(del.seq, ack)?;
                 continue;
             }
             "check_run" if &payload.action == "rerequested" => {
@@ -711,13 +904,23 @@ async fn bgtask_one(app: &Arc<App>) -> Result<()> {
                     continue;
                 };
 
-                app.db.ensure_check_suite(
+                let mut cs = app.db.ensure_check_suite(
                     repo.id,
                     instid,
                     suite.id,
                     &suite.head_sha,
                     suite.head_branch.as_deref(),
                 )?;
+
+                /*
+                 * Record the user who triggered this check suite request event
+                 * so that we can do authorisation checks later.
+                 */
+                if cs.requested_by.is_none() {
+                    cs.requested_by = Some(payload.sender.id);
+                    app.db.update_check_suite(&cs)?;
+                }
+
                 app.db.delivery_ack(del.seq, ack)?;
             }
             "check_suite" if &payload.action == "rerequested" => {
@@ -889,6 +1092,7 @@ struct FlushOut {
     summary: String,
     detail: String,
     state: FlushState,
+    actions: Vec<octorust::types::ChecksCreateRequestActions>,
 }
 
 async fn flush_check_runs(
@@ -913,19 +1117,50 @@ async fn flush_check_runs(
             CheckRunVariety::Control => {
                 let sha = cs.plan_sha.as_ref();
                 let p: ControlPrivate = cr.get_private()?;
+
+                let approval = if let Some(aby) = cs.approved_by {
+                    let u = app.db.load_user(aby)?;
+                    format!("  Plan approved by user {:?}.", u.login)
+                } else {
+                    "".to_string()
+                };
+
                 if let Some(e) = &p.error {
                     FlushOut {
                         title: "Failed to load plan".into(),
                         summary: e.to_string(),
                         detail: "".into(),
                         state: FlushState::Failure,
+                        actions: Default::default(),
                     }
                 } else if !p.complete {
                     FlushOut {
                         title: "Plan loaded, creating check runs...".into(),
-                        summary: format!("Plan loaded from commit {:?}", sha),
+                        summary: format!(
+                            "Plan loaded from commit {:?}.{}",
+                            sha, approval,
+                        ),
                         detail: "".into(),
                         state: FlushState::Running,
+                        actions: Default::default(),
+                    }
+                } else if p.need_auth {
+                    FlushOut {
+                        title: "Plan requires authorisation.".into(),
+                        summary: "Plans submitted by users that are not a \
+                            member of the organisation require explicit \
+                            authorisation."
+                            .into(),
+                        detail: "".into(),
+                        state: FlushState::Failure,
+                        actions: vec![
+                            octorust::types::ChecksCreateRequestActions {
+                                description: "Allow this plan to proceed."
+                                    .into(),
+                                identifier: "auth".into(),
+                                label: "Authorise".into(),
+                            },
+                        ],
                     }
                 } else if p.no_plans {
                     FlushOut {
@@ -937,13 +1172,18 @@ async fn flush_check_runs(
                         ),
                         detail: "".into(),
                         state: FlushState::Success,
+                        actions: Default::default(),
                     }
                 } else {
                     FlushOut {
                         title: "Checks underway.".into(),
-                        summary: format!("Plan loaded from commit {:?}", sha),
+                        summary: format!(
+                            "Plan loaded from commit {:?}.{}",
+                            sha, approval,
+                        ),
                         detail: "".into(),
                         state: FlushState::Success,
+                        actions: Default::default(),
                     }
                 }
             }
@@ -955,6 +1195,7 @@ async fn flush_check_runs(
                         summary: "This check is not exhaustive.".into(),
                         detail: "".into(),
                         state: FlushState::Success,
+                        actions: Default::default(),
                     }
                 } else {
                     FlushOut {
@@ -962,6 +1203,7 @@ async fn flush_check_runs(
                         summary: "This check is not exhaustive.".into(),
                         detail: "".into(),
                         state: FlushState::Running,
+                        actions: Default::default(),
                     }
                 }
             }
@@ -979,6 +1221,7 @@ async fn flush_check_runs(
                                 .into(),
                             detail: "".into(),
                             state: FlushState::Failure,
+                            actions: Default::default(),
                         }
                     } else {
                         FlushOut {
@@ -988,6 +1231,7 @@ async fn flush_check_runs(
                                 .into(),
                             detail: "".into(),
                             state: FlushState::Success,
+                            actions: Default::default(),
                         }
                     }
                 } else {
@@ -996,6 +1240,7 @@ async fn flush_check_runs(
                         summary: "This check is not exhaustive.".into(),
                         detail: "".into(),
                         state: FlushState::Running,
+                        actions: Default::default(),
                     }
                 }
             }
@@ -1037,6 +1282,7 @@ async fn flush_check_runs(
                 details_url,
                 output,
                 status,
+                actions: out.actions,
                 ..Default::default()
             };
 
@@ -1059,6 +1305,7 @@ async fn flush_check_runs(
                 name: cr.name.to_string(),
                 output,
                 status,
+                actions: out.actions,
                 ..Default::default()
             };
 
@@ -1096,13 +1343,15 @@ struct FailFirstPrivate {
     count: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 struct ControlPrivate {
     error: Option<String>,
     #[serde(default)]
     complete: bool,
     #[serde(default)]
     no_plans: bool,
+    #[serde(default)]
+    need_auth: bool,
 }
 
 /**
@@ -1165,6 +1414,7 @@ async fn process_check_suite(app: &Arc<App>, cs: &CheckSuiteId) -> Result<()> {
 
     let mut cs = db.load_check_suite(cs)?;
     let repo = app.db.load_repository(cs.repo)?;
+    let install = app.db.load_install(cs.install)?;
 
     match &cs.state {
         CheckSuiteState::Parked => {}
@@ -1253,67 +1503,162 @@ async fn process_check_suite(app: &Arc<App>, cs: &CheckSuiteId) -> Result<()> {
                 &CheckRunVariety::Control,
             )?;
 
-            match app.load_repo_job_files(&gh, &cs, &repo).await {
-                Ok(lp) => {
+            /*
+             * Organisation-only authorisation can be enabled on a
+             * per-repository basis.  It requires that we not create any job in
+             * response to a pull request made by a user that is not a member of
+             * the organisation.  Such a job will be marked as failed due to
+             * lack of authorisation, with a button that an organisation member
+             * may press to authorise the job.
+             */
+            let authorised = if !rc.loaded.org_only {
+                /*
+                 * If organisation-only authorisation is not enabled, all jobs
+                 * are implicitly authorised.
+                 */
+                true
+            } else {
+                if cs.approved_by.is_none() {
                     /*
-                     * Store the new plan in the check suite record.
+                     * If the check suite was created by a push, we expect it to
+                     * have been explicitly requested by a delivery.  Check for
+                     * a requesting user first.
                      */
-                    info!(
-                        log,
-                        "check suite {} plan from {}/{} commit {}",
-                        cs.id,
-                        repo.owner,
-                        repo.name,
-                        lp.sha
-                    );
+                    if let Some(id) = cs.requested_by {
+                        let u = db.load_user(id)?;
+                        let org = db.load_user(install.owner)?;
+                        let res = gh
+                            .orgs()
+                            .check_membership_for_user(&org.login, &u.login)
+                            .await;
+                        if res.is_ok() {
+                            info!(
+                                log,
+                                "check suite {} authorised by {} (request)",
+                                cs.id,
+                                u.login,
+                            );
+                            cs.approved_by = Some(u.id);
+                        }
+                    }
+                }
+                if cs.approved_by.is_none() {
+                    /*
+                     * Otherwise, if the check suite was created by a pull
+                     * request, check whether the user that created the PR is
+                     * within the organisation.
+                     */
+                    if let Some(id) = cs.pr_by {
+                        let u = db.load_user(id)?;
+                        let org = db.load_user(install.owner)?;
+                        let res = gh
+                            .orgs()
+                            .check_membership_for_user(&org.login, &u.login)
+                            .await;
+                        if res.is_ok() {
+                            info!(
+                                log,
+                                "check suite {} authorised by {} (pull)",
+                                cs.id,
+                                u.login,
+                            );
+                            cs.approved_by = Some(u.id);
+                        }
+                    }
+                }
+                cs.approved_by.is_some()
+            };
 
-                    /*
-                     * If there were no job files, be sure to make a note
-                     * of this in the summary output.
-                     */
-                    if lp.loaded.jobfiles.is_empty() {
+            if authorised {
+                match app.load_repo_job_files(&gh, &cs, &repo).await {
+                    Ok(lp) => {
+                        /*
+                         * Store the new plan in the check suite record.
+                         */
+                        info!(
+                            log,
+                            "check suite {} plan from {}/{} commit {}",
+                            cs.id,
+                            repo.owner,
+                            repo.name,
+                            lp.sha
+                        );
+
+                        /*
+                         * If there were no job files, be sure to make a note
+                         * of this in the summary output.
+                         */
+                        if lp.loaded.jobfiles.is_empty() {
+                            cr.flushed = false;
+                            cr.set_private(ControlPrivate {
+                                complete: true,
+                                no_plans: true,
+                                ..Default::default()
+                            })?;
+                            db.update_check_run(&cr)?;
+                        }
+
+                        cs.plan = Some(lp.loaded.into());
+                        cs.plan_sha = Some(lp.sha);
+                        cs.state = CheckSuiteState::Planned;
+                    }
+                    Err(e) => {
+                        /*
+                         * We could not load the plan for this job.  Discard any
+                         * existing plan for this check suite.
+                         */
+                        cs.plan = None;
+                        cs.plan_sha = None;
+
+                        /*
+                         * Report the failure to the user through the check run
+                         * output and state.
+                         */
                         cr.flushed = false;
                         cr.set_private(ControlPrivate {
-                            error: None,
-                            complete: false,
-                            no_plans: true,
+                            complete: true,
+                            error: Some(format!(
+                                "Failed to load plan:\n```\n{:?}\n```\n",
+                                e
+                            )),
+                            ..Default::default()
                         })?;
                         db.update_check_run(&cr)?;
+
+                        /*
+                         * Park the check suite.  If the user hits retry on the
+                         * control job in the GitHub UI, it will bring us back
+                         * to the Created state for another attempt.
+                         */
+                        cs.state = CheckSuiteState::Parked;
                     }
-
-                    cs.plan = Some(lp.loaded.into());
-                    cs.plan_sha = Some(lp.sha);
-                    cs.state = CheckSuiteState::Planned;
                 }
-                Err(e) => {
-                    /*
-                     * Discard any existing plan for this check suite.
-                     */
-                    cs.plan = None;
-                    cs.plan_sha = None;
+            } else {
+                /*
+                 * The job is not authorised.  Discard any existing plan for
+                 * this check suite.
+                 */
+                cs.plan = None;
+                cs.plan_sha = None;
 
-                    /*
-                     * Report the failure to the user through the check run
-                     * output and state.
-                     */
-                    cr.flushed = false;
-                    cr.set_private(ControlPrivate {
-                        error: Some(format!(
-                            "Failed to load plan:\n```\n{:?}\n```\n",
-                            e
-                        )),
-                        complete: true,
-                        no_plans: false,
-                    })?;
-                    db.update_check_run(&cr)?;
+                /*
+                 * Report the authorisation failure to the user through
+                 * the check run output and state.
+                 */
+                cr.flushed = false;
+                cr.set_private(ControlPrivate {
+                    complete: true,
+                    need_auth: true,
+                    ..Default::default()
+                })?;
+                db.update_check_run(&cr)?;
 
-                    /*
-                     * Park the check suite.  If the user hits retry on the
-                     * control job in the GitHub UI, it will bring us back to
-                     * the Created state for another attempt.
-                     */
-                    cs.state = CheckSuiteState::Parked;
-                }
+                /*
+                 * Park the check suite.  If an organisation user subsequently
+                 * authorises the job, it will bring us back to the Created
+                 * state for another attempt.
+                 */
+                cs.state = CheckSuiteState::Parked;
             }
 
             flush_check_runs(app, &cs, &repo).await?;
@@ -1434,8 +1779,8 @@ async fn bgtask(app: Arc<App>) {
     let log = &app.log;
 
     loop {
-        if let Err(e) = bgtask_one(&app).await {
-            error!(log, "background task 1 error: {:?}", e);
+        if let Err(e) = process_deliveries(&app).await {
+            error!(log, "background task: delivery processing error: {:?}", e);
         }
         match app.db.list_check_suites_active() {
             Ok(suites) => {
@@ -1504,7 +1849,32 @@ async fn main() -> Result<()> {
      */
     let insts = c.apps().list_all_installations(None, "").await?;
     for i in insts.iter() {
-        println!("  installation: {} ({}/{})", i.id, i.app_id, i.app_slug);
+        println!(
+            "  installation: {} [{}] ({}/{})",
+            i.id, i.account.simple_user.login, i.app_id, i.app_slug,
+        );
+
+        if !i.account.simple_user.login.is_empty() {
+            let name = if i.account.simple_user.name.is_empty() {
+                None
+            } else {
+                Some(i.account.simple_user.name.as_str())
+            };
+            let email = if i.account.simple_user.email.is_empty() {
+                None
+            } else {
+                Some(i.account.simple_user.email.as_str())
+            };
+
+            app0.db.store_user(
+                i.account.simple_user.id,
+                &i.account.simple_user.login,
+                UserType::from_github_str(&i.account.simple_user.type_)?,
+                name,
+                email,
+            )?;
+            app0.db.store_install(i.id, i.account.simple_user.id)?;
+        }
 
         let c = app0.install_client(i.id);
 

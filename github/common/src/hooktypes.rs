@@ -14,6 +14,7 @@ pub struct Payload {
     pub check_suite: Option<CheckSuite>,
     pub check_run: Option<CheckRun>,
     pub pull_request: Option<PullRequest>,
+    pub requested_action: Option<RequestedAction>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -28,7 +29,7 @@ pub struct User {
     pub site_admin: bool,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone, Copy)]
 pub enum UserType {
     Bot,
     User,
@@ -140,6 +141,7 @@ pub enum CheckRunConclusion {
 pub struct Installation {
     pub id: i64,
     pub node_id: Option<String>,
+    pub account: Option<User>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -147,4 +149,9 @@ pub struct Owner {
     pub id: i64,
     pub node_id: String,
     pub login: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct RequestedAction {
+    pub identifier: String,
 }

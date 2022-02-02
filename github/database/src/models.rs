@@ -7,6 +7,7 @@ use diesel::serialize::ToSql;
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::str::FromStr;
+use wollongong_common::hooktypes;
 
 use super::schema::*;
 
@@ -41,6 +42,95 @@ pub struct Repository {
     pub id: i64,
     pub owner: String,
     pub name: String,
+}
+
+#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
+#[table_name = "install"]
+#[primary_key(id)]
+pub struct Install {
+    pub id: i64,
+    pub owner: i64,
+}
+
+#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
+#[table_name = "user"]
+#[primary_key(id)]
+pub struct User {
+    pub id: i64,
+    pub login: String,
+    pub usertype: UserType,
+    pub name: Option<String>,
+    pub email: Option<String>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    DeserializeFromStr,
+    SerializeDisplay,
+    FromSqlRow,
+    diesel::expression::AsExpression,
+)]
+#[sql_type = "diesel::sql_types::Text"]
+pub enum UserType {
+    User,
+    Bot,
+    Organisation,
+}
+sql_for_enum!(UserType);
+
+impl UserType {
+    pub fn is_org(&self) -> bool {
+        matches!(self, UserType::Organisation)
+    }
+
+    pub fn from_github_str(ut: &str) -> Result<Self> {
+        Ok(match ut {
+            "User" => UserType::User,
+            "Bot" => UserType::Bot,
+            "Organization" => UserType::Organisation,
+            x => bail!("invalid user type from GitHub: {:?}", x),
+        })
+    }
+
+    pub fn from_github(ut: hooktypes::UserType) -> Self {
+        match ut {
+            hooktypes::UserType::User => UserType::User,
+            hooktypes::UserType::Bot => UserType::Bot,
+            hooktypes::UserType::Organization => UserType::Organisation,
+        }
+    }
+}
+
+impl FromStr for UserType {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "user" => UserType::User,
+            "bot" => UserType::Bot,
+            "org" => UserType::Organisation,
+            x => bail!("unknown user type: {:?}", x),
+        })
+    }
+}
+
+impl std::fmt::Display for UserType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use UserType::*;
+
+        write!(
+            f,
+            "{}",
+            match self {
+                User => "user",
+                Bot => "bot",
+                Organisation => "org",
+            }
+        )
+    }
 }
 
 #[derive(
@@ -111,6 +201,12 @@ pub enum CheckSuiteState {
 }
 sql_for_enum!(CheckSuiteState);
 
+impl CheckSuiteState {
+    pub fn is_parked(&self) -> bool {
+        matches!(self, CheckSuiteState::Parked)
+    }
+}
+
 impl FromStr for CheckSuiteState {
     type Err = anyhow::Error;
 
@@ -173,6 +269,9 @@ pub struct CheckSuite {
     pub plan: Option<JsonPlan>,
     pub plan_sha: Option<String>,
     pub url_key: String,
+    pub pr_by: Option<i64>,
+    pub requested_by: Option<i64>,
+    pub approved_by: Option<i64>,
 }
 
 #[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
