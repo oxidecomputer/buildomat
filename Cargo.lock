@@ -2651,6 +2651,7 @@ dependencies = [
  "serde_with",
  "slog",
  "thiserror",
+ "wollongong-common",
 ]
 
 [[package]]
@@ -2665,6 +2666,30 @@ dependencies = [
  "tokio",
  "wollongong-common",
  "wollongong-database",
+]
+
+[[package]]
+name = "wollongong-ghtool"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "base64 0.13.0",
+ "chrono",
+ "hiercmd",
+ "hmac-sha256",
+ "hyper",
+ "jsonwebtoken",
+ "new_mime_guess",
+ "nom_pem",
+ "octorust",
+ "reqwest",
+ "rusty_ulid",
+ "serde",
+ "serde_json",
+ "slog",
+ "tokio",
+ "toml",
+ "wollongong-common",
 ]
 
 [[package]]

@@ -7,6 +7,7 @@ members = [
 	"github/common",
 	"github/database",
 	"github/dbtool",
+	"github/ghtool",
 	"github/server",
 	"openapi",
 	"server",
