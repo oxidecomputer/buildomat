@@ -394,12 +394,12 @@ pub(crate) async fn run(
                 set -o pipefail\n\
                 set -o xtrace\n\
                 groupadd -g 12345 build\n\
-                useradd -u 12345 -g build -d /home/work -s /bin/bash \
+                useradd -u 12345 -g build -d /home/build -s /bin/bash \
                 -c 'build' -P 'Primary Administrator' build\n\
                 zfs create -o mountpoint=/work rpool/work\n\
-                mkdir -p /home/work\n\
-                chown build:build /home/work /work\n\
-                chmod 0700 /home/work /work\n\
+                mkdir -p /home/build\n\
+                chown build:build /home/build /work\n\
+                chmod 0700 /home/build /work\n\
                 "
             .into(),
         });
@@ -409,12 +409,12 @@ pub(crate) async fn run(
          * the non-root build user:
          */
         let mut buildenv = HashMap::new();
-        buildenv.insert("HOME".into(), "/home/work".into());
-        buildenv.insert("USER".into(), "work".into());
-        buildenv.insert("LOGNAME".into(), "work".into());
+        buildenv.insert("HOME".into(), "/home/build".into());
+        buildenv.insert("USER".into(), "build".into());
+        buildenv.insert("LOGNAME".into(), "build".into());
         buildenv.insert(
             "PATH".into(),
-            "/home/work/.cargo/bin:\
+            "/home/build/.cargo/bin:\
             /usr/bin:/usr/sbin:/sbin:/opt/ooce/bin:/opt/ooce/sbin"
                 .into(),
         );
@@ -444,7 +444,7 @@ pub(crate) async fn run(
                 env_clear: false,
                 gid: Some(12345),
                 uid: Some(12345),
-                workdir: Some("/home/work".into()),
+                workdir: Some("/home/build".into()),
                 script: "\
                     #!/bin/bash\n\
                     set -o errexit\n\
@@ -477,7 +477,7 @@ pub(crate) async fn run(
             env_clear: false,
             gid: Some(12345),
             uid: Some(12345),
-            workdir: Some("/home/work".into()),
+            workdir: Some("/home/build".into()),
             script: "\
                 #!/bin/bash\n\
                 set -o errexit\n\
@@ -499,7 +499,7 @@ pub(crate) async fn run(
             env_clear: false,
             gid: Some(12345),
             uid: Some(12345),
-            workdir: Some("/home/work".into()),
+            workdir: Some("/home/build".into()),
             script: "\
                 #!/bin/bash\n\
                 set -o errexit\n\
