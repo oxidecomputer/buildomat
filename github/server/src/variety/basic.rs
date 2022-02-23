@@ -24,6 +24,8 @@ struct BasicConfig {
     output_rules: Vec<String>,
     rust_toolchain: Option<String>,
     target: Option<String>,
+    #[serde(default)]
+    access_repos: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -234,6 +236,7 @@ pub(crate) async fn run(
 ) -> Result<bool> {
     let db = &app.db;
     let repo = db.load_repository(cs.repo)?;
+    let log = &app.log;
 
     let c: BasicConfig = cr.get_config()?;
 
@@ -364,11 +367,70 @@ pub(crate) async fn run(
         }
     } else {
         /*
-         * We will need to provide the user program with an access token
-         * that allows them to check out what may well be a private
-         * repository.
+         * We will need to provide the user program with an access token that
+         * allows them to check out what may well be a private repository,
+         * whether the repository for the check run or one of the other
+         * repositories to which the check needs access.
          */
-        let token = app.temp_access_token(cs.install, &repo).await?;
+        let mut extras = Vec::new();
+        if !c.access_repos.is_empty() {
+            /*
+             * We need to map the symbolic name of each repository to an ID that
+             * can be included in an access token request.  Invalid repository
+             * names should result in a job error that the user can then
+             * correct.
+             */
+            let gh = app.install_client(cs.install);
+
+            for dep in &c.access_repos {
+                let msg = if let Some((owner, name)) = dep.split_once("/") {
+                    match gh.repos().get(owner, name).await {
+                        Ok(fr) => {
+                            if !extras.contains(&fr.id) {
+                                extras.push(fr.id);
+                            }
+                            continue;
+                        }
+                        Err(e) => {
+                            warn!(
+                                log,
+                                "check run {} could not map repository {:?}: \
+                                {:?}",
+                                cr.id,
+                                dep,
+                                e,
+                            );
+                            format!(
+                                "The \"access_repos\" entry {:?} is not valid.",
+                                dep,
+                            )
+                        }
+                    }
+                } else {
+                    format!(
+                        "The \"access_repos\" entry {:?} is not valid.  \
+                        It should be the name of a GitHub repository in \
+                        \"owner/name\" format.",
+                        dep
+                    )
+                };
+
+                /*
+                 * If we could not resolve the extra repository to which we need
+                 * to provide access, report it to the user and fail the check
+                 * run.
+                 */
+                p.complete = true;
+                p.error = Some(msg);
+                cr.set_private(p)?;
+                cr.flushed = false;
+                db.update_check_run(cr)?;
+                return Ok(false);
+            }
+        }
+
+        let token =
+            app.temp_access_token(cs.install, &repo, Some(&extras)).await?;
 
         /*
          * Create a series of tasks to configure the build environment

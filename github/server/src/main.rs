@@ -94,12 +94,22 @@ impl App {
         &self,
         install_id: i64,
         repo: &Repository,
+        extra_repos: Option<&Vec<i64>>,
     ) -> Result<String> {
         use octorust::types::{
             AppPermissions, AppsCreateInstallationAccessTokenRequest, Pages,
         };
 
         let gh = self.install_client(install_id);
+
+        let mut ids = vec![repo.id];
+        if let Some(repos) = extra_repos {
+            for id in repos {
+                if !ids.contains(id) {
+                    ids.push(*id);
+                }
+            }
+        }
 
         let permissions = Some(AppPermissions {
             contents: Some(Pages::Read),
@@ -108,7 +118,7 @@ impl App {
 
         let body = AppsCreateInstallationAccessTokenRequest {
             permissions,
-            repository_ids: vec![repo.id],
+            repository_ids: ids,
             ..Default::default()
         };
 
