@@ -161,23 +161,22 @@ async fn clean_files_one(log: &Logger, c: &Central) -> Result<()> {
                     continue;
                 };
 
-            let file =
-                if let Some(file) = c.db.job_file_by_id_opt(jid, fid)? {
-                    if file.time_archived.is_none() {
-                        /*
-                         * Ignore files not yet archived to the object store.
-                         */
-                        continue;
-                    }
-                    file
-                } else {
-                    warn!(
-                        log,
-                        "file not found in database for job: {:?}",
-                        ent.path(),
-                    );
+            let file = if let Some(file) = c.db.job_file_by_id_opt(jid, fid)? {
+                if file.time_archived.is_none() {
+                    /*
+                     * Ignore files not yet archived to the object store.
+                     */
                     continue;
-                };
+                }
+                file
+            } else {
+                warn!(
+                    log,
+                    "file not found in database for job: {:?}",
+                    ent.path(),
+                );
+                continue;
+            };
 
             info!(
                 log,

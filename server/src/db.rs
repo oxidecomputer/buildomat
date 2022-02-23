@@ -532,10 +532,7 @@ impl Database {
             .get_results(c)?)
     }
 
-    pub fn job_outputs(
-        &self,
-        job: JobId,
-    ) -> Result<Vec<(JobOutput, JobFile)>> {
+    pub fn job_outputs(&self, job: JobId) -> Result<Vec<(JobOutput, JobFile)>> {
         use schema::{job_file, job_output};
 
         let c = &mut self.1.lock().unwrap().conn;
@@ -746,11 +743,7 @@ impl Database {
             assert_eq!(ic, 1);
 
             let ic = diesel::insert_into(job_output::dsl::job_output)
-                .values(JobOutput {
-                    job,
-                    path: path.to_string(),
-                    id,
-                })
+                .values(JobOutput { job, path: path.to_string(), id })
                 .execute(tx)?;
             assert_eq!(ic, 1);
 

@@ -627,8 +627,7 @@ async fn main() -> Result<()> {
 
     let mut dbfile = datadir.clone();
     dbfile.push("data.sqlite3");
-    let db =
-        db::Database::new(log.clone(), dbfile, config.sqlite.cache_kb)?;
+    let db = db::Database::new(log.clone(), dbfile, config.sqlite.cache_kb)?;
 
     let credprov = rusoto_credential::StaticProvider::new_minimal(
         config.storage.access_key_id.clone(),
