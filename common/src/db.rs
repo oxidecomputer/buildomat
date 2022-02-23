@@ -227,6 +227,13 @@ macro_rules! ulid_new_type {
             pub fn datetime(&self) -> DateTime<Utc> {
                 self.0.datetime()
             }
+
+            pub fn age(&self) -> std::time::Duration {
+                Utc::now()
+                    .signed_duration_since(self.0.datetime())
+                    .to_std()
+                    .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+            }
         }
     };
 }
@@ -303,6 +310,15 @@ impl std::ops::Deref for IsoDate {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl IsoDate {
+    pub fn age(&self) -> std::time::Duration {
+        Utc::now()
+            .signed_duration_since(self.0)
+            .to_std()
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
     }
 }
 

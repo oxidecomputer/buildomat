@@ -117,10 +117,7 @@ pub struct JobEvent {
 
 impl JobEvent {
     pub fn age(&self) -> Duration {
-        Utc::now()
-            .signed_duration_since(self.time.0)
-            .to_std()
-            .unwrap_or_else(|_| Duration::from_secs(0))
+        self.time.age()
     }
 }
 

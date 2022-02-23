@@ -4,6 +4,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use anyhow::Result;
+use chrono::prelude::*;
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
@@ -78,4 +79,22 @@ pub fn genkey(len: usize) -> String {
         .take(len)
         .map(|c| c as char)
         .collect()
+}
+
+pub trait UlidDateExt {
+    fn creation(&self) -> DateTime<Utc>;
+    fn age(&self) -> Duration;
+}
+
+impl UlidDateExt for Ulid {
+    fn creation(&self) -> DateTime<Utc> {
+        Utc.timestamp_millis(self.timestamp() as i64)
+    }
+
+    fn age(&self) -> Duration {
+        let when = std::time::UNIX_EPOCH
+            .checked_add(Duration::from_millis(self.timestamp()))
+            .unwrap();
+        std::time::SystemTime::now().duration_since(when).unwrap()
+    }
 }

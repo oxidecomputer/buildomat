@@ -37,24 +37,6 @@ impl IdExt for Worker {
     }
 }
 
-trait UlidDateExt {
-    fn creation(&self) -> DateTime<Utc>;
-    fn age(&self) -> Duration;
-}
-
-impl UlidDateExt for Ulid {
-    fn creation(&self) -> DateTime<Utc> {
-        Utc.timestamp_millis(self.timestamp() as i64)
-    }
-
-    fn age(&self) -> Duration {
-        let when = std::time::UNIX_EPOCH
-            .checked_add(Duration::from_millis(self.timestamp()))
-            .unwrap();
-        std::time::SystemTime::now().duration_since(when).unwrap()
-    }
-}
-
 #[derive(Default)]
 struct Stuff {
     client_user: Option<Client>,
