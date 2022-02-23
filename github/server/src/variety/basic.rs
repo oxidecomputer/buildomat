@@ -375,6 +375,23 @@ pub(crate) async fn run(
         let mut extras = Vec::new();
         if !c.access_repos.is_empty() {
             /*
+             * First, make sure this job is authorised by a member of the
+             * organisation that owns the repository.
+             */
+            if cs.approved_by.is_none() {
+                p.complete = true;
+                p.error = Some(
+                    "Use of \"access_repos\" requires authorisation from \
+                    a member of the organisation that owns the repository."
+                        .into(),
+                );
+                cr.set_private(p)?;
+                cr.flushed = false;
+                db.update_check_run(cr)?;
+                return Ok(false);
+            }
+
+            /*
              * We need to map the symbolic name of each repository to an ID that
              * can be included in an access token request.  Invalid repository
              * names should result in a job error that the user can then

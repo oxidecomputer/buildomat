@@ -1540,7 +1540,62 @@ async fn process_check_suite(app: &Arc<App>, cs: &CheckSuiteId) -> Result<()> {
              * the organisation.  Such a job will be marked as failed due to
              * lack of authorisation, with a button that an organisation member
              * may press to authorise the job.
+             *
+             * We need to fill in the "approved_by" field whether or not this
+             * kind of authorisation check will be performed, as it is
+             * subsequently used by varieties to determine if this user is
+             * authorised by the organisation or not; e.g., to determine if
+             * access to additional private repositories is allowed.
              */
+            if cs.approved_by.is_none() {
+                /*
+                 * If the check suite was created by a push, we expect it to
+                 * have been explicitly requested by a delivery.  Check for
+                 * a requesting user first.
+                 */
+                if let Some(id) = cs.requested_by {
+                    let u = db.load_user(id)?;
+                    let org = db.load_user(install.owner)?;
+                    let res = gh
+                        .orgs()
+                        .check_membership_for_user(&org.login, &u.login)
+                        .await;
+                    if res.is_ok() {
+                        info!(
+                            log,
+                            "check suite {} authorised by {} (request)",
+                            cs.id,
+                            u.login,
+                        );
+                        cs.approved_by = Some(u.id);
+                    }
+                }
+            }
+            if cs.approved_by.is_none() {
+                /*
+                 * Otherwise, if the check suite was created by a pull
+                 * request, check whether the user that created the PR is
+                 * within the organisation.
+                 */
+                if let Some(id) = cs.pr_by {
+                    let u = db.load_user(id)?;
+                    let org = db.load_user(install.owner)?;
+                    let res = gh
+                        .orgs()
+                        .check_membership_for_user(&org.login, &u.login)
+                        .await;
+                    if res.is_ok() {
+                        info!(
+                            log,
+                            "check suite {} authorised by {} (pull)",
+                            cs.id,
+                            u.login,
+                        );
+                        cs.approved_by = Some(u.id);
+                    }
+                }
+            }
+
             let authorised = if !rc.loaded.org_only {
                 /*
                  * If organisation-only authorisation is not enabled, all jobs
@@ -1548,54 +1603,6 @@ async fn process_check_suite(app: &Arc<App>, cs: &CheckSuiteId) -> Result<()> {
                  */
                 true
             } else {
-                if cs.approved_by.is_none() {
-                    /*
-                     * If the check suite was created by a push, we expect it to
-                     * have been explicitly requested by a delivery.  Check for
-                     * a requesting user first.
-                     */
-                    if let Some(id) = cs.requested_by {
-                        let u = db.load_user(id)?;
-                        let org = db.load_user(install.owner)?;
-                        let res = gh
-                            .orgs()
-                            .check_membership_for_user(&org.login, &u.login)
-                            .await;
-                        if res.is_ok() {
-                            info!(
-                                log,
-                                "check suite {} authorised by {} (request)",
-                                cs.id,
-                                u.login,
-                            );
-                            cs.approved_by = Some(u.id);
-                        }
-                    }
-                }
-                if cs.approved_by.is_none() {
-                    /*
-                     * Otherwise, if the check suite was created by a pull
-                     * request, check whether the user that created the PR is
-                     * within the organisation.
-                     */
-                    if let Some(id) = cs.pr_by {
-                        let u = db.load_user(id)?;
-                        let org = db.load_user(install.owner)?;
-                        let res = gh
-                            .orgs()
-                            .check_membership_for_user(&org.login, &u.login)
-                            .await;
-                        if res.is_ok() {
-                            info!(
-                                log,
-                                "check suite {} authorised by {} (pull)",
-                                cs.id,
-                                u.login,
-                            );
-                            cs.approved_by = Some(u.id);
-                        }
-                    }
-                }
                 cs.approved_by.is_some()
             };
 
