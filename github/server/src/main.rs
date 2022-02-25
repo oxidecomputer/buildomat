@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use slog::{debug, error, info, o, trace, warn, Logger};
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::Duration;
 use wollongong_common::hooktypes;
 use wollongong_database::types::*;
 
@@ -327,8 +326,6 @@ impl App {
     }
 
     fn buildomat(&self, repo: &Repository) -> buildomat_openapi::Client {
-        use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
-
         /*
          * Use a separate buildomat user for each GitHub repository.  These are
          * created on demand, and we access them via delegation rather than
@@ -343,30 +340,13 @@ impl App {
          */
         let username = format!("gong-{}", repo.id);
 
-        let mut dh = HeaderMap::new();
-        dh.insert(
-            AUTHORIZATION,
-            HeaderValue::from_str(&format!(
-                "Bearer {}",
-                &self.config.buildomat.token
-            ))
-            .unwrap(),
-        );
-        dh.insert(
-            "X-Buildomat-Delegate",
-            HeaderValue::from_str(&username).unwrap(),
-        );
-
-        let rwc = reqwest::ClientBuilder::new()
-            .timeout(Duration::from_secs(15))
-            .connect_timeout(Duration::from_secs(15))
-            .default_headers(dh)
-            .build()
-            .unwrap();
-
         buildomat_openapi::Client::new_with_client(
             &self.config.buildomat.url,
-            rwc,
+            buildomat_common::delegated_client(
+                &self.config.buildomat.token,
+                &username,
+            )
+            .unwrap(),
         )
     }
 }

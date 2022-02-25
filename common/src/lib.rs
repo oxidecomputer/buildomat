@@ -46,7 +46,8 @@ pub async fn sleep_ms(ms: u64) {
 
 fn headers_client(dh: HeaderMap) -> Result<reqwest::Client> {
     Ok(ClientBuilder::new()
-        .timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(3600))
+        .tcp_keepalive(Duration::from_secs(60))
         .connect_timeout(Duration::from_secs(15))
         .default_headers(dh)
         .build()?)

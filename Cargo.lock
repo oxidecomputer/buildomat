@@ -2698,6 +2698,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "base64 0.13.0",
+ "buildomat-common",
  "buildomat-openapi",
  "chrono",
  "dropshot",

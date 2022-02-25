@@ -8,6 +8,7 @@ license = "MPL-2.0"
 anyhow = "1.0.41"
 base64 = "0.13"
 buildomat-openapi = { path = "../../openapi" }
+buildomat-common = { path = "../../common" }
 chrono = { version = "0.4.19", features = ["serde"] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot" }
 hmac-sha256 = "0.1.7"
