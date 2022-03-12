@@ -332,7 +332,7 @@ pub(crate) async fn run(
                 }
             }
 
-            while p.events_tail.len() > 16 {
+            while p.events_tail.len() > 25 {
                 change = true;
                 let first = p.events_tail.pop_front().unwrap();
                 if let (Some(tag), msg) = first {
