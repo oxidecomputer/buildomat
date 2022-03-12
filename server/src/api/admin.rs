@@ -96,7 +96,7 @@ pub(crate) async fn user_create(
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req).await?;
+    c.require_admin(log, &req, "user.create").await?;
 
     let new_user = new_user.into_inner();
     let u = c.db.user_create(&new_user.name).or_500()?;
@@ -119,7 +119,7 @@ pub(crate) async fn users_list(
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req).await?;
+    c.require_admin(log, &req, "user.read").await?;
 
     let out =
         c.db.users()
@@ -148,7 +148,7 @@ pub(crate) async fn user_get(
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req).await?;
+    c.require_admin(log, &req, "user.read").await?;
 
     if let Some(u) = c.db.user_get_by_id(path.into_inner().user()?).or_500()? {
         Ok(HttpResponseOk(User {
@@ -174,7 +174,7 @@ pub(crate) async fn user_privilege_grant(
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req).await?;
+    c.require_admin(log, &req, "privilege.grant").await?;
 
     let path = path.into_inner();
     let u = path.user()?;
@@ -198,7 +198,7 @@ pub(crate) async fn user_privilege_revoke(
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req).await?;
+    c.require_admin(log, &req, "privilege.revoke").await?;
 
     let path = path.into_inner();
     let u = path.user()?;
@@ -230,7 +230,7 @@ pub(crate) async fn admin_jobs_get(
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req).await?;
+    c.require_admin(log, &req, "job.read").await?;
 
     let q = query.into_inner();
     let jobs = if q.active {
@@ -280,7 +280,7 @@ pub(crate) async fn admin_job_get(
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req).await?;
+    c.require_admin(log, &req, "job.read").await?;
 
     let id = path.into_inner().job.parse::<db::JobId>().or_500()?;
     let job = c.db.job_by_id(id).or_500()?;
@@ -304,7 +304,7 @@ pub(crate) async fn control_hold(
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req).await?;
+    c.require_admin(log, &req, "control").await?;
 
     info!(log, "ADMIN: HOLD NEW VM CREATION");
     c.inner.lock().unwrap().hold = true;
@@ -323,7 +323,7 @@ pub(crate) async fn control_resume(
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req).await?;
+    c.require_admin(log, &req, "control").await?;
 
     info!(log, "ADMIN: RESUME NEW VM CREATION");
     c.inner.lock().unwrap().hold = false;
@@ -376,7 +376,7 @@ pub(crate) async fn workers_list(
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req).await?;
+    c.require_admin(log, &req, "worker.read").await?;
 
     let w = if query.into_inner().active {
         /*
@@ -433,7 +433,7 @@ pub(crate) async fn workers_recycle(
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req).await?;
+    c.require_admin(log, &req, "control").await?;
 
     c.db.worker_recycle_all().or_500()?;
 
@@ -464,7 +464,7 @@ pub(crate) async fn factory_create(
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req).await?;
+    c.require_admin(log, &req, "factory.create").await?;
 
     let new_fac = new_fac.into_inner();
     let f = c.db.factory_create(&new_fac.name).or_500()?;
@@ -506,7 +506,7 @@ pub(crate) async fn target_create(
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req).await?;
+    c.require_admin(log, &req, "target.create").await?;
 
     let new_targ = new_targ.into_inner();
     let t = c.db.target_create(&new_targ.name, &new_targ.desc).or_500()?;
@@ -525,7 +525,7 @@ pub(crate) async fn targets_list(
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req).await?;
+    c.require_admin(log, &req, "target.read").await?;
 
     let out =
         c.db.targets()
@@ -555,7 +555,7 @@ pub(crate) async fn target_require_privilege(
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req).await?;
+    c.require_admin(log, &req, "target.write").await?;
 
     let path = path.into_inner();
     let t = c.db.target_get(path.target()?).or_500()?;
@@ -577,7 +577,7 @@ pub(crate) async fn target_require_no_privilege(
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req).await?;
+    c.require_admin(log, &req, "target.write").await?;
 
     let path = path.into_inner();
     let t = c.db.target_get(path.target()?).or_500()?;

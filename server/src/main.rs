@@ -254,14 +254,40 @@ impl Central {
         &self,
         log: &Logger,
         req: &Request<Body>,
+        privname: &str,
     ) -> SResult<(), HttpError> {
         let t = self._int_auth_token(log, req)?;
+
         if t == self.config.admin.token {
-            Ok(())
-        } else {
-            warn!(log, "admin auth failure");
-            unauth_response()
+            /*
+             * If the bearer token matches the configured global admin token, we
+             * can proceed immediately.
+             */
+            return Ok(());
         }
+
+        /*
+         * Otherwise, try to use the bearer token to authenticate as a regular
+         * user and we will check if they have been delegated the specific
+         * administrative privilege needed.
+         */
+        assert!(!privname.starts_with("admin."));
+        let want = format!("admin.{}", privname);
+        let u = match self.db.user_auth(&t) {
+            Ok(u) => u,
+            Err(e) => {
+                warn!(log, "admin auth failure: {:?}", e);
+                return unauth_response();
+            }
+        };
+
+        if !u.has_privilege(&want) {
+            warn!(log, "user {} does not have privilege {}", u.name, want);
+            return unauth_response();
+        }
+
+        info!(log, "user {} used delegated admin privilege {}", u.name, want);
+        Ok(())
     }
 
     async fn require_user(

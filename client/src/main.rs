@@ -49,8 +49,14 @@ impl Stuff {
         self.client_user.as_ref().unwrap()
     }
 
-    fn admin(&self) -> Result<&buildomat_openapi::Client> {
-        self.client_admin.as_ref().ok_or_else(|| anyhow!("need admin token"))
+    fn admin(&self) -> &buildomat_openapi::Client {
+        /*
+         * If the profile has an admin token configured, use it for all admin
+         * tasks.  Otherwise, we will try our luck with our regular user
+         * credentials, in the hope that we have been granted the required
+         * privileges.
+         */
+        self.client_admin.as_ref().unwrap_or_else(|| self.user())
     }
 }
 
@@ -306,19 +312,19 @@ async fn do_info(mut l: Level<Stuff>) -> Result<()> {
 
 async fn do_control_resume(mut l: Level<Stuff>) -> Result<()> {
     no_args!(l);
-    println!("{:?}", l.context().admin()?.control_resume().await?);
+    println!("{:?}", l.context().admin().control_resume().await?);
     Ok(())
 }
 
 async fn do_control_hold(mut l: Level<Stuff>) -> Result<()> {
     no_args!(l);
-    println!("{:?}", l.context().admin()?.control_hold().await?);
+    println!("{:?}", l.context().admin().control_hold().await?);
     Ok(())
 }
 
 async fn do_control_recycle(mut l: Level<Stuff>) -> Result<()> {
     no_args!(l);
-    println!("{:?}", l.context().admin()?.workers_recycle().await?);
+    println!("{:?}", l.context().admin().workers_recycle().await?);
     Ok(())
 }
 
@@ -456,7 +462,7 @@ async fn do_user_create(mut l: Level<Stuff>) -> Result<()> {
     }
     let name = a.args()[0].to_string();
 
-    let res = l.context().admin()?.user_create(&UserCreate { name }).await?;
+    let res = l.context().admin().user_create(&UserCreate { name }).await?;
 
     println!("{}", res.token);
     Ok(())
@@ -473,7 +479,7 @@ async fn do_user_grant(mut l: Level<Stuff>) -> Result<()> {
     let id = a.args()[0].to_string();
     let privilege = a.args()[1].to_string();
 
-    l.context().admin()?.user_privilege_grant(&id, &privilege).await?;
+    l.context().admin().user_privilege_grant(&id, &privilege).await?;
     Ok(())
 }
 
@@ -488,7 +494,7 @@ async fn do_user_revoke(mut l: Level<Stuff>) -> Result<()> {
     let id = a.args()[0].to_string();
     let privilege = a.args()[1].to_string();
 
-    l.context().admin()?.user_privilege_revoke(&id, &privilege).await?;
+    l.context().admin().user_privilege_revoke(&id, &privilege).await?;
     Ok(())
 }
 
@@ -501,7 +507,7 @@ async fn do_user_list(mut l: Level<Stuff>) -> Result<()> {
 
     let mut t = a.table();
 
-    for u in l.context().admin()?.users_list().await? {
+    for u in l.context().admin().users_list().await? {
         let mut r = Row::default();
         r.add_str("id", &u.id);
         r.add_str("name", &u.name);
@@ -526,7 +532,7 @@ async fn do_user_show(mut l: Level<Stuff>) -> Result<()> {
     }
     let id = a.args()[0].to_string();
 
-    let res = l.context().admin()?.user_get(&id).await?;
+    let res = l.context().admin().user_get(&id).await?;
 
     println!("id:          {}", res.id);
     println!("name:        {}", res.name);
@@ -565,7 +571,7 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
 
     let mut t = a.table();
 
-    for w in l.context().admin()?.workers_list(Some(active)).await?.workers {
+    for w in l.context().admin().workers_list(Some(active)).await?.workers {
         if active && w.deleted {
             continue;
         }
@@ -638,7 +644,7 @@ async fn do_factory_create(mut l: Level<Stuff>) -> Result<()> {
     let name = a.args()[0].to_string();
 
     let res =
-        l.context().admin()?.factory_create(&FactoryCreate { name }).await?;
+        l.context().admin().factory_create(&FactoryCreate { name }).await?;
 
     println!("{}", res.token);
     Ok(())
@@ -662,11 +668,8 @@ async fn do_target_create(mut l: Level<Stuff>) -> Result<()> {
     let name = a.args()[0].to_string();
     let desc = a.opts().opt_str("d").unwrap();
 
-    let res = l
-        .context()
-        .admin()?
-        .target_create(&TargetCreate { name, desc })
-        .await?;
+    let res =
+        l.context().admin().target_create(&TargetCreate { name, desc }).await?;
 
     println!("{}", res.id);
     Ok(())
@@ -683,7 +686,7 @@ async fn do_target_list(mut l: Level<Stuff>) -> Result<()> {
 
     let mut t = a.table();
 
-    for targ in l.context().admin()?.targets_list().await? {
+    for targ in l.context().admin().targets_list().await? {
         let mut r = Row::default();
         r.add_str("id", &targ.id);
         r.add_str("name", &targ.name);
@@ -708,7 +711,7 @@ async fn do_target_restrict(mut l: Level<Stuff>) -> Result<()> {
     let id = a.args()[0].to_string();
     let privilege = a.args()[1].to_string();
 
-    l.context().admin()?.target_require_privilege(&id, &privilege).await?;
+    l.context().admin().target_require_privilege(&id, &privilege).await?;
     Ok(())
 }
 
@@ -722,7 +725,7 @@ async fn do_target_unrestrict(mut l: Level<Stuff>) -> Result<()> {
     }
     let id = a.args()[0].to_string();
 
-    l.context().admin()?.target_require_no_privilege(&id).await?;
+    l.context().admin().target_require_no_privilege(&id).await?;
     Ok(())
 }
 
@@ -775,7 +778,7 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
     let mut w = Stopwatch::start(a.opts().opt_present("v"));
 
     let users = s
-        .admin()?
+        .admin()
         .users_list()
         .await?
         .iter()
@@ -786,19 +789,19 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
     /*
      * Load active jobs:
      */
-    let jobs = s.admin()?.admin_jobs_get(Some(true), None).await?;
+    let jobs = s.admin().admin_jobs_get(Some(true), None).await?;
     w.lap("admin_jobs_get active");
 
     /*
      * Load some of recently completed jobs:
      */
-    let oldjobs = s.admin()?.admin_jobs_get(None, Some(10)).await?;
+    let oldjobs = s.admin().admin_jobs_get(None, Some(10)).await?;
     w.lap("admin_jobs_get completed");
 
     /*
      * Load active workers:
      */
-    let res = s.admin()?.workers_list(Some(true)).await?;
+    let res = s.admin().workers_list(Some(true)).await?;
     w.lap("workers_list");
 
     fn github_url(tags: &HashMap<String, String>) -> Option<String> {
