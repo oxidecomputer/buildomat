@@ -565,7 +565,7 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
 
     let mut t = a.table();
 
-    for w in l.context().admin()?.workers_list().await?.workers {
+    for w in l.context().admin()?.workers_list(Some(active)).await?.workers {
         if active && w.deleted {
             continue;
         }
@@ -743,10 +743,36 @@ async fn do_target(mut l: Level<Stuff>) -> Result<()> {
     sel!(l).run().await
 }
 
+struct Stopwatch {
+    enable: bool,
+    last: Instant,
+}
+
+impl Stopwatch {
+    fn start(enable: bool) -> Stopwatch {
+        Stopwatch { enable, last: Instant::now() }
+    }
+
+    fn lap(&mut self, n: &str) {
+        if !self.enable {
+            return;
+        }
+
+        let now = Instant::now();
+        let delta = now.checked_duration_since(self.last).unwrap();
+        self.last = now;
+        eprintln!("WATCH: {} ({} s)", n, delta.as_secs_f64());
+    }
+}
+
 async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
-    no_args!(l);
+    l.optflag("v", "", "debugging output");
+
+    let a = no_args!(l);
 
     let s = l.context();
+
+    let mut w = Stopwatch::start(a.opts().opt_present("v"));
 
     let users = s
         .admin()?
@@ -755,13 +781,25 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
         .iter()
         .map(|u| (u.id.to_string(), u.name.to_string()))
         .collect::<HashMap<String, String>>();
+    w.lap("users_list");
 
     /*
-     * Load all jobs.
+     * Load active jobs:
      */
-    let jobs = s.admin()?.admin_jobs_get().await?;
+    let jobs = s.admin()?.admin_jobs_get(Some(true), None).await?;
+    w.lap("admin_jobs_get active");
 
-    let res = s.admin()?.workers_list().await?;
+    /*
+     * Load some of recently completed jobs:
+     */
+    let oldjobs = s.admin()?.admin_jobs_get(None, Some(10)).await?;
+    w.lap("admin_jobs_get completed");
+
+    /*
+     * Load active workers:
+     */
+    let res = s.admin()?.workers_list(Some(true)).await?;
+    w.lap("workers_list");
 
     fn github_url(tags: &HashMap<String, String>) -> Option<String> {
         let owner = tags.get("gong.repo.owner")?;
@@ -807,10 +845,11 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
         }
 
         println!(
-            "== worker {} ({:?})\n    created {}",
+            "== worker {} ({:?})\n    created {} ({}s ago)",
             w.id,
             w.factory_private,
-            w.id()?.creation()
+            w.id()?.creation(),
+            w.id()?.age().as_secs(),
         );
         for job in w.jobs.iter() {
             seen.insert(job.id.to_string());
@@ -822,6 +861,7 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
         }
         println!();
     }
+    w.lap("worker display");
 
     /*
      * Display all jobs that have not been displayed already, and which are not
@@ -842,6 +882,23 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
         dump_info(&job.tags);
         println!();
     }
+    w.lap("job display");
+
+    /*
+     * Display recently completed jobs:
+     */
+    for job in oldjobs.iter() {
+        if seen.contains(&job.id) {
+            continue;
+        }
+
+        let owner = users.get(&job.owner).unwrap_or(&job.owner);
+
+        println!("~~ recent completed job {} (user {})", job.id, owner);
+        dump_info(&job.tags);
+        println!();
+    }
+    w.lap("completed job display");
 
     Ok(())
 }

@@ -1,5 +1,3 @@
-#![allow(clippy::needless_lifetimes)]
-
 use anyhow::Result;
 mod progenitor_support {
     use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
@@ -366,9 +364,22 @@ impl Client {
     }
 
     #[doc = "admin_jobs_get: GET /0/admin/jobs"]
-    pub async fn admin_jobs_get<'a>(&'a self) -> Result<Vec<types::Job>> {
+    pub async fn admin_jobs_get<'a>(
+        &'a self,
+        active: Option<bool>,
+        completed: Option<u64>,
+    ) -> Result<Vec<types::Job>> {
         let url = format!("{}/0/admin/jobs", self.baseurl,);
-        let request = self.client.get(url).build()?;
+        let mut query = Vec::new();
+        if let Some(v) = &active {
+            query.push(("active", v.to_string()));
+        }
+
+        if let Some(v) = &completed {
+            query.push(("completed", v.to_string()));
+        }
+
+        let request = self.client.get(url).query(&query).build()?;
         let result = self.client.execute(request).await;
         let res = result?.error_for_status()?;
         Ok(res.json().await?)
@@ -923,9 +934,17 @@ impl Client {
     }
 
     #[doc = "workers_list: GET /0/workers"]
-    pub async fn workers_list<'a>(&'a self) -> Result<types::WorkersResult> {
+    pub async fn workers_list<'a>(
+        &'a self,
+        active: Option<bool>,
+    ) -> Result<types::WorkersResult> {
         let url = format!("{}/0/workers", self.baseurl,);
-        let request = self.client.get(url).build()?;
+        let mut query = Vec::new();
+        if let Some(v) = &active {
+            query.push(("active", v.to_string()));
+        }
+
+        let request = self.client.get(url).query(&query).build()?;
         let result = self.client.execute(request).await;
         let res = result?.error_for_status()?;
         Ok(res.json().await?)

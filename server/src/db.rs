@@ -83,6 +83,17 @@ impl Database {
         Ok(dsl::worker.order_by(dsl::id.asc()).get_results(c)?)
     }
 
+    pub fn workers_active(&self) -> Result<Vec<Worker>> {
+        let c = &mut self.1.lock().unwrap().conn;
+
+        use schema::worker::dsl;
+
+        Ok(dsl::worker
+            .filter(dsl::deleted.eq(false))
+            .order_by(dsl::id.asc())
+            .get_results(c)?)
+    }
+
     pub fn workers_for_factory(
         &self,
         factory: &Factory,
@@ -477,6 +488,22 @@ impl Database {
             .filter(dsl::waiting.eq(true))
             .order_by(dsl::id.asc())
             .get_results(c)?)
+    }
+
+    /**
+     * Enumerate some number of the most recently complete jobs.
+     */
+    pub fn jobs_completed(&self, limit: usize) -> Result<Vec<Job>> {
+        use schema::job::dsl;
+
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut res = dsl::job
+            .filter(dsl::complete.eq(true))
+            .order_by(dsl::id.desc())
+            .limit(limit.try_into().unwrap())
+            .get_results(c)?;
+        res.reverse();
+        Ok(res)
     }
 
     pub fn job_tasks(&self, job: JobId) -> Result<Vec<Task>> {

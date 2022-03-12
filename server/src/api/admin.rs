@@ -210,12 +210,21 @@ pub(crate) async fn user_privilege_revoke(
     Ok(HttpResponseDeleted())
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct AdminJobsGetQuery {
+    #[serde(default)]
+    active: bool,
+    #[serde(default)]
+    completed: Option<u64>,
+}
+
 #[endpoint {
     method = GET,
     path = "/0/admin/jobs",
 }]
 pub(crate) async fn admin_jobs_get(
     rqctx: Arc<RequestContext<Arc<Central>>>,
+    query: TypedQuery<AdminJobsGetQuery>,
 ) -> SResult<HttpResponseOk<Vec<super::user::Job>>, HttpError> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
@@ -223,10 +232,28 @@ pub(crate) async fn admin_jobs_get(
 
     c.require_admin(log, &req).await?;
 
+    let q = query.into_inner();
+    let jobs = if q.active {
+        /*
+         * We have been asked to list only active jobs:
+         */
+        let mut jobs = c.db.jobs_active().or_500()?;
+        jobs.extend(c.db.jobs_waiting().or_500()?);
+        jobs
+    } else if let Some(n) = &q.completed {
+        /*
+         * We have been asked to provide some number of recently completed jobs:
+         */
+        c.db.jobs_completed((*n).try_into().unwrap()).or_500()?
+    } else {
+        /*
+         * By default we list all jobs in the database.
+         */
+        c.db.jobs_all().or_500()?
+    };
+
     Ok(HttpResponseOk(
-        c.db.jobs_all()
-            .or_500()?
-            .iter()
+        jobs.iter()
             .map(|job| {
                 Ok(super::user::format_job(
                     job,
@@ -331,12 +358,19 @@ pub(crate) struct WorkersResult {
     workers: Vec<Worker>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct WorkersListQuery {
+    #[serde(default)]
+    active: bool,
+}
+
 #[endpoint {
     method = GET,
     path = "/0/workers",
 }]
 pub(crate) async fn workers_list(
     rqctx: Arc<RequestContext<Arc<Central>>>,
+    query: TypedQuery<WorkersListQuery>,
 ) -> SResult<HttpResponseOk<WorkersResult>, HttpError> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
@@ -344,7 +378,18 @@ pub(crate) async fn workers_list(
 
     c.require_admin(log, &req).await?;
 
-    let w = c.db.workers().or_500()?;
+    let w = if query.into_inner().active {
+        /*
+         * List only active (i.e., not deleted) workers:
+         */
+        c.db.workers_active().or_500()?
+    } else {
+        /*
+         * List all workers in the database.
+         */
+        c.db.workers().or_500()?
+    };
+
     let workers = w
         .iter()
         .map(|w| {
