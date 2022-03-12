@@ -3,21 +3,33 @@
  */
 
 use anyhow::{anyhow, bail, Result};
+use buildomat_common::*;
 use chrono::prelude::*;
 use dropshot::{
     endpoint, ConfigDropshot, HttpError, HttpResponseOk, RequestContext,
 };
+use rusty_ulid::Ulid;
 use schemars::JsonSchema;
 #[allow(unused_imports)]
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use slog::{debug, error, info, o, trace, Logger};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::result::Result as SResult;
 use std::sync::Arc;
 use wollongong_database::types::*;
 
 use super::{variety, App};
+
+trait IdExt {
+    fn id(&self) -> Result<Ulid>;
+}
+
+impl IdExt for buildomat_openapi::types::Worker {
+    fn id(&self) -> Result<Ulid> {
+        to_ulid(&self.id)
+    }
+}
 
 fn sign(body: &[u8], secret: &str) -> String {
     let hmac = hmac_sha256::HMAC::mac(body, secret.as_bytes());
@@ -268,6 +280,189 @@ async fn webhook(
     Ok(HttpResponseOk(()))
 }
 
+#[endpoint {
+    method = GET,
+    path = "/status",
+}]
+async fn status(
+    rc: Arc<RequestContext<Arc<App>>>,
+) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+    let app = rc.context();
+    let b = app.buildomat_admin();
+
+    let mut out = String::new();
+    out += "<html>\n";
+    out += "<head><title>Buildomat Status</title></head>\n";
+    out += "<body>\n";
+    out += "<h1>Buildomat Status</h1>\n";
+
+    /*
+     * Load active jobs, recently completed jobs, and active workers:
+     */
+    let jobs = b.admin_jobs_get(Some(true), None).await.to_500()?;
+    let oldjobs = {
+        let mut oldjobs = b.admin_jobs_get(None, Some(20)).await.to_500()?;
+        /*
+         * Display most recent job first by sorting the ID backwards; a ULID
+         * begins with a timestamp prefix, so a lexicographical sort is ordered
+         * by creation time.
+         */
+        oldjobs.sort_by(|a, b| b.id.cmp(&a.id));
+        oldjobs
+    };
+    let workers = b.workers_list(Some(true)).await.to_500()?;
+
+    fn github_url(tags: &HashMap<String, String>) -> Option<String> {
+        let owner = tags.get("gong.repo.owner")?;
+        let name = tags.get("gong.repo.name")?;
+        let checkrun = tags.get("gong.run.github_id")?;
+
+        let url =
+            format!("https://github.com/{}/{}/runs/{}", owner, name, checkrun);
+
+        Some(format!("<a href=\"{}\">{}</a>", url, url))
+    }
+
+    fn commit_url(tags: &HashMap<String, String>) -> Option<String> {
+        let owner = tags.get("gong.repo.owner")?;
+        let name = tags.get("gong.repo.name")?;
+        let sha = tags.get("gong.head.sha")?;
+
+        let url =
+            format!("https://github.com/{}/{}/commit/{}", owner, name, sha);
+
+        Some(format!("<a href=\"{}\">{}</a>", url, sha))
+    }
+
+    fn github_info(tags: &HashMap<String, String>) -> Option<String> {
+        let owner = tags.get("gong.repo.owner")?;
+        let name = tags.get("gong.repo.name")?;
+        let title = tags.get("gong.name")?;
+
+        let url = format!("https://github.com/{}/{}", owner, name);
+
+        let mut out = format!("<a href=\"{}\">{}/{}</a>", url, owner, name);
+        if let Some(branch) = tags.get("gong.head.branch") {
+            out.push_str(&format!(" ({})", branch));
+        }
+        out.push_str(&format!(": {}", title));
+
+        Some(out)
+    }
+
+    fn dump_info(tags: &HashMap<String, String>) -> String {
+        let mut out = String::new();
+        if let Some(info) = github_info(tags) {
+            out += &format!("&nbsp;&nbsp;&nbsp;<b>{}</b><br>\n", info);
+        }
+        if let Some(url) = commit_url(tags) {
+            out += &format!("&nbsp;&nbsp;&nbsp;<b>commit:</b> {}<br>\n", url);
+        }
+        if let Some(url) = github_url(tags) {
+            out += &format!("&nbsp;&nbsp;&nbsp;<b>url:</b> {}<br>\n", url);
+        }
+        if !out.is_empty() {
+            out = format!("<br>\n{}\n", out);
+        }
+        out
+    }
+
+    let mut seen = HashSet::new();
+
+    if workers.workers.iter().any(|w| !w.deleted) {
+        out += "<h2>Active Workers</h2>\n";
+        out += "<ul>\n";
+
+        for w in workers.workers.iter() {
+            if w.deleted {
+                continue;
+            }
+
+            out += "<li>";
+            out += &w.id;
+            if let Some(fp) = &w.factory_private {
+                out += &format!(" ({})", fp);
+            }
+            out += &format!(
+                " created {} ({}s ago)\n",
+                w.id().to_500()?.creation(),
+                w.id().to_500()?.age().as_secs(),
+            );
+
+            if !w.jobs.is_empty() {
+                out += "<ul>\n";
+
+                for job in w.jobs.iter() {
+                    seen.insert(job.id.to_string());
+
+                    let owner = b.user_get(&job.owner).await.to_500()?;
+
+                    out += "<li>";
+                    out += &format!("job {} user {}", job.id, owner.name);
+                    out += &dump_info(&job.tags);
+                    out += "<br>\n";
+                }
+
+                out += "</ul>\n";
+            }
+        }
+
+        out += "</ul>\n";
+    }
+
+    if jobs.iter().any(|job| !seen.contains(&job.id)) {
+        out += "<h2>Queued Jobs</h2>\n";
+        out += "<ul>\n";
+        for job in jobs.iter() {
+            if seen.contains(&job.id) {
+                continue;
+            }
+
+            if job.state == "completed" || job.state == "failed" {
+                continue;
+            }
+
+            let owner = b.user_get(&job.owner).await.to_500()?;
+
+            out += "<li>";
+            out += &format!("{} user {}", job.id, owner.name);
+            out += &dump_info(&job.tags);
+            out += "<br>\n";
+        }
+        out += "</ul>\n";
+    }
+
+    out += "<h2>Recently Completed Jobs</h2>\n";
+    out += "<ul>\n";
+    for job in oldjobs.iter() {
+        if seen.contains(&job.id) {
+            continue;
+        }
+
+        let owner = b.user_get(&job.owner).await.to_500()?;
+
+        out += "<li>";
+        out += &format!("{} user {}", job.id, owner.name);
+        if job.state == "failed" {
+            out += " <span style=\"background-color: #f29494\">[FAIL]</span>";
+        } else {
+            out += " <span style=\"background-color: #97f294\">[OK]</span>";
+        }
+        out += &dump_info(&job.tags);
+        out += "<br>\n";
+    }
+    out += "</ul>\n";
+
+    out += "</body>\n";
+    out += "</html>\n";
+
+    Ok(hyper::Response::builder()
+        .status(hyper::StatusCode::OK)
+        .header(hyper::header::CONTENT_TYPE, "text/html; charset=utf-8")
+        .header(hyper::header::CONTENT_LENGTH, out.as_bytes().len())
+        .body(hyper::Body::from(out))?)
+}
+
 pub(crate) async fn server(
     app: Arc<App>,
     bind_address: std::net::SocketAddr,
@@ -282,6 +477,7 @@ pub(crate) async fn server(
     api.register(webhook).unwrap();
     api.register(details).unwrap();
     api.register(artefact).unwrap();
+    api.register(status).unwrap();
 
     let log = app.log.clone();
     let s = dropshot::HttpServerStarter::new(&cd, api, app, &log)

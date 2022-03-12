@@ -349,6 +349,19 @@ impl App {
             .unwrap(),
         )
     }
+
+    fn buildomat_admin(&self) -> buildomat_openapi::Client {
+        /*
+         * The buildomat admin client is used for the overall status page.  It
+         * uses the configured service user without switching to a
+         * per-repository user.
+         */
+        buildomat_openapi::Client::new_with_client(
+            &self.config.buildomat.url,
+            buildomat_common::bearer_client(&self.config.buildomat.token)
+                .unwrap(),
+        )
+    }
 }
 
 async fn process_deliveries(app: &Arc<App>) -> Result<()> {
