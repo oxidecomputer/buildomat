@@ -595,6 +595,7 @@ async fn main() -> Result<()> {
     ad.register(api::user::job_events_get).api_check()?;
     ad.register(api::user::job_outputs_get).api_check()?;
     ad.register(api::user::job_output_download).api_check()?;
+    ad.register(api::user::job_output_publish).api_check()?;
     ad.register(api::user::job_get).api_check()?;
     ad.register(api::user::job_submit).api_check()?;
     ad.register(api::user::job_upload_chunk).api_check()?;
@@ -618,6 +619,7 @@ async fn main() -> Result<()> {
     ad.register(api::factory::factory_worker_destroy).api_check()?;
     ad.register(api::factory::factory_lease).api_check()?;
     ad.register(api::factory::factory_lease_renew).api_check()?;
+    ad.register(api::public::public_file_download).api_check()?;
 
     if let Some(s) = p.opt_str("S") {
         let mut f = std::fs::OpenOptions::new()

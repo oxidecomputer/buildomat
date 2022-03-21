@@ -463,6 +463,63 @@ async fn status(
         .body(hyper::Body::from(out))?)
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct PublishedFilePath {
+    pub owner: String,
+    pub repo: String,
+    pub series: String,
+    pub version: String,
+    pub name: String,
+}
+
+#[endpoint {
+    method = GET,
+    path = "/public/file/{owner}/{repo}/{series}/{version}/{name}",
+}]
+async fn published_file(
+    rc: Arc<RequestContext<Arc<App>>>,
+    path: dropshot::Path<PublishedFilePath>,
+) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+    let app = rc.context();
+    let path = path.into_inner();
+
+    /*
+     * Determine the buildomat username for this GitHub owner/repository:
+     */
+    let bmu = if let Some(repo) =
+        app.db.lookup_repository(&path.owner, &path.repo).to_500()?
+    {
+        app.buildomat_username(&repo)
+    } else {
+        let out = "<html><head><title>404 Not Found</title>\
+            <body>Artefact not found!</body></html>";
+
+        return Ok(hyper::Response::builder()
+            .status(hyper::StatusCode::NOT_FOUND)
+            .header(hyper::header::CONTENT_TYPE, "text/html")
+            .header(hyper::header::CONTENT_LENGTH, out.as_bytes().len())
+            .body(hyper::Body::from(out))?);
+    };
+
+    let b = app.buildomat_admin();
+
+    let backend = b
+        .public_file_download(&bmu, &path.series, &path.version, &path.name)
+        .await
+        .to_500()?;
+
+    let ct = guess_mime_type(&path.name);
+
+    Ok(hyper::Response::builder()
+        .status(hyper::StatusCode::OK)
+        .header(hyper::header::CONTENT_TYPE, ct)
+        .header(
+            hyper::header::CONTENT_LENGTH,
+            backend.content_length().unwrap(),
+        )
+        .body(hyper::Body::wrap_stream(backend.bytes_stream()))?)
+}
+
 pub(crate) async fn server(
     app: Arc<App>,
     bind_address: std::net::SocketAddr,
@@ -478,6 +535,7 @@ pub(crate) async fn server(
     api.register(details).unwrap();
     api.register(artefact).unwrap();
     api.register(status).unwrap();
+    api.register(published_file).unwrap();
 
     let log = app.log.clone();
     let s = dropshot::HttpServerStarter::new(&cd, api, app, &log)

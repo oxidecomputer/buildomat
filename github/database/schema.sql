@@ -77,3 +77,6 @@ ALTER TABLE check_suite ADD COLUMN
 -- v 10
 ALTER TABLE check_suite ADD COLUMN
     approved_by     INTEGER;
+
+-- v 11
+CREATE INDEX repository_owner_name ON repository (owner, name);

@@ -283,6 +283,22 @@ impl Database {
         Ok(repository::dsl::repository.find(id).get_result(c)?)
     }
 
+    pub fn lookup_repository(
+        &self,
+        owner: &str,
+        name: &str,
+    ) -> DBResult<Option<Repository>> {
+        use schema::repository;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        Ok(repository::dsl::repository
+            .filter(repository::dsl::owner.eq(owner))
+            .filter(repository::dsl::name.eq(name))
+            .get_result(c)
+            .optional()?)
+    }
+
     pub fn store_repository(
         &self,
         id: i64,

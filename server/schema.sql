@@ -192,3 +192,18 @@ CREATE TABLE user_privilege (
 -- v 28
 ALTER TABLE target ADD COLUMN
     privilege       TEXT;
+
+-- v 29
+CREATE TABLE published_file (
+    owner           TEXT    NOT NULL,
+    series          TEXT    NOT NULL,
+    version         TEXT    NOT NULL,
+    name            TEXT    NOT NULL,
+    job             TEXT    NOT NULL,
+    file            TEXT    NOT NULL,
+
+    PRIMARY KEY (owner, series, version, name)
+);
+
+-- v 30
+CREATE INDEX published_file_sets ON published_file (owner, series, version);

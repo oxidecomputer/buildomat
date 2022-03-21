@@ -99,3 +99,16 @@ impl UlidDateExt for Ulid {
         std::time::SystemTime::now().duration_since(when).unwrap()
     }
 }
+
+pub fn guess_mime_type(filename: &str) -> String {
+    if filename == "Cargo.lock" {
+        /*
+         * This file may be TOML, but is almost certainly plain text.
+         */
+        "text/plain".to_string()
+    } else {
+        new_mime_guess::from_path(std::path::PathBuf::from(filename))
+            .first_or_octet_stream()
+            .to_string()
+    }
+}

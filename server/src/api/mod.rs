@@ -32,5 +32,6 @@ mod prelude {
 
 pub mod admin;
 pub mod factory;
+pub mod public;
 pub mod user;
 pub mod worker;

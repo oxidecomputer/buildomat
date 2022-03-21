@@ -14,7 +14,6 @@ dropshot = { git = "https://github.com/oxidecomputer/dropshot" }
 hmac-sha256 = "0.1.7"
 hyper = "0.14"
 jsonwebtoken = "7.2.0"
-new_mime_guess = "3.0.0"
 nom_pem = "4.0.0"
 octorust = { git = "https://github.com/oxidecomputer/third-party-api-clients", branch = "jclulow" }
 reqwest = "0.11.4"

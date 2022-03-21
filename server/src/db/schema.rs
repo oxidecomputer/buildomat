@@ -138,3 +138,16 @@ table! {
         privilege -> Text,
     }
 }
+
+table! {
+    published_file (owner, series, version, name) {
+        owner -> Text,
+        series -> Text,
+        version -> Text,
+        name -> Text,
+        job -> Text,
+        file -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(published_file, job_file);

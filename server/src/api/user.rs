@@ -160,6 +160,91 @@ pub(crate) async fn job_output_download(
     Ok(res.body(fr.body)?)
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JobOutputPublish {
+    series: String,
+    version: String,
+    name: String,
+}
+
+impl JobOutputPublish {
+    fn safe(&self) -> std::result::Result<(), HttpError> {
+        let Self { series, version, name } = self;
+        Self::one_safe(&series)?;
+        Self::one_safe(&version)?;
+        Self::one_safe(&name)?;
+        Ok(())
+    }
+
+    fn one_safe(n: &str) -> std::result::Result<(), HttpError> {
+        if (2..=48).contains(&n.chars().count())
+            && n.chars().all(|c| {
+                c.is_ascii_digit()
+                    || c.is_ascii_alphabetic()
+                    || c == '-'
+                    || c == '_'
+                    || c == '.'
+            })
+        {
+            Ok(())
+        } else {
+            Err(HttpError::for_client_error(
+                None,
+                StatusCode::BAD_REQUEST,
+                "invalid published file ID".into(),
+            ))
+        }
+    }
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/jobs/{job}/outputs/{output}/publish",
+}]
+pub(crate) async fn job_output_publish(
+    rqctx: Arc<RequestContext<Arc<Central>>>,
+    path: TypedPath<JobsOutputsPath>,
+    body: TypedBody<JobOutputPublish>,
+) -> std::result::Result<HttpResponseUpdatedNoContent, HttpError> {
+    let c = rqctx.context();
+    let req = rqctx.request.lock().await;
+    let log = &rqctx.log;
+
+    let p = path.into_inner();
+
+    let b = body.into_inner();
+    b.safe()?;
+
+    let owner = c.require_user(log, &req).await?;
+
+    let t = c.db.job_by_str(&p.job).or_500()?;
+    if t.owner != owner.id {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::FORBIDDEN,
+            "not your job".into(),
+        ));
+    }
+
+    let o = c.db.job_output_by_str(&p.job, &p.output).or_500()?;
+
+    info!(
+        log,
+        "user {} publishing job {} output {} as {}/{}/{}",
+        owner.id,
+        t.id,
+        o.id,
+        &b.series,
+        &b.version,
+        &b.name
+    );
+
+    c.db.job_publish_output(t.id, o.id, &b.series, &b.version, &b.name)
+        .or_500()?;
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
 fn format_task(t: &db::Task) -> Task {
     let state = if t.failed {
         "failed"

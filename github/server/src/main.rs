@@ -325,7 +325,7 @@ impl App {
         }
     }
 
-    fn buildomat(&self, repo: &Repository) -> buildomat_openapi::Client {
+    fn buildomat_username(&self, repo: &Repository) -> String {
         /*
          * Use a separate buildomat user for each GitHub repository.  These are
          * created on demand, and we access them via delegation rather than
@@ -338,13 +338,15 @@ impl App {
          * in the hope that this will remain invariant across future changes in
          * the name and organisational ownership of the repository.
          */
-        let username = format!("gong-{}", repo.id);
+        format!("gong-{}", repo.id)
+    }
 
+    fn buildomat(&self, repo: &Repository) -> buildomat_openapi::Client {
         buildomat_openapi::Client::new_with_client(
             &self.config.buildomat.url,
             buildomat_common::delegated_client(
                 &self.config.buildomat.token,
-                &username,
+                &self.buildomat_username(repo),
             )
             .unwrap(),
         )

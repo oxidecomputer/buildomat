@@ -436,6 +436,54 @@ async fn do_job_copy(mut l: Level<Stuff>) -> Result<()> {
     bail!("job {} does not have a file that matches {}", job, src);
 }
 
+async fn do_job_publish(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("JOB SRC SERIES VERSION NAME"));
+
+    let a = args!(l);
+
+    if a.args().len() != 5 {
+        bad_args!(
+            l,
+            "specify a job, a job output path, and the name for \
+            the published file: series, version, and file name"
+        );
+    }
+
+    let job = a.args()[0].as_str();
+    let src = a.args()[1].as_str();
+    let series = a.args()[2].as_str();
+    let version = a.args()[3].as_str();
+    let name = a.args()[4].as_str();
+
+    let c = l.context().user();
+    for o in c.job_outputs_get(job).await? {
+        if o.path == src {
+            println!(
+                "publishing {} -> {}/{}/{} ({}KB)",
+                o.path,
+                series,
+                version,
+                name,
+                o.size / 1024
+            );
+
+            c.job_output_publish(
+                job,
+                &o.id,
+                &JobOutputPublish {
+                    name: name.to_string(),
+                    series: series.to_string(),
+                    version: version.to_string(),
+                },
+            )
+            .await?;
+            return Ok(());
+        }
+    }
+
+    bail!("job {} does not have a file that matches {}", job, src);
+}
+
 async fn do_job(mut l: Level<Stuff>) -> Result<()> {
     l.cmda("list", "ls", "list jobs", cmd!(do_job_list))?;
     l.cmd("run", "run a job", cmd!(do_job_run))?;
@@ -447,6 +495,11 @@ async fn do_job(mut l: Level<Stuff>) -> Result<()> {
         "cp",
         "copy from job outputs to local files",
         cmd!(do_job_copy),
+    )?;
+    l.cmd(
+        "publish",
+        "publish a job output for public consumption",
+        cmd!(do_job_publish),
     )?;
 
     sel!(l).run().await

@@ -158,6 +158,18 @@ pub struct JobFile {
     pub time_archived: Option<IsoDate>,
 }
 
+#[derive(Debug, Queryable, Insertable, Identifiable)]
+#[table_name = "published_file"]
+#[primary_key(owner, series, version, name)]
+pub struct PublishedFile {
+    pub owner: UserId,
+    pub series: String,
+    pub version: String,
+    pub name: String,
+    pub job: JobId,
+    pub file: JobFileId,
+}
+
 #[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
 #[table_name = "worker"]
 #[primary_key(id)]

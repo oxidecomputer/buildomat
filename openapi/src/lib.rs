@@ -122,6 +122,13 @@ pub mod types {
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct JobOutputPublish {
+        pub name: String,
+        pub series: String,
+        pub version: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct JobSubmit {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pub inputs: Vec<String>,
@@ -702,6 +709,47 @@ impl Client {
             self.baseurl,
             progenitor_support::encode_path(&job.to_string()),
             progenitor_support::encode_path(&output.to_string()),
+        );
+        let request = self.client.get(url).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res)
+    }
+
+    #[doc = "job_output_publish: POST /0/jobs/{job}/outputs/{output}/publish"]
+    pub async fn job_output_publish<'a>(
+        &'a self,
+        job: &'a str,
+        output: &'a str,
+        body: &'a types::JobOutputPublish,
+    ) -> Result<reqwest::Response> {
+        let url = format!(
+            "{}/0/jobs/{}/outputs/{}/publish",
+            self.baseurl,
+            progenitor_support::encode_path(&job.to_string()),
+            progenitor_support::encode_path(&output.to_string()),
+        );
+        let request = self.client.post(url).json(body).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res)
+    }
+
+    #[doc = "public_file_download: GET /0/public/file/{username}/{series}/{version}/{name}"]
+    pub async fn public_file_download<'a>(
+        &'a self,
+        username: &'a str,
+        series: &'a str,
+        version: &'a str,
+        name: &'a str,
+    ) -> Result<reqwest::Response> {
+        let url = format!(
+            "{}/0/public/file/{}/{}/{}/{}",
+            self.baseurl,
+            progenitor_support::encode_path(&username.to_string()),
+            progenitor_support::encode_path(&series.to_string()),
+            progenitor_support::encode_path(&version.to_string()),
+            progenitor_support::encode_path(&name.to_string()),
         );
         let request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;

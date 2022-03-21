@@ -742,6 +742,87 @@ impl Database {
             .get_result(c)?)
     }
 
+    pub fn published_file_by_name(
+        &self,
+        owner: UserId,
+        series: &str,
+        version: &str,
+        name: &str,
+    ) -> OResult<Option<PublishedFile>> {
+        use schema::published_file;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        Ok(published_file::dsl::published_file
+            .find((owner, series, version, name))
+            .get_result(c)
+            .optional()?)
+    }
+
+    pub fn job_publish_output(
+        &self,
+        job: JobId,
+        file: JobFileId,
+        series: &str,
+        version: &str,
+        name: &str,
+    ) -> OResult<()> {
+        use schema::{job, job_output, published_file};
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        c.immediate_transaction(|tx| {
+            let j: Job = job::dsl::job.find(job).get_result(tx)?;
+            if !j.complete {
+                conflict!("job must be complete before files are published");
+            }
+
+            /*
+             * Make sure this output exists.
+             */
+            let _jo: JobOutput = job_output::dsl::job_output
+                .filter(job_output::dsl::job.eq(job))
+                .filter(job_output::dsl::id.eq(file))
+                .get_result(tx)?;
+
+            /*
+             * Determine whether this record has been published already or not.
+             */
+            let pf: Option<PublishedFile> = published_file::dsl::published_file
+                .find((j.owner, series, version, name))
+                .get_result(tx)
+                .optional()?;
+
+            if let Some(pf) = pf {
+                if pf.owner == j.owner && pf.job == job && pf.file == file {
+                    /*
+                     * The target file is the same, so just succeed.
+                     */
+                    return Ok(());
+                } else {
+                    conflict!(
+                        "that published file already exists with \
+                        different contents"
+                    );
+                }
+            }
+
+            let ic = diesel::insert_into(published_file::dsl::published_file)
+                .values(PublishedFile {
+                    owner: j.owner,
+                    job,
+                    file,
+                    series: series.to_string(),
+                    version: version.to_string(),
+                    name: name.to_string(),
+                })
+                .execute(tx)?;
+            assert!(ic == 1);
+
+            Ok(())
+        })
+    }
+
     pub fn job_add_output(
         &self,
         job: JobId,
@@ -1104,6 +1185,17 @@ impl Database {
                 })
             })
             .transpose()
+    }
+
+    pub fn user_get_by_name(&self, name: &str) -> Result<Option<User>> {
+        use schema::user::dsl;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        Ok(dsl::user
+            .filter(dsl::name.eq(name))
+            .get_result::<User>(c)
+            .optional()?)
     }
 
     pub fn users(&self) -> Result<Vec<AuthUser>> {

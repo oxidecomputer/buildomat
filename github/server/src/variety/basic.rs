@@ -4,6 +4,7 @@
 
 use crate::{App, FlushOut, FlushState};
 use anyhow::Result;
+use buildomat_common::*;
 use chrono::SecondsFormat;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
@@ -26,6 +27,15 @@ struct BasicConfig {
     target: Option<String>,
     #[serde(default)]
     access_repos: Vec<String>,
+    #[serde(default)]
+    publish: Vec<BasicConfigPublish>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct BasicConfigPublish {
+    from_output: String,
+    series: String,
+    name: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -357,11 +367,36 @@ pub(crate) async fn run(
             if !outputs.is_empty() {
                 cr.flushed = false;
             }
-            for o in outputs {
+            for o in outputs.iter() {
                 if p.job_outputs.len() < MAX_OUTPUTS {
-                    p.job_outputs.push(BasicOutput::new(app, cs, cr, &o));
+                    p.job_outputs.push(BasicOutput::new(app, cs, cr, o));
                 } else {
                     p.job_outputs_extra += 1;
+                }
+            }
+
+            /*
+             * Resolve any publishing directives.  For now, we do not handle
+             * publish rules that did not match any output from the actual job.
+             * We also do not yet correctly handle a failure to publish, which
+             * will require more nuance in reported errors from Dropshot and
+             * Progenitor.  This feature is broadly still experimental.
+             */
+            for p in c.publish.iter() {
+                if let Some(o) =
+                    outputs.iter().find(|o| o.path == p.from_output)
+                {
+                    b.job_output_publish(
+                        jid,
+                        &o.id,
+                        &buildomat_openapi::types::JobOutputPublish {
+                            series: p.series.to_string(),
+                            version: cs.head_sha.to_string(),
+                            name: p.name.to_string(),
+                        },
+                    )
+                    .await
+                    .ok();
                 }
             }
         }
@@ -696,16 +731,7 @@ pub(crate) async fn artefact(
          * escape hatch of sorts for unhelpful file extensions: put whatever you
          * want in the URL!
          */
-        let ct = if name == "Cargo.lock" {
-            /*
-             * This file may be TOML, but is almost certainly plain text.
-             */
-            "text/plain".to_string()
-        } else {
-            new_mime_guess::from_path(std::path::PathBuf::from(name))
-                .first_or_octet_stream()
-                .to_string()
-        };
+        let ct = guess_mime_type(name);
 
         return Ok(Some(
             hyper::Response::builder()
