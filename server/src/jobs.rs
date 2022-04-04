@@ -2,7 +2,7 @@
  * Copyright 2021 Oxide Computer Company
  */
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -11,7 +11,7 @@ use chrono::prelude::*;
 #[allow(unused_imports)]
 use slog::{error, info, warn, Logger};
 
-use super::db::{FactoryId, JobId};
+use super::db::{FactoryId, JobId, TargetId, WorkerId};
 use super::Central;
 
 /*
@@ -65,10 +65,13 @@ impl Leases {
 
 async fn job_assignment_one(log: &Logger, c: &Central) -> Result<()> {
     /*
-     * Grab a list of free workers that we can assign to jobs.
+     * Grab a list of free workers that we can assign to jobs and sort them into
+     * a separate queue per target type.
      */
-    let mut freeworkers =
-        c.db.free_workers()?.iter().map(|w| w.id).collect::<Vec<_>>();
+    let mut freeworkers: HashMap<TargetId, Vec<WorkerId>> = Default::default();
+    c.db.free_workers()?.iter().for_each(|w| {
+        freeworkers.entry(w.target()).or_default().push(w.id);
+    });
 
     for j in c.db.jobs_active()?.iter() {
         assert!(!j.complete);
@@ -99,10 +102,16 @@ async fn job_assignment_one(log: &Logger, c: &Central) -> Result<()> {
             continue;
         }
 
-        if let Some(fw) = freeworkers.pop() {
-            info!(log, "assigning job {} to worker {}", j.id, fw);
-            c.db.worker_assign_job(fw, j.id)?;
-            continue;
+        /*
+         * We must take care to assign jobs only to workers of the correct
+         * target type.
+         */
+        if let Some(fwq) = freeworkers.get_mut(&j.target()) {
+            if let Some(fw) = fwq.pop() {
+                info!(log, "assigning job {} to worker {}", j.id, fw);
+                c.db.worker_assign_job(fw, j.id)?;
+                continue;
+            }
         }
     }
 
