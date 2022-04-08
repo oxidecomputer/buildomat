@@ -292,6 +292,14 @@ async fn poll_job(l: &Level<Stuff>, id: &str) -> Result<()> {
                 for e in events.iter() {
                     if e.stream == "stdout" || e.stream == "stderr" {
                         println!("{}", e.payload);
+                    } else if e.stream == "control" {
+                        println!("|=| {}", e.payload);
+                    } else if e.stream == "worker" {
+                        println!("|W| {}", e.payload);
+                    } else if e.stream == "task" {
+                        println!("|T| {}", e.payload);
+                    } else if e.stream == "console" {
+                        println!("|C| {}", e.payload);
                     } else {
                         println!("{:?}", e);
                     }
