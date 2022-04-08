@@ -1,0 +1,17 @@
+#!ipxe
+
+set node %HOST%
+set server %BASEURL%
+
+:top
+#
+# Emit our hold marker string so that we can detect when the machine has come
+# up to iPXE and is looping waiting for instructions.
+#
+# We emit the string many times here on the basis that BMCs often have
+# unreliable rubbish serial facilities, and the odd character here and there is
+# known to go missing; Claude E. Shannon defend us.
+#
+echo %MARKER% %MARKER% %MARKER% %MARKER% %MARKER% %MARKER% %MARKER% %MARKER%
+sleep 5
+chain --replace ${server}/ipxe/${node} || goto top

@@ -183,6 +183,7 @@ pub struct Worker {
     pub lastping: Option<IsoDate>,
     pub factory: Option<FactoryId>,
     pub target: Option<TargetId>,
+    pub wait_for_flush: bool,
 }
 
 impl Worker {

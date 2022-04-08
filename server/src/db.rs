@@ -157,6 +157,18 @@ impl Database {
             > 0)
     }
 
+    pub fn worker_flush(&self, id: WorkerId) -> Result<bool> {
+        use schema::worker::dsl;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        Ok(diesel::update(dsl::worker)
+            .filter(dsl::id.eq(id))
+            .set(dsl::wait_for_flush.eq(false))
+            .execute(c)?
+            > 0)
+    }
+
     pub fn worker_destroy(&self, id: WorkerId) -> Result<bool> {
         use schema::worker::dsl;
 
@@ -412,6 +424,7 @@ impl Database {
         factory: &Factory,
         target: &Target,
         job: Option<JobId>,
+        wait_for_flush: bool,
     ) -> Result<Worker> {
         use schema::worker;
 
@@ -425,6 +438,7 @@ impl Database {
             lastping: None,
             factory: Some(factory.id),
             target: Some(target.id),
+            wait_for_flush,
         };
 
         let c = &mut self.1.lock().unwrap().conn;

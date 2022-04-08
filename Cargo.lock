@@ -205,6 +205,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "buildomat-factory-lab"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "base64 0.13.0",
+ "buildomat-common",
+ "buildomat-openapi",
+ "chrono",
+ "diesel",
+ "dropshot",
+ "getopts",
+ "hyper",
+ "hyper-staticfile 0.8.0",
+ "libc",
+ "rand",
+ "rusty_ulid",
+ "schemars",
+ "serde",
+ "serde_with",
+ "slog",
+ "slog-term",
+ "thiserror",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "buildomat-openapi"
 version = "0.0.0"
 dependencies = [
@@ -227,7 +254,7 @@ dependencies = [
  "dropshot",
  "getopts",
  "hyper",
- "hyper-staticfile",
+ "hyper-staticfile 0.6.0",
  "rusoto_core",
  "rusoto_credential",
  "rusoto_s3",
@@ -840,6 +867,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-range"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21dec9db110f5f872ed9699c3ecf50cf16f423502706ba5c72462e28d3157573"
+
+[[package]]
 name = "httparse"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -887,6 +920,24 @@ dependencies = [
  "hyper",
  "mime_guess",
  "percent-encoding",
+ "tokio",
+ "url",
+ "winapi",
+]
+
+[[package]]
+name = "hyper-staticfile"
+version = "0.8.0"
+source = "git+https://github.com/jclulow/hyper-staticfile?branch=jclulow#6ecab6a38cd8f308b9cf9acc122e2d9dcb996e13"
+dependencies = [
+ "futures-util",
+ "http",
+ "http-range",
+ "httpdate",
+ "hyper",
+ "mime_guess",
+ "percent-encoding",
+ "rand",
  "tokio",
  "url",
  "winapi",

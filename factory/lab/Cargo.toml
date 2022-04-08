@@ -1,0 +1,28 @@
+[package]
+name = "buildomat-factory-lab"
+version = "0.0.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow = "1"
+rusty_ulid = "0.11"
+slog = "2.7"
+slog-term = "2.7"
+base64 = "0.13"
+tokio = { version = "1", features = [ "full" ] }
+serde = { version = "1", features = [ "derive" ] }
+toml = "0.5"
+buildomat-openapi = { path = "../../openapi" }
+buildomat-common = { path = "../../common" }
+getopts = "0.2"
+diesel = { git = "https://github.com/diesel-rs/diesel", rev = "54122fb305daf12d3f05ff174a8024dec6323318", features = ["sqlite", "extras", "serde_json"] }
+dropshot = { git = "https://github.com/oxidecomputer/dropshot" }
+hyper = "0.14.16"
+hyper-staticfile = { version = "0.8.0", git = "https://github.com/jclulow/hyper-staticfile", branch = "jclulow" }
+libc = "0.2.113"
+rand = "0.8.4"
+schemars = "0.8.8"
+thiserror = "1"
+chrono = { version = "0.4", features = ["serde"] }
+serde_with = "1.10.0"

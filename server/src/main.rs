@@ -615,6 +615,8 @@ async fn main() -> Result<()> {
     ad.register(api::factory::factory_worker_get).api_check()?;
     ad.register(api::factory::factory_ping).api_check()?;
     ad.register(api::factory::factory_worker_create).api_check()?;
+    ad.register(api::factory::factory_worker_append).api_check()?;
+    ad.register(api::factory::factory_worker_flush).api_check()?;
     ad.register(api::factory::factory_worker_associate).api_check()?;
     ad.register(api::factory::factory_worker_destroy).api_check()?;
     ad.register(api::factory::factory_lease).api_check()?;

@@ -486,6 +486,7 @@ async fn aws_worker_one(
             .factory_worker_create(&FactoryWorkerCreate {
                 target: lease.target.to_string(),
                 job: None,
+                wait_for_flush: None,
             })
             .await?;
 

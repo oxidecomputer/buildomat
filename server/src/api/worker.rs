@@ -93,44 +93,56 @@ pub(crate) async fn worker_ping(
 
     c.db.worker_ping(w.id).or_500()?;
 
-    let job = c.db.worker_job(w.id).or_500()?;
-    let job = if let Some(job) = job {
-        let output_rules = c.db.job_output_rules(job.id).or_500()?;
-        let tasks =
-            c.db.job_tasks(job.id)
-                .or_500()?
-                .iter()
-                .enumerate()
-                .map(|(i, t)| WorkerPingTask {
-                    id: i as u32,
-                    name: t.name.to_string(),
-                    script: t.script.to_string(),
-                    env_clear: t.env_clear,
-                    env: t.env.clone().into(),
-                    uid: t.user_id.map(|x| x.0).unwrap_or(0),
-                    gid: t.group_id.map(|x| x.0).unwrap_or(0),
-                    workdir: t.workdir.as_deref().unwrap_or("/").to_string(),
-                })
-                .collect::<Vec<_>>();
-        let inputs =
-            c.db.job_inputs(job.id)
-                .or_500()?
-                .iter()
-                .filter(|(ji, _)| ji.id.is_some())
-                .map(|(ji, _)| WorkerPingInput {
-                    name: ji.name.to_string(),
-                    id: ji.id.unwrap().to_string(),
-                })
-                .collect::<Vec<_>>();
-        Some(WorkerPingJob {
-            id: job.id.to_string(),
-            name: job.name,
-            output_rules,
-            tasks,
-            inputs,
-        })
-    } else {
+    let job = if w.wait_for_flush {
+        /*
+         * The factory may have event records (e.g., boot time console logs or
+         * other information about provisioning) to flush before we give the job
+         * to the agent.
+         */
         None
+    } else {
+        let job = c.db.worker_job(w.id).or_500()?;
+        if let Some(job) = job {
+            Some(WorkerPingJob {
+                id: job.id.to_string(),
+                name: job.name,
+                output_rules: c.db.job_output_rules(job.id).or_500()?,
+                tasks: c
+                    .db
+                    .job_tasks(job.id)
+                    .or_500()?
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| WorkerPingTask {
+                        id: i as u32,
+                        name: t.name.to_string(),
+                        script: t.script.to_string(),
+                        env_clear: t.env_clear,
+                        env: t.env.clone().into(),
+                        uid: t.user_id.map(|x| x.0).unwrap_or(0),
+                        gid: t.group_id.map(|x| x.0).unwrap_or(0),
+                        workdir: t
+                            .workdir
+                            .as_deref()
+                            .unwrap_or("/")
+                            .to_string(),
+                    })
+                    .collect::<Vec<_>>(),
+                inputs: c
+                    .db
+                    .job_inputs(job.id)
+                    .or_500()?
+                    .iter()
+                    .filter(|(ji, _)| ji.id.is_some())
+                    .map(|(ji, _)| WorkerPingInput {
+                        name: ji.name.to_string(),
+                        id: ji.id.unwrap().to_string(),
+                    })
+                    .collect::<Vec<_>>(),
+            })
+        } else {
+            None
+        }
     };
 
     let res = WorkerPingResult { poweroff: w.recycle || w.deleted, job };

@@ -207,3 +207,7 @@ CREATE TABLE published_file (
 
 -- v 30
 CREATE INDEX published_file_sets ON published_file (owner, series, version);
+
+-- v 31
+ALTER TABLE worker ADD COLUMN
+    wait_for_flush  INTEGER NOT NULL    DEFAULT 0;

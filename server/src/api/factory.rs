@@ -157,6 +157,114 @@ pub(crate) async fn factory_worker_get(
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct FactoryWorkerAppend {
+    stream: String,
+    time: DateTime<Utc>,
+    payload: String,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct FactoryWorkerAppendResult {
+    retry: bool,
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/factory/worker/{worker}/append",
+}]
+pub(crate) async fn factory_worker_append(
+    rqctx: Arc<RequestContext<Arc<Central>>>,
+    path: TypedPath<WorkerPath>,
+    body: TypedBody<FactoryWorkerAppend>,
+) -> DSResult<HttpResponseOk<FactoryWorkerAppendResult>> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+    let req = rqctx.request.lock().await;
+
+    let p = path.into_inner();
+    let b = body.into_inner();
+
+    let f = c.require_factory(log, &req).await?;
+
+    let w = c.db.worker_get(p.worker()?).or_500()?;
+    f.owns(log, &w)?;
+
+    let job = c.db.worker_job(w.id).or_500()?;
+
+    let retry = if let Some(job) = job {
+        if job.complete {
+            /*
+             * Ignore any console output that arrives after we have closed out
+             * the job.
+             */
+            false
+        } else {
+            c.db.job_append_event(
+                job.id,
+                None,
+                &b.stream,
+                Utc::now(),
+                Some(b.time),
+                &b.payload,
+            )
+            .or_500()?;
+            info!(
+                log,
+                "factory {} worker {} job {} append event: {:?}",
+                f.id,
+                w.id,
+                job.id,
+                b,
+            );
+            false
+        }
+    } else if w.recycle && w.token.is_none() {
+        /*
+         * This worker has been recycled withing ever having completed
+         * bootstrap, and without having been assigned a job.  Ignore any
+         * console output that arrives.
+         */
+        false
+    } else {
+        /*
+         * Without out a current job, we do not presently have a context in
+         * which to usefully store these event records.  Inform the factory so
+         * that it may retain the record and try again later.
+         */
+        true
+    };
+
+    Ok(HttpResponseOk(FactoryWorkerAppendResult { retry }))
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/factory/worker/{worker}/flush",
+}]
+pub(crate) async fn factory_worker_flush(
+    rqctx: Arc<RequestContext<Arc<Central>>>,
+    path: TypedPath<WorkerPath>,
+) -> DSResult<HttpResponseUpdatedNoContent> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+    let req = rqctx.request.lock().await;
+
+    let p = path.into_inner();
+
+    let f = c.require_factory(log, &req).await?;
+
+    let w = c.db.worker_get(p.worker()?).or_500()?;
+    f.owns(log, &w)?;
+
+    if w.wait_for_flush {
+        info!(log, "factory {} worker {} flush boot logs", f.id, w.id);
+        c.db.worker_flush(w.id).or_500()?;
+    }
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct FactoryWorkerAssociate {
     private: String,
 }
@@ -233,6 +341,8 @@ pub(crate) async fn factory_worker_destroy(
 pub(crate) struct FactoryWorkerCreate {
     target: String,
     job: Option<String>,
+    #[serde(default)]
+    wait_for_flush: bool,
 }
 
 impl FactoryWorkerCreate {
@@ -267,7 +377,7 @@ pub(crate) async fn factory_worker_create(
     let t = c.db.target_get(b.target()?).or_500()?;
     let j = b.job()?;
 
-    let w = c.db.worker_create(&f, &t, j).or_500()?;
+    let w = c.db.worker_create(&f, &t, j, b.wait_for_flush).or_500()?;
     info!(log, "factory {} worker {} created (job {:?})", f.id, t.id, j);
 
     Ok(HttpResponseCreated(FactoryWorker::from(&w)))

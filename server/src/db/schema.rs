@@ -107,6 +107,7 @@ table! {
         lastping -> Nullable<Text>,
         factory -> Nullable<Text>,
         target -> Nullable<Text>,
+        wait_for_flush -> Bool,
     }
 }
 

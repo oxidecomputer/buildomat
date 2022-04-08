@@ -65,6 +65,18 @@ pub mod types {
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct FactoryWorkerAppend {
+        pub payload: String,
+        pub stream: String,
+        pub time: chrono::DateTime<chrono::offset::Utc>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct FactoryWorkerAppendResult {
+        pub retry: bool,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct FactoryWorkerAssociate {
         pub private: String,
     }
@@ -74,6 +86,8 @@ pub mod types {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub job: Option<String>,
         pub target: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub wait_for_flush: Option<bool>,
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -576,6 +590,39 @@ impl Client {
             progenitor_support::encode_path(&worker.to_string()),
         );
         let request = self.client.patch(url).json(body).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res)
+    }
+
+    #[doc = "factory_worker_append: POST /0/factory/worker/{worker}/append"]
+    pub async fn factory_worker_append<'a>(
+        &'a self,
+        worker: &'a str,
+        body: &'a types::FactoryWorkerAppend,
+    ) -> Result<types::FactoryWorkerAppendResult> {
+        let url = format!(
+            "{}/0/factory/worker/{}/append",
+            self.baseurl,
+            progenitor_support::encode_path(&worker.to_string()),
+        );
+        let request = self.client.post(url).json(body).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res.json().await?)
+    }
+
+    #[doc = "factory_worker_flush: POST /0/factory/worker/{worker}/flush"]
+    pub async fn factory_worker_flush<'a>(
+        &'a self,
+        worker: &'a str,
+    ) -> Result<reqwest::Response> {
+        let url = format!(
+            "{}/0/factory/worker/{}/flush",
+            self.baseurl,
+            progenitor_support::encode_path(&worker.to_string()),
+        );
+        let request = self.client.post(url).build()?;
         let result = self.client.execute(request).await;
         let res = result?.error_for_status()?;
         Ok(res)
