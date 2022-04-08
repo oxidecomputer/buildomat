@@ -116,6 +116,7 @@ pub(crate) async fn worker_ping(
             c.db.job_inputs(job.id)
                 .or_500()?
                 .iter()
+                .filter(|(ji, _)| ji.id.is_some())
                 .map(|(ji, _)| WorkerPingInput {
                     name: ji.name.to_string(),
                     id: ji.id.unwrap().to_string(),

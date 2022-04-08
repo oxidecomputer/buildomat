@@ -554,8 +554,8 @@ impl Database {
                     .eq(job_input::dsl::job)
                     .and(job_file::dsl::id.nullable().eq(job_input::dsl::id))),
             )
-            .filter(job_file::dsl::job.eq(job))
-            .order_by(job_file::dsl::id.asc())
+            .filter(job_input::dsl::job.eq(job))
+            .order_by(job_input::dsl::id.asc())
             .get_results(c)?)
     }
 
