@@ -88,6 +88,7 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
     );
     l.optmulti("i", "input", "input file to pass to job", "[NAME=]FILE");
     l.optmulti("T", "tag", "informational tag to identify job", "KEY=VALUE");
+    l.optflag("v", "", "debugging output");
 
     l.mutually_exclusive(&[("c", "script"), ("C", "script-file")]);
 
@@ -170,6 +171,8 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
         })
         .collect::<Result<HashMap<String, PathBuf>>>()?;
 
+    let mut w = Stopwatch::start(a.opts().opt_present("v"));
+
     /*
      * Create the job on the server.
      */
@@ -191,6 +194,7 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
         tags,
     };
     let x = l.context().user().job_submit(&j).await?;
+    w.lap("job submit");
 
     for (name, path) in inputs.iter() {
         let mut f = std::fs::File::open(path)?;
@@ -219,6 +223,8 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
             chunks.push(
                 l.context().user().job_upload_chunk(&x.id, buf).await?.id,
             );
+
+            w.lap(&format!("upload {} chunk {}", name, chunks.len()));
         }
 
         l.context()
@@ -232,6 +238,7 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
                 },
             )
             .await?;
+        w.lap(&format!("add input {}", name));
     }
 
     if nowait {
@@ -257,7 +264,7 @@ async fn poll_job(l: &Level<Stuff>, id: &str) -> Result<()> {
         let t = match l.context().user().job_get(id).await {
             Ok(t) => t,
             Err(_) => {
-                sleep_ms(1000).await;
+                sleep_ms(500).await;
                 continue;
             }
         };
@@ -293,7 +300,7 @@ async fn poll_job(l: &Level<Stuff>, id: &str) -> Result<()> {
             }
         }
 
-        sleep_ms(1000).await;
+        sleep_ms(250).await;
     }
 
     if exit_status != 0 {
