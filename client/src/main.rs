@@ -979,6 +979,8 @@ async fn do_admin(mut l: Level<Stuff>) -> Result<()> {
     l.cmd("factory", "factory management", cmd!(do_factory))?;
     l.cmd("target", "target management", cmd!(do_target))?;
     l.cmda("dashboard", "dash", "summarise system state", cmd!(do_dash))?;
+    l.cmd("control", "server control functions", cmd!(do_control))?;
+    l.cmd("worker", "worker management", cmd!(do_worker))?;
 
     sel!(l).run().await
 }
@@ -995,10 +997,10 @@ async fn main() -> Result<()> {
         "get information about server and user account",
         cmd!(do_info),
     )?;
-    l.cmd("control", "server control functions", cmd!(do_control))?;
     l.cmd("job", "job management", cmd!(do_job))?;
-    l.cmd("worker", "worker management", cmd!(do_worker))?;
     l.cmda("admin", "a", "administrative functioons", cmd!(do_admin))?;
+    l.hcmd("control", "server control functions", cmd!(do_control))?;
+    l.hcmd("worker", "worker management", cmd!(do_worker))?;
 
     let a = args!(l);
 
