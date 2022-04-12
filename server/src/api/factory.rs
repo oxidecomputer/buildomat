@@ -442,7 +442,7 @@ pub(crate) async fn factory_lease(
      * Look at the jobs that are not assigned.
      */
     for j in c.db.jobs_active().or_500()? {
-        if j.complete || j.worker.is_some() {
+        if j.complete || j.cancelled || j.worker.is_some() {
             continue;
         }
 

@@ -45,6 +45,8 @@ struct BasicPrivate {
     job_state: Option<String>,
     buildomat_id: Option<String>,
     error: Option<String>,
+    #[serde(default)]
+    cancelled: bool,
 
     #[serde(default)]
     events_tail: VecDeque<(Option<String>, String)>,
@@ -161,6 +163,10 @@ pub(crate) async fn flush(
         );
     }
 
+    if p.cancelled {
+        summary += "The job was cancelled by a user.\n\n";
+    }
+
     if !p.job_outputs.is_empty() {
         summary += "The job produced the following artefacts:\n";
         for bo in p.job_outputs.iter() {
@@ -175,6 +181,12 @@ pub(crate) async fn flush(
         }
         summary += "\n\n";
     }
+
+    let cancel = vec![octorust::types::ChecksCreateRequestActions {
+        description: "Cancel execution and fail the check.".into(),
+        identifier: "cancel".into(),
+        label: "Cancel".into(),
+    }];
 
     Ok(if p.complete {
         if let Some(e) = p.error.as_deref() {
@@ -212,7 +224,7 @@ pub(crate) async fn flush(
                 summary: format!("{}The job is in line to run.", summary),
                 detail,
                 state: FlushState::Queued,
-                actions: Default::default(),
+                actions: cancel,
             }
         } else {
             FlushOut {
@@ -220,7 +232,7 @@ pub(crate) async fn flush(
                 summary: format!("{}The job is running now!", summary),
                 detail,
                 state: FlushState::Running,
-                actions: Default::default(),
+                actions: cancel,
             }
         }
     } else {
@@ -229,7 +241,7 @@ pub(crate) async fn flush(
             summary: format!("{}The job is in line to run.", summary),
             detail,
             state: FlushState::Queued,
-            actions: Default::default(),
+            actions: cancel,
         }
     })
 }
@@ -873,4 +885,50 @@ pub(crate) async fn details(
     }
 
     Ok(out)
+}
+
+pub(crate) async fn cancel(
+    app: &Arc<App>,
+    cs: &CheckSuite,
+    cr: &mut CheckRun,
+) -> Result<()> {
+    let db = &app.db;
+    let repo = db.load_repository(cs.repo)?;
+    let log = &app.log;
+
+    let mut p: BasicPrivate = cr.get_private()?;
+    if p.complete || p.cancelled {
+        return Ok(());
+    }
+
+    if let Some(jid) = &p.buildomat_id {
+        /*
+         * If we already started the buildomat job, we need to cancel it.
+         */
+        let b = app.buildomat(&repo);
+        let j = b.job_get(&jid).await?;
+
+        if j.state == "complete" || j.state == "failed" {
+            /*
+             * This job is already finished.
+             */
+            return Ok(());
+        }
+
+        info!(log, "cancelling backend buildomat job {}", jid);
+        b.job_cancel(&jid).await?;
+    } else {
+        /*
+         * Otherwise, report the failure and halt check run processing.
+         */
+        p.error = Some("Job was cancelled before it began running.".into());
+        p.complete = true;
+    }
+
+    p.cancelled = true;
+    cr.flushed = false;
+
+    cr.set_private(p)?;
+    db.update_check_run(cr)?;
+    Ok(())
 }

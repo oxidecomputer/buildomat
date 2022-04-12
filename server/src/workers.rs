@@ -24,6 +24,15 @@ async fn worker_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
 
         let jobs = c.db.worker_jobs(w.id)?;
         if jobs.is_empty() {
+            /*
+             * Idle workers should be assigned relatively promptly.  If a worker
+             * has bootstrapped but not been assigned for some time, tear it
+             * down.
+             */
+            if w.agent_ok() && w.age() > Duration::from_secs(30 * 60) {
+                info!(log, "recycling surplus worker {} after 30m idle", w.id);
+                c.db.worker_recycle(w.id)?;
+            }
             continue;
         }
 

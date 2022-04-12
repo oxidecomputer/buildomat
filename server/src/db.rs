@@ -674,6 +674,7 @@ impl Database {
             complete: false,
             failed: false,
             worker: None,
+            cancelled: false,
         };
 
         let c = &mut self.1.lock().unwrap().conn;
@@ -1009,6 +1010,45 @@ impl Database {
         })
     }
 
+    pub fn job_cancel(&self, job: JobId) -> OResult<bool> {
+        use schema::job;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        c.immediate_transaction(|tx| {
+            let j: Job = job::dsl::job.find(job).get_result(tx)?;
+            if j.complete {
+                conflict!("job {} is already complete", j.id);
+            }
+
+            if j.cancelled {
+                /*
+                 * Already cancelled previously.
+                 */
+                return Ok(false);
+            }
+
+            self.i_job_event_insert(
+                tx,
+                j.id,
+                None,
+                "control",
+                Utc::now(),
+                None,
+                "job cancelled",
+            )?;
+
+            let uc = diesel::update(job::dsl::job)
+                .filter(job::dsl::id.eq(j.id))
+                .filter(job::dsl::complete.eq(false))
+                .set((job::dsl::cancelled.eq(true),))
+                .execute(tx)?;
+            assert_eq!(uc, 1);
+
+            Ok(true)
+        })
+    }
+
     pub fn job_complete(&self, job: JobId, failed: bool) -> Result<bool> {
         use schema::{job, task};
 
@@ -1021,6 +1061,10 @@ impl Database {
                  * This job is already complete.
                  */
                 return Ok(false);
+            }
+
+            if j.cancelled && !failed {
+                bail!("job {} cancelled; cannot succeed", j.id);
             }
 
             /*
@@ -1036,7 +1080,7 @@ impl Database {
                 if t.failed {
                     tasks_failed = true;
                 }
-                if t.failed || t.complete {
+                if t.failed || t.complete || j.cancelled {
                     continue;
                 }
 

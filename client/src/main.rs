@@ -351,6 +351,20 @@ async fn do_control(mut l: Level<Stuff>) -> Result<()> {
     sel!(l).run().await
 }
 
+async fn do_job_cancel(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("JOB"));
+
+    let a = args!(l);
+
+    if a.args().len() != 1 {
+        bad_args!(l, "specify job ID");
+    }
+
+    l.context().user().job_cancel(a.args()[0].as_str()).await?;
+
+    Ok(())
+}
+
 async fn do_job_outputs(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("path", 68, true);
     l.add_column("size", 10, true);
@@ -390,7 +404,11 @@ async fn do_job_list(mut l: Level<Stuff>) -> Result<()> {
         let mut r = Row::default();
         r.add_str("id", &job.id);
         r.add_str("name", &job.name);
-        r.add_str("state", &job.state);
+        if job.state == "failed" && job.cancelled {
+            r.add_str("state", "cancelled");
+        } else {
+            r.add_str("state", &job.state);
+        }
         t.add_row(r);
     }
 
@@ -502,6 +520,7 @@ async fn do_job_publish(mut l: Level<Stuff>) -> Result<()> {
 async fn do_job(mut l: Level<Stuff>) -> Result<()> {
     l.cmda("list", "ls", "list jobs", cmd!(do_job_list))?;
     l.cmd("run", "run a job", cmd!(do_job_run))?;
+    l.cmd("cancel", "cancel a job", cmd!(do_job_cancel))?;
     l.cmd("tail", "listen for events from a job", cmd!(do_job_tail))?;
     l.cmd("outputs", "list job outputs", cmd!(do_job_outputs))?;
     l.cmd("dump", "dump information about jobs", cmd!(do_job_dump))?;

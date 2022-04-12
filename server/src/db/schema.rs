@@ -18,6 +18,7 @@ table! {
         worker -> Nullable<Text>,
         waiting -> Bool,
         target_id -> Nullable<Text>,
+        cancelled -> Bool,
     }
 }
 

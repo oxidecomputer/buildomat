@@ -211,3 +211,7 @@ CREATE INDEX published_file_sets ON published_file (owner, series, version);
 -- v 31
 ALTER TABLE worker ADD COLUMN
     wait_for_flush  INTEGER NOT NULL    DEFAULT 0;
+
+-- v 32
+ALTER TABLE job ADD COLUMN
+    cancelled       INTEGER NOT NULL    DEFAULT 0;

@@ -187,7 +187,6 @@ pub struct Worker {
 }
 
 impl Worker {
-    #[allow(dead_code)]
     pub fn agent_ok(&self) -> bool {
         /*
          * Until we have a token from the worker, the agent hasn't started up
@@ -239,6 +238,7 @@ pub struct Job {
     pub worker: Option<WorkerId>,
     pub waiting: bool,
     pub target_id: Option<TargetId>,
+    pub cancelled: bool,
 }
 
 impl Job {

@@ -688,11 +688,11 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                 continue;
             }
             "check_run" if &payload.action == "requested_action" => {
-                if let Some(ra) = &payload.requested_action {
-                    if ra.identifier != "auth" {
+                let actid = if let Some(ra) = &payload.requested_action {
+                    if ra.identifier != "auth" && ra.identifier != "cancel" {
                         /*
-                         * Authorisation is the only action we know how to do
-                         * for now.
+                         * Authorisation and cancellation are the only actions
+                         * we know how to do for now.
                          */
                         error!(
                             log,
@@ -703,6 +703,7 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                         app.db.delivery_ack(del.seq, ack)?;
                         continue;
                     }
+                    ra.identifier.to_string()
                 } else {
                     error!(
                         log,
@@ -737,17 +738,53 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                 };
                 let mut cs = app.db.load_check_suite(&cr.check_suite)?;
 
-                /*
-                 * The "Authorise" button should only appear on the Control
-                 * check run.
-                 */
-                if !cr.variety.is_control() {
-                    warn!(
-                        log,
-                        "delivery {} for non-control check run", del.seq
-                    );
-                    app.db.delivery_ack(del.seq, ack)?;
-                    continue;
+                match cr.variety {
+                    CheckRunVariety::Control => {
+                        /*
+                         * The "Authorise" button is the only action that is
+                         * valid for the Control check run.
+                         */
+                        if actid != "auth" {
+                            warn!(
+                                log,
+                                "delivery {} for {:?} on control check run",
+                                del.seq,
+                                actid,
+                            );
+                            app.db.delivery_ack(del.seq, ack)?;
+                            continue;
+                        }
+                    }
+                    CheckRunVariety::AlwaysPass
+                    | CheckRunVariety::FailFirst => {
+                        warn!(
+                            log,
+                            "delivery {} for {:?} unsupported", del.seq, actid,
+                        );
+                        app.db.delivery_ack(del.seq, ack)?;
+                        continue;
+                    }
+                    CheckRunVariety::Basic => {
+                        if actid != "cancel" {
+                            warn!(
+                                log,
+                                "delivery {} for {:?} on basic check run",
+                                del.seq,
+                                actid,
+                            );
+                            app.db.delivery_ack(del.seq, ack)?;
+                            continue;
+                        }
+
+                        /*
+                         * Cancel any work that has been queued but not yet
+                         * performed:
+                         */
+                        variety::basic::cancel(app, &cs, &mut cr).await?;
+
+                        app.db.delivery_ack(del.seq, ack)?;
+                        continue;
+                    }
                 }
 
                 /*

@@ -299,6 +299,7 @@ pub(crate) fn format_job(
         output_rules,
         state: format_job_state(j),
         tags,
+        cancelled: j.cancelled,
     }
 }
 
@@ -384,6 +385,7 @@ pub(crate) struct Job {
     tasks: Vec<Task>,
     state: String,
     tags: HashMap<String, String>,
+    cancelled: bool,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -695,6 +697,45 @@ pub(crate) async fn job_add_input(
      * Insert a record in the database for this input object and report success.
      */
     c.db.job_add_input(job.id, &add.name, fid, addsize).or_500()?;
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/jobs/{job}/cancel",
+}]
+pub(crate) async fn job_cancel(
+    rqctx: Arc<RequestContext<Arc<Central>>>,
+    path: TypedPath<JobsPath>,
+) -> DSResult<HttpResponseUpdatedNoContent> {
+    let c = rqctx.context();
+    let req = rqctx.request.lock().await;
+    let log = &rqctx.log;
+
+    let owner = c.require_user(log, &req).await?;
+
+    let p = path.into_inner();
+
+    let job = c.db.job_by_str(&p.job).or_500()?;
+    if job.owner != owner.id {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::FORBIDDEN,
+            "not your job".into(),
+        ));
+    }
+
+    if job.complete {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::CONFLICT,
+            "cannot cancel a job that is already complete".into(),
+        ));
+    }
+
+    c.db.job_cancel(job.id).or_500()?;
+    info!(log, "user {} cancelled job {}", owner.id, job.id);
 
     Ok(HttpResponseUpdatedNoContent())
 }

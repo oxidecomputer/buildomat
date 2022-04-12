@@ -77,6 +77,32 @@ async fn job_assignment_one(log: &Logger, c: &Central) -> Result<()> {
         assert!(!j.complete);
         assert!(!j.waiting);
 
+        if j.cancelled {
+            /*
+             * If the user or an administrator has cancelled a job, we need to
+             * recycle its worker.
+             */
+            if let Some(wid) = j.worker {
+                let w = c.db.worker_get(wid)?;
+                if !w.deleted && !w.recycle {
+                    info!(
+                        log,
+                        "recycling worker {} for cancelled job {}", w.id, j.id,
+                    );
+                    c.db.worker_recycle(w.id)?;
+                }
+                info!(log, "failing job {}, cancelled while running", j.id);
+            } else {
+                /*
+                 * This job was cancelled before we were able to assign it to a
+                 * worker.
+                 */
+                info!(log, "failing job {}, cancelled before assignment", j.id);
+            }
+            c.db.job_complete(j.id, true)?;
+            continue;
+        }
+
         if let Some(wid) = j.worker {
             /*
              * This job has already been assigned.  Check to see if the worker
@@ -198,9 +224,10 @@ async fn lease_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
         .filter(|(_, job)| {
             if let Some(job) = job {
                 /*
-                 * This job has been assigned to a worker.
+                 * This job has been assigned to a worker, or it has been
+                 * cancelled before being assigned.
                  */
-                job.worker.is_some()
+                job.worker.is_some() || job.cancelled
             } else {
                 /*
                  * The job no longer appears in the database for whatever

@@ -98,6 +98,7 @@ pub mod types {
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct Job {
+        pub cancelled: bool,
         pub id: String,
         pub name: String,
         pub output_rules: Vec<String>,
@@ -671,6 +672,22 @@ impl Client {
         let result = self.client.execute(request).await;
         let res = result?.error_for_status()?;
         Ok(res.json().await?)
+    }
+
+    #[doc = "job_cancel: POST /0/jobs/{job}/cancel"]
+    pub async fn job_cancel<'a>(
+        &'a self,
+        job: &'a str,
+    ) -> Result<reqwest::Response> {
+        let url = format!(
+            "{}/0/jobs/{}/cancel",
+            self.baseurl,
+            progenitor_support::encode_path(&job.to_string()),
+        );
+        let request = self.client.post(url).build()?;
+        let result = self.client.execute(request).await;
+        let res = result?.error_for_status()?;
+        Ok(res)
     }
 
     #[doc = "job_upload_chunk: POST /0/jobs/{job}/chunk"]

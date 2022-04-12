@@ -443,11 +443,19 @@ async fn status(
 
         out += "<li>";
         out += &format!("{} user {}", job.id, owner.name);
-        if job.state == "failed" {
-            out += " <span style=\"background-color: #f29494\">[FAIL]</span>";
+        let (colour, word) = if job.state == "failed" {
+            if job.cancelled {
+                ("dabea6", "CANCEL")
+            } else {
+                ("f29494", "FAIL")
+            }
         } else {
-            out += " <span style=\"background-color: #97f294\">[OK]</span>";
-        }
+            ("97f294", "OK")
+        };
+        out += &format!(
+            " <span style=\"background-color: #{}\">[{}]</span>",
+            colour, word
+        );
         out += &dump_info(&job.tags);
         out += "<br>\n";
     }
