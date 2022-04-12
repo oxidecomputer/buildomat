@@ -304,8 +304,13 @@ fn make_executable<P: AsRef<Path>>(p: P) -> Result<()> {
 
 fn make_dirs_for<P: AsRef<Path>>(p: P) -> Result<()> {
     let mut p = p.as_ref().to_path_buf();
-    p.pop();
-    std::fs::create_dir_all(p)?;
+    if p.pop() {
+        /*
+         * Create any missing parent directories if this path is not a bare
+         * filename.  If not, do nothing.
+         */
+        std::fs::create_dir_all(p)?;
+    }
     Ok(())
 }
 

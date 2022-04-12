@@ -137,11 +137,12 @@ pub struct JobInput {
     pub job: JobId,
     pub name: String,
     pub id: Option<JobFileId>,
+    pub other_job: Option<JobId>,
 }
 
 impl JobInput {
     pub fn from_create(name: &str, job: JobId) -> JobInput {
-        JobInput { job, name: name.to_string(), id: None }
+        JobInput { job, name: name.to_string(), id: None, other_job: None }
     }
 }
 
@@ -278,4 +279,31 @@ pub struct Target {
     pub desc: String,
     pub redirect: Option<TargetId>,
     pub privilege: Option<String>,
+}
+
+#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
+#[table_name = "job_depend"]
+#[primary_key(job, name)]
+pub struct JobDepend {
+    pub job: JobId,
+    pub name: String,
+    pub prior_job: JobId,
+    pub copy_outputs: bool,
+    pub on_failed: bool,
+    pub on_completed: bool,
+    pub satisfied: bool,
+}
+
+impl JobDepend {
+    pub fn from_create(cd: &super::CreateDepend, job: JobId) -> JobDepend {
+        JobDepend {
+            job,
+            name: cd.name.to_string(),
+            prior_job: cd.prior_job,
+            copy_outputs: cd.copy_outputs,
+            on_failed: cd.on_failed,
+            on_completed: cd.on_completed,
+            satisfied: false,
+        }
+    }
 }

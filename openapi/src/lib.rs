@@ -3,6 +3,14 @@ mod progenitor_client;
 pub use progenitor_client::{ByteStream, Error, ResponseValue};
 pub mod types {
     use serde::{Deserialize, Serialize};
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct DependSubmit {
+        pub copy_outputs: bool,
+        pub on_completed: bool,
+        pub on_failed: bool,
+        pub prior_job: String,
+    }
+
     #[doc = "Error information from a response."]
     #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct Error {
@@ -137,6 +145,11 @@ pub mod types {
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct JobSubmit {
+        #[serde(
+            default,
+            skip_serializing_if = "std::collections::HashMap::is_empty"
+        )]
+        pub depends: std::collections::HashMap<String, DependSubmit>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pub inputs: Vec<String>,
         pub name: String,

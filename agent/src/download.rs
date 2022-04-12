@@ -23,6 +23,12 @@ pub(crate) fn download(
             let mut path = inputdir.clone();
             path.push(&i.name);
 
+            /*
+             * Try our best to create any parent directories that are required
+             * for names that includes slashes.
+             */
+            super::make_dirs_for(&path).ok();
+
             tx.send(Activity::Downloading(path.clone())).unwrap();
 
             cw.input(&i.id, &path).await;

@@ -88,6 +88,7 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
         "GLOB",
     );
     l.optmulti("i", "input", "input file to pass to job", "[NAME=]FILE");
+    l.optmulti("d", "depend-on", "depend on prior job", "NAME=JOB_ID");
     l.optmulti("T", "tag", "informational tag to identify job", "KEY=VALUE");
     l.optflag("v", "", "debugging output");
 
@@ -171,6 +172,26 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
             }
         })
         .collect::<Result<HashMap<String, PathBuf>>>()?;
+    let depends = a
+        .opts()
+        .opt_strs("depend-on")
+        .iter()
+        .map(|val| {
+            if let Some((name, job)) = val.split_once('=') {
+                Ok((
+                    name.to_string(),
+                    DependSubmit {
+                        copy_outputs: true,
+                        on_completed: true,
+                        on_failed: false,
+                        prior_job: job.to_string(),
+                    },
+                ))
+            } else {
+                bail!("dependency {:?} not well-formed", val);
+            }
+        })
+        .collect::<Result<HashMap<String, DependSubmit>>>()?;
 
     let mut w = Stopwatch::start(a.opts().opt_present("v"));
 
@@ -193,6 +214,7 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
         tasks: vec![t],
         inputs: inputs.keys().cloned().collect(),
         tags,
+        depends,
     };
     let x = l.context().user().job_submit(&j).await?;
     w.lap("job submit");

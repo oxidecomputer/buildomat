@@ -215,3 +215,20 @@ ALTER TABLE worker ADD COLUMN
 -- v 32
 ALTER TABLE job ADD COLUMN
     cancelled       INTEGER NOT NULL    DEFAULT 0;
+
+-- v 33
+CREATE TABLE job_depend (
+    job             TEXT    NOT NULL,
+    name            TEXT    NOT NULL,
+    prior_job       TEXT    NOT NULL,
+    copy_outputs    INTEGER NOT NULL,
+    on_failed       INTEGER NOT NULL,
+    on_completed    INTEGER NOT NULL,
+    satisfied       INTEGER NOT NULL,
+
+    PRIMARY KEY (job, name)
+);
+
+-- v 34
+ALTER TABLE job_input ADD COLUMN
+    other_job       TEXT;

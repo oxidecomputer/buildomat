@@ -51,6 +51,7 @@ table! {
         job -> Text,
         name -> Text,
         id -> Nullable<Text>,
+        other_job -> Nullable<Text>,
     }
 }
 
@@ -153,3 +154,15 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(published_file, job_file);
+
+table! {
+    job_depend (job, name) {
+        job -> Text,
+        name -> Text,
+        prior_job -> Text,
+        copy_outputs -> Bool,
+        on_failed -> Bool,
+        on_completed -> Bool,
+        satisfied -> Bool,
+    }
+}

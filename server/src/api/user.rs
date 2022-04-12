@@ -410,6 +410,8 @@ pub(crate) struct JobSubmit {
     inputs: Vec<String>,
     #[serde(default)]
     tags: HashMap<String, String>,
+    #[serde(default)]
+    depends: HashMap<String, DependSubmit>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -421,6 +423,14 @@ pub(crate) struct TaskSubmit {
     uid: Option<u32>,
     gid: Option<u32>,
     workdir: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct DependSubmit {
+    prior_job: String,
+    copy_outputs: bool,
+    on_failed: bool,
+    on_completed: bool,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -544,6 +554,20 @@ pub(crate) async fn job_submit(
         })
         .collect::<Vec<_>>();
 
+    let depends = new_job
+        .depends
+        .iter()
+        .map(|(name, ds)| {
+            Ok(db::CreateDepend {
+                name: name.to_string(),
+                prior_job: db::JobId::from_str(&ds.prior_job).or_500()?,
+                copy_outputs: ds.copy_outputs,
+                on_failed: ds.on_failed,
+                on_completed: ds.on_completed,
+            })
+        })
+        .collect::<DSResult<Vec<_>>>()?;
+
     let t =
         c.db.job_create(
             owner.id,
@@ -554,6 +578,7 @@ pub(crate) async fn job_submit(
             &new_job.output_rules,
             &new_job.inputs,
             new_job.tags,
+            depends,
         )
         .or_500()?;
 

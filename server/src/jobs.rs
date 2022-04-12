@@ -147,18 +147,95 @@ async fn job_assignment_one(log: &Logger, c: &Central) -> Result<()> {
 async fn job_waiters_one(log: &Logger, c: &Central) -> Result<()> {
     /*
      * Look at jobs that are waiting for inputs or dependency satisfaction.
+     *
+     * Process dependencies first.
      */
-    for j in c.db.jobs_waiting()?.iter() {
+    'job: for j in c.db.jobs_waiting()?.iter() {
         assert!(j.waiting);
+
+        /*
+         * First, check for any jobs that this job depends on.
+         */
+        let depends = c.db.job_depends(j.id)?;
+        for d in depends.iter() {
+            if d.satisfied {
+                /*
+                 * This dependency has been satisfied already.
+                 */
+                continue;
+            }
+
+            let failmsg = if let Some(pj) = c.db.job_by_id_opt(d.prior_job)? {
+                /*
+                 * The job exists!  Check on the status.
+                 */
+                if !pj.complete {
+                    /*
+                     * If the prior job is not yet complete, we do not need to
+                     * check anything else about this job.
+                     */
+                    continue 'job;
+                }
+
+                if pj.failed {
+                    if d.on_failed {
+                        c.db.job_depend_satisfy(j.id, d)?;
+                        continue;
+                    } else {
+                        format!(
+                            "this job depends on job {} ({}) failing,
+                            but it has completed; failing job",
+                            d.prior_job, d.name,
+                        )
+                    }
+                } else {
+                    if d.on_completed {
+                        c.db.job_depend_satisfy(j.id, d)?;
+                        continue;
+                    } else {
+                        format!(
+                            "this job depends on job {} ({}) completing \
+                            but it has failed; failing job",
+                            d.prior_job, d.name,
+                        )
+                    }
+                }
+            } else {
+                /*
+                 * If the job on which we depend no longer exists, this
+                 * dependency can never be satisfied and we must fail this job.
+                 */
+                format!(
+                    "this job depends on job {} ({}) which has \
+                    been deleted; failing job",
+                    d.prior_job, d.name,
+                )
+            };
+
+            c.db.job_append_event(
+                j.id,
+                None,
+                "control",
+                Utc::now(),
+                None,
+                &failmsg,
+            )?;
+            c.db.job_complete(j.id, true)?;
+            continue 'job;
+        }
 
         let inputs = c.db.job_inputs(j.id)?;
         if inputs.iter().any(|(_, f)| f.is_none()) {
             /*
              * At least one input file is not yet uploaded.
              */
-            continue;
+            continue 'job;
         }
 
+        /*
+         * If all dependencies and inputs are accounted for, release the job for
+         * execution.
+         */
         info!(log, "waking up job {}", j.id);
         c.db.job_wakeup(j.id)?;
     }

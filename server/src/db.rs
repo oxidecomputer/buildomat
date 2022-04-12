@@ -59,6 +59,14 @@ pub struct CreateTask {
     pub workdir: Option<String>,
 }
 
+pub struct CreateDepend {
+    pub name: String,
+    pub prior_job: JobId,
+    pub copy_outputs: bool,
+    pub on_failed: bool,
+    pub on_completed: bool,
+}
+
 impl Database {
     pub fn new<P: AsRef<Path>>(
         log: Logger,
@@ -554,6 +562,108 @@ impl Database {
             .get_results::<String>(c)?)
     }
 
+    pub fn job_depends(&self, job: JobId) -> Result<Vec<JobDepend>> {
+        use schema::job_depend;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        Ok(job_depend::dsl::job_depend
+            .filter(job_depend::dsl::job.eq(job))
+            .order_by(job_depend::dsl::name)
+            .get_results(c)?)
+    }
+
+    /**
+     * When a prior job has completed, we need to mark the dependency record as
+     * satisfied.  In the process, if requested, we will copy any output files
+     * from the previous job into the new job as input files.
+     */
+    pub fn job_depend_satisfy(&self, jid: JobId, d: &JobDepend) -> Result<()> {
+        use schema::{job, job_depend, job_input};
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        c.immediate_transaction(|tx| {
+            /*
+             * Confirm that this job exists and is still waiting.
+             */
+            let j: Job = job::dsl::job.find(jid).get_result(tx)?;
+            if !j.waiting {
+                bail!("job not waiting, cannot satisfy dependency");
+            }
+
+            /*
+             * Confirm that the dependency record still exists and has not yet
+             * been satisfied.
+             */
+            let d: JobDepend = job_depend::dsl::job_depend
+                .find((j.id, &d.name))
+                .get_result(tx)?;
+            if d.satisfied {
+                bail!("job dependency already satisfied");
+            }
+
+            /*
+             * Confirm that the prior job exists and is complete.
+             */
+            let pj: Job = job::dsl::job.find(d.prior_job).get_result(tx)?;
+            if !pj.complete {
+                bail!("prior job not complete");
+            }
+
+            if d.copy_outputs {
+                /*
+                 * Resolve the list of output files.
+                 */
+                let pjouts = self.i_job_outputs(tx, pj.id)?;
+
+                /*
+                 * For each output file produced by the dependency, create an
+                 * input record for this job.
+                 */
+                for (pjo, pjf) in pjouts {
+                    /*
+                     * These input files will be placed under a directory named
+                     * for the dependency; e.g., If the dependency produced a
+                     * file "/work/file.txt", and the dependency was named
+                     * "builds", we want to create an input named
+                     * "builds/work/file.txt", which will result in a file at
+                     * "/input/builds/work/file.txt" in the job runner.
+                     */
+                    let mut name = d.name.trim().to_string();
+                    if !pjo.path.starts_with('/') {
+                        name.push('/');
+                    }
+                    name.push_str(&pjo.path);
+
+                    /*
+                     * Note that job files are named by a (job ID, file ID)
+                     * tuple.  In the case of a copied output, we need to use
+                     * the "other_job" field to refer to the job which holds the
+                     * output file we are referencing.
+                     */
+                    let ji = JobInput {
+                        job: j.id,
+                        name,
+                        id: Some(pjf.id),
+                        other_job: Some(pjf.job),
+                    };
+
+                    diesel::insert_into(job_input::dsl::job_input)
+                        .values(ji)
+                        .on_conflict_do_nothing()
+                        .execute(tx)?;
+                }
+            }
+
+            diesel::update(job_depend::dsl::job_depend)
+                .set((job_depend::dsl::satisfied.eq(true),))
+                .execute(tx)?;
+
+            Ok(())
+        })
+    }
+
     pub fn job_inputs(
         &self,
         job: JobId,
@@ -564,19 +674,41 @@ impl Database {
 
         Ok(job_input::dsl::job_input
             .left_outer_join(
-                job_file::table.on(job_file::dsl::job
-                    .eq(job_input::dsl::job)
-                    .and(job_file::dsl::id.nullable().eq(job_input::dsl::id))),
+                job_file::table.on(
+                    /*
+                     * The file ID column must always match:
+                     */
+                    job_file::dsl::id.nullable().eq(job_input::dsl::id).and(
+                        /*
+                         * Either the other_job field is null, and the input
+                         * job ID matches the file job ID directly...
+                         */
+                        (job_input::dsl::other_job
+                            .is_null()
+                            .and(job_file::dsl::job.eq(job_input::dsl::job)))
+                        /*
+                         * ... or the other_job field is populated and it
+                         * matches the file job ID instead:
+                         */
+                        .or(job_input::dsl::other_job.is_not_null().and(
+                            job_file::dsl::job
+                                .nullable()
+                                .eq(job_input::dsl::other_job),
+                        )),
+                    ),
+                ),
             )
             .filter(job_input::dsl::job.eq(job))
             .order_by(job_input::dsl::id.asc())
             .get_results(c)?)
     }
 
-    pub fn job_outputs(&self, job: JobId) -> Result<Vec<(JobOutput, JobFile)>> {
+    fn i_job_outputs(
+        &self,
+        tx: &mut SqliteConnection,
+        job: JobId,
+    ) -> Result<Vec<(JobOutput, JobFile)>> {
         use schema::{job_file, job_output};
-
-        let c = &mut self.1.lock().unwrap().conn;
 
         Ok(job_output::dsl::job_output
             .inner_join(
@@ -586,7 +718,13 @@ impl Database {
             )
             .filter(job_file::dsl::job.eq(job))
             .order_by(job_file::dsl::id.asc())
-            .get_results(c)?)
+            .get_results(tx)?)
+    }
+
+    pub fn job_outputs(&self, job: JobId) -> Result<Vec<(JobOutput, JobFile)>> {
+        let c = &mut self.1.lock().unwrap().conn;
+
+        self.i_job_outputs(c, job)
     }
 
     pub fn job_file_by_id_opt(
@@ -648,21 +786,49 @@ impl Database {
         output_rules: &[String],
         inputs: &[String],
         tags: I,
+        depends: Vec<CreateDepend>,
     ) -> Result<Job>
     where
         I: IntoIterator<Item = (String, String)>,
     {
-        use schema::{job, job_input, job_output_rule, job_tag, task};
+        use schema::{
+            job, job_depend, job_input, job_output_rule, job_tag, task,
+        };
 
         if tasks.is_empty() {
             bail!("a job must have at least one task");
         }
+        if tasks.len() > 64 {
+            bail!("a job must have 64 or fewer tasks");
+        }
+
+        if depends.len() > 8 {
+            bail!("a job must depend on 8 or fewer other jobs");
+        }
+        for cd in depends.iter() {
+            if cd.name.contains('/') || cd.name.trim().is_empty() {
+                bail!("invalid depend name");
+            }
+
+            if !cd.on_failed && !cd.on_completed {
+                bail!("depend must have at least one trigger condition");
+            }
+        }
+
+        if inputs.len() > 32 {
+            bail!("a job must have 32 or fewer input files");
+        }
+        for ci in inputs.iter() {
+            if ci.contains('/') || ci.trim().is_empty() {
+                bail!("invalid input name");
+            }
+        }
 
         /*
-         * If the job has any input files, it begins in the "waiting" state.
-         * Otherwise it can begin immediately.
+         * If the job has any input files or any jobs on which it depends, it
+         * begins in the "waiting" state.  Otherwise it can begin immediately.
          */
-        let waiting = !inputs.is_empty();
+        let waiting = !inputs.is_empty() || !depends.is_empty();
 
         let j = Job {
             id: JobId::generate(),
@@ -687,6 +853,32 @@ impl Database {
             for (i, ct) in tasks.iter().enumerate() {
                 let ic = diesel::insert_into(task::dsl::task)
                     .values(Task::from_create(ct, j.id, i))
+                    .execute(tx)?;
+                assert_eq!(ic, 1);
+            }
+
+            for cd in depends.iter() {
+                /*
+                 * Make sure that this job exists in the system and that its
+                 * owner matches the owner of this job.  By requiring prior jobs
+                 * to exist already at the time of dependency specification we
+                 * can avoid the mess of cycles in the dependency graph.
+                 */
+                let pj: Option<Job> = job::dsl::job
+                    .find(cd.prior_job)
+                    .get_result(tx)
+                    .optional()?;
+
+                if !pj.map(|j| j.owner == owner).unwrap_or(false) {
+                    /*
+                     * Try not to leak information about job IDs from other
+                     * users in the process.
+                     */
+                    bail!("prior job does not exist");
+                }
+
+                let ic = diesel::insert_into(job_depend::dsl::job_depend)
+                    .values(JobDepend::from_create(cd, j.id))
                     .execute(tx)?;
                 assert_eq!(ic, 1);
             }

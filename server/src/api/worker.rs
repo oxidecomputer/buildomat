@@ -173,7 +173,10 @@ pub(crate) async fn worker_job_input_download(
     let mut res = Response::builder();
     res = res.header(CONTENT_TYPE, "application/octet-stream");
 
-    let fr = c.file_response(j.id, i.id.unwrap()).await.or_500()?;
+    let fr = c
+        .file_response(i.other_job.unwrap_or(i.job), i.id.unwrap())
+        .await
+        .or_500()?;
     info!(
         log,
         "worker {} job {} input {} name {:?} is in the {}",

@@ -699,6 +699,7 @@ pub(crate) async fn run(
             tasks,
             inputs: Default::default(),
             tags,
+            depends: Default::default(),
         };
         let jsr = b.job_submit(body).await?.into_inner();
 
