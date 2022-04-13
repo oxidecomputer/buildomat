@@ -258,7 +258,11 @@ async fn aws_worker_one(
             /*
              * Request information about this worker from the core server.
              */
-            let w = c.client.factory_worker_get(&id.to_string()).await?;
+            let w = c
+                .client
+                .factory_worker_get(&id.to_string())
+                .await?
+                .into_inner();
             match w.worker {
                 Some(w) => {
                     debug!(log, "instance {} is for worker {}", i.id, w.id);
@@ -370,7 +374,7 @@ async fn aws_worker_one(
      * instance, they must be scrubbed from the database as detritus from prior
      * failed runs.
      */
-    for w in c.client.factory_workers().await? {
+    for w in c.client.factory_workers().await?.into_inner() {
         let rm = if let Some(instance_id) = w.private.as_deref() {
             /*
              * There is a record of a particular instance ID for this worker.
@@ -463,7 +467,8 @@ async fn aws_worker_one(
             .factory_lease(&FactoryWhatsNext {
                 supported_targets: c.targets.clone(),
             })
-            .await?;
+            .await?
+            .into_inner();
 
         let lease = if let Some(lease) = res.lease {
             lease

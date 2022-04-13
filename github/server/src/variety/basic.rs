@@ -284,7 +284,7 @@ pub(crate) async fn run(
          * We have submitted the task to buildomat already, so just try
          * to update our state.
          */
-        let bt = b.job_get(jid).await?;
+        let bt = b.job_get(jid).await?.into_inner();
         let new_state = Some(bt.state);
         let complete = if let Some(state) = new_state.as_deref() {
             state == "completed" || state == "failed"
@@ -308,7 +308,9 @@ pub(crate) async fn run(
         if now - p.event_last_redraw_time >= 6 || complete {
             let mut change = false;
 
-            for ev in b.job_events_get(jid, Some(p.event_minseq)).await? {
+            for ev in
+                b.job_events_get(jid, Some(p.event_minseq)).await?.into_inner()
+            {
                 change = true;
                 if ev.seq + 1 > p.event_minseq {
                     p.event_minseq = ev.seq + 1;
@@ -698,7 +700,7 @@ pub(crate) async fn run(
             inputs: Default::default(),
             tags,
         };
-        let jsr = b.job_submit(body).await?;
+        let jsr = b.job_submit(body).await?.into_inner();
 
         p.buildomat_id = Some(jsr.id);
         cr.flushed = false;
@@ -730,6 +732,7 @@ pub(crate) async fn artefact(
         let bm = app.buildomat(&app.db.load_repository(cs.repo)?);
 
         let backend = bm.job_output_download(id, output).await?;
+        let cl = backend.content_length().unwrap();
 
         /*
          * To try and help out the browser in deciding whether to display or
@@ -749,11 +752,8 @@ pub(crate) async fn artefact(
             hyper::Response::builder()
                 .status(hyper::StatusCode::OK)
                 .header(hyper::header::CONTENT_TYPE, ct)
-                .header(
-                    hyper::header::CONTENT_LENGTH,
-                    backend.content_length().unwrap(),
-                )
-                .body(hyper::Body::wrap_stream(backend.bytes_stream()))?,
+                .header(hyper::header::CONTENT_LENGTH, cl)
+                .body(hyper::Body::wrap_stream(backend.into_inner()))?,
         ));
     }
 
@@ -782,7 +782,7 @@ pub(crate) async fn details(
          */
         let bm = app.buildomat(&app.db.load_repository(cs.repo)?);
         let job = bm.job_get(jid).await?;
-        let outputs = bm.job_outputs_get(jid).await?;
+        let outputs = bm.job_outputs_get(jid).await?.into_inner();
 
         out += &format!("<h2>Buildomat Job: {}</h2>\n", jid);
 
@@ -819,7 +819,7 @@ pub(crate) async fn details(
 
         let mut last = None;
 
-        for ev in bm.job_events_get(jid, None).await? {
+        for ev in bm.job_events_get(jid, None).await?.into_inner() {
             if ev.task != last {
                 out += "<tr><td colspan=\"3\">&nbsp;</td></tr>";
             }

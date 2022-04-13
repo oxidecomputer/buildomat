@@ -52,7 +52,7 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
          * Fetch the state for this worker from the core server:
          */
         let w = if let Some(w) =
-            c.client.factory_worker_get(&i.worker).await?.worker
+            c.client.factory_worker_get(&i.worker).await?.into_inner().worker
         {
             debug!(log, "instance {} is for worker {}", i.id(), w.id);
             w
@@ -111,7 +111,7 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
      * any worker records left that do not have an associate instance, they must
      * be scrubbed as detritus from prior failed runs.
      */
-    for w in c.client.factory_workers().await? {
+    for w in c.client.factory_workers().await?.into_inner() {
         let rm = if let Some(p) = w.private.as_deref() {
             if let Ok(ii) = parse_instance_id(p) {
                 if let Some(i) = c.db.instance_get(&ii.0, ii.1)? {
@@ -200,6 +200,7 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
             .client
             .factory_lease(&FactoryWhatsNext { supported_targets })
             .await?
+            .into_inner()
             .lease
         {
             /*
@@ -326,7 +327,7 @@ async fn upload_worker_one(log: &Logger, c: &Central) -> Result<()> {
 
         if !i.flushed {
             let w = c.client.factory_worker_get(&i.worker).await?;
-            if let Some(w) = w.worker {
+            if let Some(w) = &w.worker {
                 if w.online {
                     /*
                      * The agent within the guest is online and ready to receive

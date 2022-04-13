@@ -20,6 +20,7 @@ use anyhow::{anyhow, bail, Result};
 use buildomat_common::*;
 use buildomat_openapi::{types::*, Client};
 use chrono::prelude::*;
+use futures::StreamExt;
 use hiercmd::prelude::*;
 use rusty_ulid::Ulid;
 
@@ -221,7 +222,12 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
             };
 
             chunks.push(
-                l.context().user().job_upload_chunk(&x.id, buf).await?.id,
+                l.context()
+                    .user()
+                    .job_upload_chunk(&x.id, buf)
+                    .await?
+                    .into_inner()
+                    .id,
             );
 
             w.lap(&format!("upload {} chunk {}", name, chunks.len()));
@@ -378,8 +384,9 @@ async fn do_job_outputs(mut l: Level<Stuff>) -> Result<()> {
     if a.args().len() != 1 {
         bad_args!(l, "specify job ID");
     }
+    let j = a.args()[0].as_str();
 
-    for i in l.context().user().job_outputs_get(a.args()[0].as_str()).await? {
+    for i in l.context().user().job_outputs_get(j).await?.into_inner() {
         let mut r = Row::default();
         r.add_str("id", &i.id);
         r.add_str("path", &i.path);
@@ -400,7 +407,7 @@ async fn do_job_list(mut l: Level<Stuff>) -> Result<()> {
 
     let mut t = a.table();
 
-    for job in l.context().user().jobs_get().await? {
+    for job in l.context().user().jobs_get().await?.into_inner() {
         let mut r = Row::default();
         r.add_str("id", &job.id);
         r.add_str("name", &job.name);
@@ -446,10 +453,10 @@ async fn do_job_copy(mut l: Level<Stuff>) -> Result<()> {
     let dst = a.args()[2].as_str();
 
     let c = l.context().user();
-    for o in c.job_outputs_get(job).await? {
+    for o in c.job_outputs_get(job).await?.into_inner() {
         if o.path == src {
             println!("downloading {} -> {} ({}KB)", o.path, dst, o.size / 1024);
-            let mut res = c.job_output_download(job, &o.id).await?;
+            let mut res = c.job_output_download(job, &o.id).await?.into_inner();
 
             let mut f = std::fs::OpenOptions::new()
                 .create(true)
@@ -457,7 +464,7 @@ async fn do_job_copy(mut l: Level<Stuff>) -> Result<()> {
                 .write(true)
                 .open(&dst)?;
 
-            while let Some(ch) = res.chunk().await? {
+            while let Some(ch) = res.next().await.transpose()? {
                 f.write_all(&ch)?;
             }
             f.flush()?;
@@ -489,7 +496,7 @@ async fn do_job_publish(mut l: Level<Stuff>) -> Result<()> {
     let name = a.args()[4].as_str();
 
     let c = l.context().user();
-    for o in c.job_outputs_get(job).await? {
+    for o in c.job_outputs_get(job).await?.into_inner() {
         if o.path == src {
             println!(
                 "publishing {} -> {}/{}/{} ({}KB)",
@@ -594,7 +601,7 @@ async fn do_user_list(mut l: Level<Stuff>) -> Result<()> {
 
     let mut t = a.table();
 
-    for u in l.context().admin().users_list().await? {
+    for u in l.context().admin().users_list().await?.into_inner() {
         let mut r = Row::default();
         r.add_str("id", &u.id);
         r.add_str("name", &u.name);
@@ -655,10 +662,11 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
 
     let a = no_args!(l);
     let active = a.opts().opt_present("active");
+    let c = l.context();
 
     let mut t = a.table();
 
-    for w in l.context().admin().workers_list(Some(active)).await?.workers {
+    for w in c.admin().workers_list(Some(active)).await?.into_inner().workers {
         if active && w.deleted {
             continue;
         }
@@ -773,7 +781,7 @@ async fn do_target_list(mut l: Level<Stuff>) -> Result<()> {
 
     let mut t = a.table();
 
-    for targ in l.context().admin().targets_list().await? {
+    for targ in l.context().admin().targets_list().await?.into_inner() {
         let mut r = Row::default();
         r.add_str("id", &targ.id);
         r.add_str("name", &targ.name);
@@ -876,19 +884,19 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
     /*
      * Load active jobs:
      */
-    let jobs = s.admin().admin_jobs_get(Some(true), None).await?;
+    let jobs = s.admin().admin_jobs_get(Some(true), None).await?.into_inner();
     w.lap("admin_jobs_get active");
 
     /*
      * Load some of recently completed jobs:
      */
-    let oldjobs = s.admin().admin_jobs_get(None, Some(10)).await?;
+    let oldjobs = s.admin().admin_jobs_get(None, Some(10)).await?.into_inner();
     w.lap("admin_jobs_get completed");
 
     /*
      * Load active workers:
      */
-    let res = s.admin().workers_list(Some(true)).await?;
+    let res = s.admin().workers_list(Some(true)).await?.into_inner();
     w.lap("workers_list");
 
     fn github_url(tags: &HashMap<String, String>) -> Option<String> {

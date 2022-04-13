@@ -76,6 +76,15 @@ impl<T> ToHttpError<T> for SResult<T, rusty_ulid::DecodingError> {
     }
 }
 
+impl<T, E> ToHttpError<T> for SResult<T, buildomat_openapi::Error<E>> {
+    fn to_500(self) -> SResult<T, HttpError> {
+        self.map_err(|e| {
+            let msg = format!("internal error: {}", e);
+            HttpError::for_internal_error(msg)
+        })
+    }
+}
+
 #[derive(Deserialize, JsonSchema)]
 struct ArtefactPath {
     pub check_suite: String,
@@ -517,15 +526,13 @@ async fn published_file(
         .to_500()?;
 
     let ct = guess_mime_type(&path.name);
+    let cl = backend.content_length().unwrap();
 
     Ok(hyper::Response::builder()
         .status(hyper::StatusCode::OK)
         .header(hyper::header::CONTENT_TYPE, ct)
-        .header(
-            hyper::header::CONTENT_LENGTH,
-            backend.content_length().unwrap(),
-        )
-        .body(hyper::Body::wrap_stream(backend.bytes_stream()))?)
+        .header(hyper::header::CONTENT_LENGTH, cl)
+        .body(hyper::Body::wrap_stream(backend.into_inner()))?)
 }
 
 pub(crate) async fn server(

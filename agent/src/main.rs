@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::prelude::*;
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use ErrorKind::NotFound;
 
@@ -164,7 +165,7 @@ impl ClientWrap {
                 .await
             {
                 Ok(uc) => {
-                    return uc.id;
+                    return uc.into_inner().id;
                 }
                 Err(e) => {
                     println!("ERROR: chunk upload: {:?}", e);
@@ -198,7 +199,9 @@ impl ClientWrap {
 
         'outer: loop {
             match self.client.worker_job_input_download(&job.id, id).await {
-                Ok(mut res) => {
+                Ok(res) => {
+                    let mut body = res.into_inner();
+
                     let mut f = match tokio::fs::File::create(path).await {
                         Ok(f) => f,
                         Err(e) => {
@@ -209,7 +212,7 @@ impl ClientWrap {
                     };
 
                     loop {
-                        match res.chunk().await {
+                        match body.next().await.transpose() {
                             Ok(None) => return,
                             Ok(Some(mut ch)) => {
                                 if let Err(e) = f.write_all_buf(&mut ch).await {
@@ -454,7 +457,7 @@ async fn main() -> Result<()> {
         sleep_ms(1000).await;
     };
 
-    let wid = res.id;
+    let wid = res.into_inner().id;
     println!("bootstrapped as worker {}", wid);
 
     let mut tasks: VecDeque<WorkerPingTask> = VecDeque::new();

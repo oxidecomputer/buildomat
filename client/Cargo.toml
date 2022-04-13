@@ -11,10 +11,10 @@ buildomat-common = { path = "../common" }
 chrono = "0.4"
 dirs-next = "2.0.0"
 hiercmd = { git = "https://github.com/jclulow/hiercmd" }
-reqwest = { version = "^0.11", default-features = false, features = ["json", "native-tls-vendored"]}
 rusty_ulid = "0.11.0"
 serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 toml = "0.5.8"
 bytes = "1"
+futures = "0.3.21"

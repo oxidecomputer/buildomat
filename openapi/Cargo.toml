@@ -4,8 +4,10 @@ version = "0.0.0"
 edition = "2018"
 
 [dependencies]
-anyhow = "1.0"
+bytes = "1.1.0"
 chrono = { version = "0.4", features = ["serde"] }
+futures-core = "0.3.21"
 percent-encoding = "2.1"
 reqwest = { version = "0.11", features = ["json", "stream"] }
 serde = { version = "1.0", features = ["derive"] }
+
