@@ -903,6 +903,11 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
         .collect::<HashMap<String, String>>();
     w.lap("users_list");
 
+    let targets = s.admin().targets_list().await?.iter()
+        .map(|t| (t.id.to_string(), t.name.to_string()))
+        .collect::<HashMap<String, String>>();
+    w.lap("targets_list");
+
     /*
      * Load active jobs:
      */
@@ -943,7 +948,9 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
         Some(out)
     }
 
-    fn dump_info(tags: &HashMap<String, String>) {
+    fn dump_info(job: &Job) {
+        let tags = &job.tags;
+
         if let Some(info) = github_info(tags) {
             println!("    {}", info);
         }
@@ -952,6 +959,11 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
         }
         if let Some(url) = github_url(tags) {
             println!("    url: {}", url);
+        }
+        if job.target == job.target_real {
+            println!("    target: {}", job.target);
+        } else {
+            println!("    target: {} -> {}", job.target, job.target_real);
         }
     }
 
@@ -965,9 +977,10 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
         }
 
         println!(
-            "== worker {} ({:?})\n    created {} ({}s ago)",
+            "== worker {} ({}, {})\n    created {} ({}s ago)",
             w.id,
-            w.factory_private,
+            targets.get(&w.target).map(|s| s.as_str()).unwrap_or("?"),
+            w.factory_private.as_deref().unwrap_or("?"),
             w.id()?.creation(),
             w.id()?.age().as_secs(),
         );
@@ -977,7 +990,9 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
             let owner = users.get(&job.owner).unwrap_or(&job.owner);
             println!("    job: {} (user {})", job.id, owner);
 
-            dump_info(&job.tags);
+            if let Some(job) = jobs.iter().find(|j| j.id == job.id) {
+                dump_info(job);
+            }
         }
         println!();
     }
@@ -999,7 +1014,7 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
         let owner = users.get(&job.owner).unwrap_or(&job.owner);
 
         println!("~~ queued job {} (user {})", job.id, owner);
-        dump_info(&job.tags);
+        dump_info(&job);
         println!();
     }
     w.lap("job display");
@@ -1015,7 +1030,7 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
         let owner = users.get(&job.owner).unwrap_or(&job.owner);
 
         println!("~~ recent completed job {} (user {})", job.id, owner);
-        dump_info(&job.tags);
+        dump_info(&job);
         println!();
     }
     w.lap("completed job display");

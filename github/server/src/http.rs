@@ -320,6 +320,13 @@ async fn status(
         oldjobs
     };
     let workers = b.workers_list(Some(true)).await.to_500()?;
+    let targets = b
+        .targets_list()
+        .await
+        .to_500()?
+        .iter()
+        .map(|t| (t.id.to_string(), t.name.to_string()))
+        .collect::<HashMap<String, String>>();
 
     fn github_url(tags: &HashMap<String, String>) -> Option<String> {
         let owner = tags.get("gong.repo.owner")?;
@@ -359,7 +366,9 @@ async fn status(
         Some(out)
     }
 
-    fn dump_info(tags: &HashMap<String, String>) -> String {
+    fn dump_info(job: &buildomat_openapi::types::Job) -> String {
+        let tags = &job.tags;
+
         let mut out = String::new();
         if let Some(info) = github_info(tags) {
             out += &format!("&nbsp;&nbsp;&nbsp;<b>{}</b><br>\n", info);
@@ -369,6 +378,17 @@ async fn status(
         }
         if let Some(url) = github_url(tags) {
             out += &format!("&nbsp;&nbsp;&nbsp;<b>url:</b> {}<br>\n", url);
+        }
+        if job.target == job.target_real {
+            out += &format!(
+                "&nbsp;&nbsp;&nbsp;<b>target:</b> {}<br>\n",
+                job.target
+            );
+        } else {
+            out += &format!(
+                "&nbsp;&nbsp;&nbsp;<b>target:</b> {} -> {}<br>\n",
+                job.target, job.target_real
+            );
         }
         if !out.is_empty() {
             out = format!("<br>\n{}\n", out);
@@ -389,8 +409,15 @@ async fn status(
 
             out += "<li>";
             out += &w.id;
+            let mut things = Vec::new();
+            if let Some(t) = targets.get(&w.target) {
+                things.push(t.to_string());
+            }
             if let Some(fp) = &w.factory_private {
-                out += &format!(" ({})", fp);
+                things.push(fp.to_string());
+            }
+            if !things.is_empty() {
+                out += &format!(" ({})", things.join(", "));
             }
             out += &format!(
                 " created {} ({}s ago)\n",
@@ -408,7 +435,9 @@ async fn status(
 
                     out += "<li>";
                     out += &format!("job {} user {}", job.id, owner.name);
-                    out += &dump_info(&job.tags);
+                    if let Some(job) = jobs.iter().find(|j| j.id == job.id) {
+                        out += &dump_info(&job);
+                    }
                     out += "<br>\n";
                 }
 
@@ -435,7 +464,7 @@ async fn status(
 
             out += "<li>";
             out += &format!("{} user {}", job.id, owner.name);
-            out += &dump_info(&job.tags);
+            out += &dump_info(&job);
             out += "<br>\n";
         }
         out += "</ul>\n";
@@ -465,7 +494,7 @@ async fn status(
             " <span style=\"background-color: #{}\">[{}]</span>",
             colour, word
         );
-        out += &dump_info(&job.tags);
+        out += &dump_info(&job);
         out += "<br>\n";
     }
     out += "</ul>\n";
