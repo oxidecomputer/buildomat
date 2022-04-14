@@ -153,6 +153,15 @@ async fn job_waiters_one(log: &Logger, c: &Central) -> Result<()> {
     'job: for j in c.db.jobs_waiting()?.iter() {
         assert!(j.waiting);
 
+        if j.cancelled {
+            /*
+             * This job was cancelled before it was ready to run.
+             */
+            info!(log, "failing job {}, cancelled while waiting", j.id);
+            c.db.job_complete(j.id, true)?;
+            continue 'job;
+        }
+
         /*
          * First, check for any jobs that this job depends on.
          */
