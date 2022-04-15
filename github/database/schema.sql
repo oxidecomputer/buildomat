@@ -80,3 +80,7 @@ ALTER TABLE check_suite ADD COLUMN
 
 -- v 11
 CREATE INDEX repository_owner_name ON repository (owner, name);
+
+-- v 12
+ALTER TABLE check_run ADD COLUMN
+    dependencies    TEXT;

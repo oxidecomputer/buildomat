@@ -6,7 +6,7 @@ use diesel::prelude::*;
 use diesel::serialize::ToSql;
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
-use std::str::FromStr;
+use std::{collections::HashMap, str::FromStr};
 use wollongong_common::hooktypes;
 
 use super::schema::*;
@@ -246,6 +246,14 @@ pub struct JobFile {
     pub variety: CheckRunVariety,
     pub config: serde_json::Value,
     pub content: String,
+    #[serde(default)]
+    pub dependencies: HashMap<String, JobFileDepend>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobFileDepend {
+    pub job: String,
+    pub config: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -315,6 +323,11 @@ pub struct CheckRun {
      * Run?
      */
     pub github_id: Option<i64>,
+    /**
+     * Dependency information.  This is a map from dependency name to
+     * JobFileDepend objects.
+     */
+    pub dependencies: Option<JsonValue>,
 }
 
 impl CheckRun {
@@ -328,6 +341,22 @@ impl CheckRun {
             serde_json::json!({})
         };
         Ok(serde_json::from_value(config)?)
+    }
+
+    pub fn get_dependencies(
+        &self,
+    ) -> Result<HashMap<String, CheckRunDependency>> {
+        let mut jfds: HashMap<String, JobFileDepend> =
+            if let Some(dependencies) = &self.dependencies {
+                serde_json::from_value(dependencies.0.clone())?
+            } else {
+                return Ok(Default::default());
+            };
+
+        Ok(jfds
+            .drain()
+            .map(|(name, jfd)| (name, CheckRunDependency(jfd)))
+            .collect())
     }
 
     pub fn get_private<T>(&self) -> Result<T>
@@ -345,5 +374,20 @@ impl CheckRun {
     pub fn set_private<T: Serialize>(&mut self, private: T) -> Result<()> {
         self.private = Some(JsonValue(serde_json::to_value(private)?));
         Ok(())
+    }
+}
+
+pub struct CheckRunDependency(JobFileDepend);
+
+impl CheckRunDependency {
+    pub fn job(&self) -> &str {
+        &self.0.job
+    }
+
+    pub fn get_config<T>(&self) -> Result<T>
+    where
+        for<'de> T: Deserialize<'de>,
+    {
+        Ok(serde_json::from_value(self.0.config.clone())?)
     }
 }

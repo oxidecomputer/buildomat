@@ -192,8 +192,8 @@ async fn job_waiters_one(log: &Logger, c: &Central) -> Result<()> {
                         continue;
                     } else {
                         format!(
-                            "this job depends on job {} ({}) failing,
-                            but it has completed; failing job",
+                            "this job depends on job {} ({}) completing, \
+                            but it has failed; failing job",
                             d.prior_job, d.name,
                         )
                     }
@@ -203,8 +203,8 @@ async fn job_waiters_one(log: &Logger, c: &Central) -> Result<()> {
                         continue;
                     } else {
                         format!(
-                            "this job depends on job {} ({}) completing \
-                            but it has failed; failing job",
+                            "this job depends on job {} ({}) failing \
+                            but it has completed; failing job",
                             d.prior_job, d.name,
                         )
                     }

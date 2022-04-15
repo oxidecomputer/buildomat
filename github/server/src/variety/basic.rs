@@ -29,6 +29,8 @@ struct BasicConfig {
     access_repos: Vec<String>,
     #[serde(default)]
     publish: Vec<BasicConfigPublish>,
+    #[serde(default)]
+    skip_clone: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -226,6 +228,18 @@ pub(crate) async fn flush(
                 state: FlushState::Queued,
                 actions: cancel,
             }
+        } else if ts == "waiting" {
+            FlushOut {
+                title: "Waiting for dependencies...".into(),
+                summary: format!(
+                    "{}This job depends on other jobs that have not \
+                    yet completed.",
+                    summary
+                ),
+                detail,
+                state: FlushState::Queued,
+                actions: cancel,
+            }
         } else {
             FlushOut {
                 title: "Running...".into(),
@@ -414,7 +428,80 @@ pub(crate) async fn run(
                 }
             }
         }
+    } else if !cr.active {
+        /*
+         * This check run has been made inactive prior to creating any
+         * backend resources.
+         */
+        return Ok(false);
     } else {
+        /*
+         * Before we can create this job in the buildomat backend, we need the
+         * buildomat job ID for any job on which it depends.  If the job IDs for
+         * the other check runs we depend on are not yet available, we need to
+         * wait.
+         */
+        let mut depends: HashMap<_, _> = Default::default();
+        for (name, crd) in cr.get_dependencies()? {
+            if let Some(ocr) =
+                db.load_check_run_for_suite_by_name(&cs.id, &crd.job())?
+            {
+                if !matches!(ocr.variety, CheckRunVariety::Basic) {
+                    p.complete = true;
+                    p.error = Some(
+                        "Basic variety jobs can only depend on other Basic \
+                        variety jobs."
+                            .into(),
+                    );
+                    cr.set_private(p)?;
+                    cr.flushed = false;
+                    db.update_check_run(cr)?;
+                    return Ok(false);
+                }
+
+                let op: BasicPrivate = ocr.get_private()?;
+                if let Some(jobid) = &op.buildomat_id {
+                    /*
+                     * Use the job ID for a buildomat-level dependency.
+                     */
+                    depends.insert(
+                        name.to_string(),
+                        buildomat_openapi::types::DependSubmit {
+                            copy_outputs: true,
+                            on_completed: true,
+                            on_failed: false,
+                            prior_job: jobid.to_string(),
+                        },
+                    );
+                    continue;
+                }
+
+                if op.complete || op.error.is_some() {
+                    p.complete = true;
+                    p.error = Some(format!(
+                        "Dependency \"{}\" did not start a buildomat job \
+                        before finishing.",
+                        crd.job()
+                    ));
+                    cr.set_private(p)?;
+                    cr.flushed = false;
+                    db.update_check_run(cr)?;
+                    return Ok(false);
+                }
+            }
+
+            /*
+             * Arriving here should be infrequent.  Dependency relationships are
+             * validated as part of loading the plan, and a complete set of
+             * check runs for the suite should have been created prior to the
+             * CheckSuiteState::Running state.  Nonetheless, there are a few
+             * edge cases where we set "active" to false on a check run; e.g.,
+             * when a re-run is requested.  During those windows we would not be
+             * able to locate the active check run by name.
+             */
+            return Ok(true);
+        }
+
         /*
          * We will need to provide the user program with an access token that
          * allows them to check out what may well be a private repository,
@@ -619,40 +706,57 @@ pub(crate) async fn run(
             .into(),
         });
 
-        buildenv.remove("GITHUB_TOKEN"); /* XXX */
+        buildenv.remove("GITHUB_TOKEN");
 
-        tasks.push(buildomat_openapi::types::TaskSubmit {
-            name: "clone repository".into(),
-            env: buildenv.clone(),
-            env_clear: false,
-            gid: Some(12345),
-            uid: Some(12345),
-            workdir: Some("/home/build".into()),
-            script: "\
-                #!/bin/bash\n\
-                set -o errexit\n\
-                set -o pipefail\n\
-                set -o xtrace\n\
-                mkdir -p \"/work/$GITHUB_REPOSITORY\"\n\
-                git clone \"https://github.com/$GITHUB_REPOSITORY\" \
-                    \"/work/$GITHUB_REPOSITORY\"\n\
-                cd \"/work/$GITHUB_REPOSITORY\"\n\
-                if [[ -n $GITHUB_BRANCH ]]; then\n\
-                    git fetch origin \"$GITHUB_BRANCH\"\n\
-                    git checkout -B \"$GITHUB_BRANCH\" \
-                        \"remotes/origin/$GITHUB_BRANCH\"\n\
-                else\n\
-                    git fetch origin \"$GITHUB_SHA\"\n\
-                fi\n\
-                git reset --hard \"$GITHUB_SHA\"
-                "
-            .into(),
-        });
+        /*
+         * By default, we assume that the target provides toolchains and other
+         * development tools like git.  While this makes sense for most jobs, in
+         * some cases we intend to build artefacts in one job, then run those
+         * binaries in a separated, limited environment where it is not
+         * appropriate to try to clone the repository again.  If "skip_clone" is
+         * set, we will not clone the repository.
+         */
+        if !c.skip_clone {
+            tasks.push(buildomat_openapi::types::TaskSubmit {
+                name: "clone repository".into(),
+                env: buildenv.clone(),
+                env_clear: false,
+                gid: Some(12345),
+                uid: Some(12345),
+                workdir: Some("/home/build".into()),
+                script: "\
+                    #!/bin/bash\n\
+                    set -o errexit\n\
+                    set -o pipefail\n\
+                    set -o xtrace\n\
+                    mkdir -p \"/work/$GITHUB_REPOSITORY\"\n\
+                    git clone \"https://github.com/$GITHUB_REPOSITORY\" \
+                        \"/work/$GITHUB_REPOSITORY\"\n\
+                    cd \"/work/$GITHUB_REPOSITORY\"\n\
+                    if [[ -n $GITHUB_BRANCH ]]; then\n\
+                        git fetch origin \"$GITHUB_BRANCH\"\n\
+                        git checkout -B \"$GITHUB_BRANCH\" \
+                            \"remotes/origin/$GITHUB_BRANCH\"\n\
+                    else\n\
+                        git fetch origin \"$GITHUB_SHA\"\n\
+                    fi\n\
+                    git reset --hard \"$GITHUB_SHA\"
+                    "
+                .into(),
+            });
+        }
 
         buildenv.insert("CI".to_string(), "true".to_string());
-        //buildenv.insert("GITHUB_TOKEN".to_string(), token);
 
-        let workdir = format!("/work/{}/{}", repo.owner, repo.name);
+        let workdir = if !c.skip_clone {
+            format!("/work/{}/{}", repo.owner, repo.name)
+        } else {
+            /*
+             * If we skipped the clone, just use the top-level work area as the
+             * working directory for the job.
+             */
+            "/work".into()
+        };
 
         tasks.push(buildomat_openapi::types::TaskSubmit {
             name: "build".into(),
@@ -699,7 +803,7 @@ pub(crate) async fn run(
             tasks,
             inputs: Default::default(),
             tags,
-            depends: Default::default(),
+            depends,
         };
         let jsr = b.job_submit(body).await?.into_inner();
 
@@ -835,7 +939,8 @@ pub(crate) async fn details(
                 "task" => "#add8e6",
                 "worker" => "#fafad2",
                 "control" => "#90ee90",
-                _ => "#000000",
+                "console" => "#e7d1ff",
+                _ => "#dddddd",
             };
             out += &format!("<tr style=\"background-color: {};\">", colour);
 

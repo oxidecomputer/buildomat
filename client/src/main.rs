@@ -903,7 +903,11 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
         .collect::<HashMap<String, String>>();
     w.lap("users_list");
 
-    let targets = s.admin().targets_list().await?.iter()
+    let targets = s
+        .admin()
+        .targets_list()
+        .await?
+        .iter()
         .map(|t| (t.id.to_string(), t.name.to_string()))
         .collect::<HashMap<String, String>>();
     w.lap("targets_list");

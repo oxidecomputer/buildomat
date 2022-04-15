@@ -48,6 +48,7 @@ table! {
         active -> Bool,
         flushed -> Bool,
         github_id -> Nullable<BigInt>,
+        dependencies -> Nullable<Text>,
     }
 }
 

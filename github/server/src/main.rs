@@ -9,7 +9,7 @@ use dropshot::ConfigLogging;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use slog::{debug, error, info, o, trace, warn, Logger};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use wollongong_common::hooktypes;
 use wollongong_database::types::*;
@@ -41,6 +41,15 @@ pub struct RepoConfig {
 struct FrontMatter {
     name: String,
     variety: CheckRunVariety,
+    #[serde(default)]
+    dependencies: HashMap<String, FrontMatterDepend>,
+    #[serde(flatten)]
+    extra: toml::Value,
+}
+
+#[derive(Deserialize)]
+struct FrontMatterDepend {
+    job: String,
     #[serde(flatten)]
     extra: toml::Value,
 }
@@ -270,16 +279,109 @@ impl App {
                         anyhow!("TOML front matter in {:?}", ent.path)
                     })?;
 
+                if jobfiles.len() > 32 {
+                    bail!("too many job files; you can have at most 32");
+                }
+
                 jobfiles.push(JobFile {
                     path: ent.path.to_string(),
                     name: toml.name.to_string(),
                     variety: toml.variety,
                     config: serde_json::to_value(&toml.extra)?,
                     content: f.to_string(),
+                    dependencies: toml
+                        .dependencies
+                        .iter()
+                        .map(|(name, dep)| {
+                            Ok((
+                                name.to_string(),
+                                JobFileDepend {
+                                    job: dep.job.to_string(),
+                                    config: serde_json::to_value(&dep.extra)?,
+                                },
+                            ))
+                        })
+                        .collect::<Result<_>>()?,
                 });
             } else {
                 bail!("unexpected item in bagging area: {}", ent.path);
             }
+        }
+
+        /*
+         * Check that the name of each job is unique, and that the job variety
+         * is one that is allowed for this type of file.
+         */
+        let mut names = HashSet::new();
+        for job in jobfiles.iter() {
+            if !names.insert(job.name.to_string()) {
+                bail!("job name {:?} is used in more than one file", job.name);
+            }
+
+            match job.variety {
+                CheckRunVariety::Control => {
+                    bail!("the control variety cannot be specified here");
+                }
+                CheckRunVariety::AlwaysPass
+                | CheckRunVariety::FailFirst
+                | CheckRunVariety::Basic => {}
+            }
+        }
+
+        /*
+         * We need to check each job for dependencies.  If a job has
+         * dependencies, each entry must be well-formed: it must refer to
+         * another job in the set by name, and it must not create a dependency
+         * cycle.
+         */
+        for job in jobfiles.iter() {
+            match job.variety {
+                CheckRunVariety::Basic => {}
+                CheckRunVariety::AlwaysPass | CheckRunVariety::FailFirst => {
+                    if !job.dependencies.is_empty() {
+                        bail!(
+                            "variety {} does not support dependencies",
+                            job.variety
+                        );
+                    }
+                }
+                CheckRunVariety::Control => panic!("lost control"),
+            }
+
+            fn visit(
+                topjob: &str,
+                jobfiles: &Vec<JobFile>,
+                thisjob: &JobFile,
+                seen: &mut HashSet<String>,
+            ) -> Result<()> {
+                if !seen.insert(thisjob.name.to_string()) {
+                    bail!(
+                        "job file {:?} creates a dependency cycle ({:?})",
+                        topjob,
+                        seen
+                    );
+                }
+
+                for dep in thisjob.dependencies.values() {
+                    if let Some(depjob) =
+                        jobfiles.iter().find(|j| j.name == dep.job)
+                    {
+                        visit(topjob, jobfiles, depjob, seen)?;
+                    } else {
+                        bail!(
+                            "job file {:?} depends on job {:?} that is not \
+                            present in the plan",
+                            topjob,
+                            dep.job,
+                        );
+                    }
+                }
+
+                Ok(())
+            }
+
+            let mut seen = HashSet::new();
+            visit(&job.path, &jobfiles, &job, &mut seen)?;
         }
 
         Ok(LoadedFromSha {
@@ -1563,6 +1665,7 @@ async fn process_check_suite(app: &Arc<App>, cs: &CheckSuiteId) -> Result<()> {
                 &cs.id,
                 control_name,
                 &CheckRunVariety::Control,
+                &Default::default(),
             )?;
 
             /*
@@ -1763,8 +1866,12 @@ async fn process_check_suite(app: &Arc<App>, cs: &CheckSuiteId) -> Result<()> {
              * run for each one.
              */
             for jf in plan.jobfiles.iter() {
-                let mut cr =
-                    db.ensure_check_run(&cs.id, &jf.name, &jf.variety)?;
+                let mut cr = db.ensure_check_run(
+                    &cs.id,
+                    &jf.name,
+                    &jf.variety,
+                    &jf.dependencies,
+                )?;
 
                 let mut update = false;
                 if cr.config.is_none() {

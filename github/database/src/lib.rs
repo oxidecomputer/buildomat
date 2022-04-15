@@ -33,6 +33,8 @@ pub enum DatabaseError {
     Sql(#[from] diesel::result::Error),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
 }
 
 pub type DBResult<T> = std::result::Result<T, DatabaseError>;
@@ -440,6 +442,23 @@ impl Database {
             .get_results(c)?)
     }
 
+    pub fn load_check_run_for_suite_by_name(
+        &self,
+        check_suite: &CheckSuiteId,
+        check_run_name: &str,
+    ) -> Result<Option<CheckRun>> {
+        use schema::check_run;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        Ok(check_run::dsl::check_run
+            .filter(check_run::dsl::check_suite.eq(check_suite))
+            .filter(check_run::dsl::active.eq(true))
+            .filter(check_run::dsl::name.eq(check_run_name))
+            .get_result(c)
+            .optional()?)
+    }
+
     pub fn ensure_check_suite(
         &self,
         repo: i64,
@@ -537,6 +556,7 @@ impl Database {
         check_suite: &CheckSuiteId,
         name: &str,
         variety: &CheckRunVariety,
+        dependencies: &HashMap<String, JobFileDepend>,
     ) -> DBResult<CheckRun> {
         let c = &mut self.1.lock().unwrap().conn;
 
@@ -599,6 +619,9 @@ impl Database {
                 active: true,
                 flushed: false,
                 github_id: None,
+                dependencies: Some(JsonValue(serde_json::to_value(
+                    dependencies,
+                )?)),
             };
 
             let ic =
@@ -626,6 +649,10 @@ impl Database {
             assert_eq!(cur.check_suite, check_run.check_suite);
             assert_eq!(cur.name, check_run.name);
             assert_eq!(cur.variety, check_run.variety);
+            assert_eq!(
+                cur.dependencies.as_ref().map(|v| &v.0),
+                check_run.dependencies.as_ref().map(|v| &v.0)
+            );
 
             let uc = diesel::update(dsl::check_run)
                 .filter(dsl::id.eq(&check_run.id))
