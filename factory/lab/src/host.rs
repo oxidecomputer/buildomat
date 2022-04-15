@@ -166,6 +166,12 @@ fn thread_serial(
 
     let mut child = cmd.spawn().context("sol activate")?;
 
+    /*
+     * Make sure we close the subsidiary device in the parent, or our reads on
+     * the manager will block forever!
+     */
+    pty.close_subsidiary();
+
     spawn_thread_reader(&hc.nodename, tx, false, Some(pty.manager()))
         .expect("start reader thread")
         .join()
@@ -409,6 +415,8 @@ pub(crate) fn start_manager(
                         log,
                         "host {} serial thread error: {:?}", nodename, e
                     );
+                } else {
+                    warn!(log, "host {} serial thread exited", nodename);
                 }
 
                 thread::sleep(Duration::from_secs(1));

@@ -37,7 +37,12 @@ impl Pty {
 
     pub fn subsidiary(&mut self) -> i32 {
         //std::process::Stdio::from_raw_fd(self.subsidiary.take().unwrap())
-        self.subsidiary.take().unwrap()
+        self.subsidiary.unwrap()
+    }
+
+    pub fn close_subsidiary(&mut self) {
+        let fd = self.subsidiary.take().unwrap();
+        assert_eq!(unsafe { libc::close(fd) }, 0);
     }
 }
 
