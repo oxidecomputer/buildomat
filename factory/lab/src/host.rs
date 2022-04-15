@@ -261,8 +261,53 @@ pub(crate) fn thread_manager(
                                     continue;
                                 }
 
+                                /*
+                                 * Sanitise console output somewhat.  Build an
+                                 * array of strings, each representing an atomic
+                                 * unit of display.  If we emit an escaped
+                                 * representation (e.g., the ASCII BEL might
+                                 * become "^G") we want to be able to trim the
+                                 * whole thing as a unit.
+                                 */
+                                let mut sanistr: Vec<String> = Vec::new();
+                                for ch in v.trim_end().chars() {
+                                    sanistr.push(match ch {
+                                        '\x08' => {
+                                            /*
+                                             * If backspace is emitted, try
+                                             * to remove a display unit from
+                                             * the end of the string.  This
+                                             * cleans up the iPXE download
+                                             * progress output.
+                                             */
+                                            sanistr.pop();
+                                            continue;
+                                        }
+                                        '\n' => "\\n".into(),
+                                        '\r' => "\\r".into(),
+                                        '\t' => "\\t".into(),
+                                        '\0' => "^@".into(),
+                                        '\x1b' => "^[".into(),
+                                        '\x1c' => "^\\".into(),
+                                        '\x1d' => "^]".into(),
+                                        '\x1e' => "^_".into(),
+                                        ch if ch.is_ascii_control() => {
+                                            /*
+                                             * A byte value of 1 is represented
+                                             * as "^A".
+                                             */
+                                            let letter = (ch as u8) - 1 + b'A';
+                                            format!("^{}", letter as char)
+                                        }
+                                        ch => ch.into(),
+                                    });
+                                }
+
                                 c.db.instance_append(
-                                    &i, "console", &v, a.time,
+                                    &i,
+                                    "console",
+                                    sanistr.join("").trim_end(),
+                                    a.time,
                                 )?;
                             }
                         }
