@@ -592,6 +592,8 @@ async fn main() -> Result<()> {
     ad.register(api::admin::targets_list).api_check()?;
     ad.register(api::admin::target_require_privilege).api_check()?;
     ad.register(api::admin::target_require_no_privilege).api_check()?;
+    ad.register(api::admin::target_redirect).api_check()?;
+    ad.register(api::admin::target_rename).api_check()?;
     ad.register(api::user::job_events_get).api_check()?;
     ad.register(api::user::job_outputs_get).api_check()?;
     ad.register(api::user::job_output_download).api_check()?;

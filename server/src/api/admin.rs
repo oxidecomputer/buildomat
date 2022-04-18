@@ -586,3 +586,82 @@ pub(crate) async fn target_require_no_privilege(
 
     Ok(HttpResponseUpdatedNoContent())
 }
+
+#[derive(Deserialize, JsonSchema)]
+pub struct TargetRedirect {
+    redirect: Option<String>,
+}
+
+impl TargetRedirect {
+    fn redirect(&self) -> SResult<Option<db::TargetId>, HttpError> {
+        self.redirect
+            .as_deref()
+            .map(|s| db::TargetId::from_str(s).or_500())
+            .transpose()
+    }
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/0/admin/targets/{target}/redirect",
+}]
+pub(crate) async fn target_redirect(
+    rqctx: Arc<RequestContext<Arc<Central>>>,
+    path: TypedPath<TargetPath>,
+    body: TypedBody<TargetRedirect>,
+) -> SResult<HttpResponseUpdatedNoContent, HttpError> {
+    let c = rqctx.context();
+    let req = rqctx.request.lock().await;
+    let log = &rqctx.log;
+
+    c.require_admin(log, &req, "target.write").await?;
+
+    let path = path.into_inner();
+    let t = c.db.target_get(path.target()?).or_500()?;
+
+    /*
+     * Make sure the redirect target, if specified, exists in the database:
+     */
+    let redirect = body
+        .into_inner()
+        .redirect()?
+        .map(|t| c.db.target_get(t).map(|t| t.id))
+        .transpose()
+        .or_500()?;
+
+    c.db.target_redirect(t.id, redirect).or_500()?;
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct TargetRename {
+    new_name: String,
+    signpost_description: String,
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/admin/targets/{target}/rename",
+}]
+pub(crate) async fn target_rename(
+    rqctx: Arc<RequestContext<Arc<Central>>>,
+    path: TypedPath<TargetPath>,
+    body: TypedBody<TargetRename>,
+) -> SResult<HttpResponseCreated<TargetCreateResult>, HttpError> {
+    let c = rqctx.context();
+    let req = rqctx.request.lock().await;
+    let log = &rqctx.log;
+
+    c.require_admin(log, &req, "target.write").await?;
+
+    let path = path.into_inner();
+    let t = c.db.target_get(path.target()?).or_500()?;
+    let body = body.into_inner();
+
+    let t =
+        c.db.target_rename(t.id, &body.new_name, &body.signpost_description)
+            .or_500()?;
+
+    Ok(HttpResponseCreated(TargetCreateResult::new(t.id)))
+}

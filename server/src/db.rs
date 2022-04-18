@@ -1687,6 +1687,10 @@ impl Database {
     }
 
     pub fn target_create(&self, name: &str, desc: &str) -> Result<Target> {
+        if name != name.trim() || name.is_empty() {
+            bail!("invalid target name");
+        }
+
         let t = Target {
             id: TargetId::generate(),
             name: name.to_string(),
@@ -1757,5 +1761,97 @@ impl Database {
         assert!(uc == 1);
 
         Ok(())
+    }
+
+    pub fn target_redirect(
+        &self,
+        id: TargetId,
+        redirect: Option<TargetId>,
+    ) -> Result<()> {
+        use schema::target::dsl;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let uc = diesel::update(dsl::target)
+            .filter(dsl::id.eq(id))
+            .set(dsl::redirect.eq(redirect))
+            .execute(c)?;
+        assert!(uc == 1);
+
+        Ok(())
+    }
+
+    /**
+     * Rename an existing target.  In the process, create a new target with the
+     * old name which redirects to the new target.  In this way, we can turn
+     * previously a concrete target like "helios" into a specific version target
+     * like "helios-20200101", leaving behind a redirect with the original name
+     * for backwards compatibility for existing job files.  We can then, later,
+     * redirect the new "helios" target to a new datestamp.  Job status will
+     * reflect the fact that they were run against whatever version was current
+     * at the time as the IDs will not change.
+     */
+    pub fn target_rename(
+        &self,
+        id: TargetId,
+        new_name: &str,
+        signpost_description: &str,
+    ) -> Result<Target> {
+        use schema::target::dsl;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        if new_name != new_name.trim() || new_name.is_empty() {
+            bail!("invalid target name");
+        }
+
+        c.immediate_transaction(|tx| {
+            /*
+             * First, load the target to rename from the database.
+             */
+            let t: Target = dsl::target.find(id).get_result(tx)?;
+
+            /*
+             * Then, make sure a target with the new name does not yet
+             * exist.
+             */
+            let nt: Option<Target> = dsl::target
+                .filter(dsl::name.eq(new_name))
+                .get_result(tx)
+                .optional()?;
+            if let Some(nt) = nt {
+                bail!(
+                    "target {} with name {:?} already exists",
+                    nt.id,
+                    new_name,
+                );
+            }
+
+            /*
+             * Rename the target:
+             */
+            let uc = diesel::update(dsl::target)
+                .filter(dsl::id.eq(id))
+                .set(dsl::name.eq(new_name))
+                .execute(tx)?;
+            assert_eq!(uc, 1);
+
+            /*
+             * Create the signpost target record.
+             */
+            let nt = Target {
+                id: TargetId::generate(),
+                name: t.name.to_string(),
+                desc: signpost_description.to_string(),
+                redirect: Some(t.id),
+                privilege: t.privilege,
+            };
+
+            let ic =
+                diesel::insert_into(dsl::target).values(&nt).execute(tx)?;
+            assert_eq!(ic, 1);
+
+            Ok(nt)
+        })
     }
 }

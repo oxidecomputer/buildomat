@@ -792,9 +792,32 @@ async fn do_target_create(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_target_rename(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("TARGET_ID NAME"));
+    l.reqopt("d", "desc", "signpost target description", "DESC");
+
+    let a = args!(l);
+
+    if a.args().len() != 2 {
+        bad_args!(l, "specify ID of existing target and new name of target");
+    }
+    let id = a.args()[0].to_string();
+    let new_name = a.args()[1].to_string();
+    let signpost_description = a.opts().opt_str("d").unwrap();
+
+    let res = l
+        .context()
+        .admin()
+        .target_rename(&id, &TargetRename { new_name, signpost_description })
+        .await?;
+
+    println!("{}", res.id);
+    Ok(())
+}
+
 async fn do_target_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("id", 26, true);
-    l.add_column("name", 14, true);
+    l.add_column("name", 15, true);
     l.add_column("description", 38, true);
     l.add_column("redirect", 26, false);
     l.add_column("privilege", 14, false);
@@ -846,6 +869,48 @@ async fn do_target_unrestrict(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_target_redirect(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("TARGET_ID REDIRECT_TO_TARGET_ID"));
+
+    let a = args!(l);
+
+    if a.args().len() != 2 {
+        bad_args!(
+            l,
+            "specify ID of target to redirect, and ID of target to which \
+            it should be redirected",
+        );
+    }
+    let id = a.args()[0].to_string();
+    let redirect = a.args()[1].to_string();
+
+    l.context()
+        .admin()
+        .target_redirect(&id, &TargetRedirect { redirect: Some(redirect) })
+        .await?;
+    Ok(())
+}
+
+async fn do_target_unredirect(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("TARGET_ID"));
+
+    let a = args!(l);
+
+    if a.args().len() != 1 {
+        bad_args!(
+            l,
+            "specify ID of target for which redirection should be disabled",
+        );
+    }
+    let id = a.args()[0].to_string();
+
+    l.context()
+        .admin()
+        .target_redirect(&id, &TargetRedirect { redirect: None })
+        .await?;
+    Ok(())
+}
+
 async fn do_target(mut l: Level<Stuff>) -> Result<()> {
     l.cmda("list", "ls", "list targets", cmd!(do_target_list))?;
     l.cmd("create", "create a target", cmd!(do_target_create))?;
@@ -858,6 +923,21 @@ async fn do_target(mut l: Level<Stuff>) -> Result<()> {
         "unrestrict",
         "require no privileges to use this target",
         cmd!(do_target_unrestrict),
+    )?;
+    l.cmd(
+        "redirect",
+        "redirect a target to another target",
+        cmd!(do_target_redirect),
+    )?;
+    l.cmd(
+        "unredirect",
+        "disable redirection for a target",
+        cmd!(do_target_unredirect),
+    )?;
+    l.cmd(
+        "rename",
+        "rename a target and leave a redirecting target in its place",
+        cmd!(do_target_rename),
     )?;
 
     sel!(l).run().await

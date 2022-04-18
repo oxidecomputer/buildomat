@@ -386,7 +386,7 @@ async fn status(
             );
         } else {
             out += &format!(
-                "&nbsp;&nbsp;&nbsp;<b>target:</b> {} -> {}<br>\n",
+                "&nbsp;&nbsp;&nbsp;<b>target:</b> {} &rarr; {}<br>\n",
                 job.target, job.target_real
             );
         }

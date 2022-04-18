@@ -191,6 +191,18 @@ pub mod types {
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct TargetRedirect {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub redirect: Option<String>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct TargetRename {
+        pub new_name: String,
+        pub signpost_description: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct Task {
         pub env: std::collections::HashMap<String, String>,
         pub env_clear: bool,
@@ -488,6 +500,59 @@ impl Client {
         let response = result?;
         match response.status().as_u16() {
             200u16 => ResponseValue::from_response(response).await,
+            400u16..=499u16 => Err(Error::ErrorResponse(
+                ResponseValue::from_response(response).await?,
+            )),
+            500u16..=599u16 => Err(Error::ErrorResponse(
+                ResponseValue::from_response(response).await?,
+            )),
+            _ => Err(Error::UnexpectedResponse(response)),
+        }
+    }
+
+    #[doc = "Sends a `PUT` request to `/0/admin/targets/{target}/redirect`"]
+    pub async fn target_redirect<'a>(
+        &'a self,
+        target: &'a str,
+        body: &'a types::TargetRedirect,
+    ) -> Result<ResponseValue<()>, Error<types::Error>> {
+        let url = format!(
+            "{}/0/admin/targets/{}/redirect",
+            self.baseurl,
+            progenitor_client::encode_path(&target.to_string()),
+        );
+        let request = self.client.put(url).json(body).build()?;
+        let result = self.client.execute(request).await;
+        let response = result?;
+        match response.status().as_u16() {
+            204u16 => Ok(ResponseValue::empty(response)),
+            400u16..=499u16 => Err(Error::ErrorResponse(
+                ResponseValue::from_response(response).await?,
+            )),
+            500u16..=599u16 => Err(Error::ErrorResponse(
+                ResponseValue::from_response(response).await?,
+            )),
+            _ => Err(Error::UnexpectedResponse(response)),
+        }
+    }
+
+    #[doc = "Sends a `POST` request to `/0/admin/targets/{target}/rename`"]
+    pub async fn target_rename<'a>(
+        &'a self,
+        target: &'a str,
+        body: &'a types::TargetRename,
+    ) -> Result<ResponseValue<types::TargetCreateResult>, Error<types::Error>>
+    {
+        let url = format!(
+            "{}/0/admin/targets/{}/rename",
+            self.baseurl,
+            progenitor_client::encode_path(&target.to_string()),
+        );
+        let request = self.client.post(url).json(body).build()?;
+        let result = self.client.execute(request).await;
+        let response = result?;
+        match response.status().as_u16() {
+            201u16 => ResponseValue::from_response(response).await,
             400u16..=499u16 => Err(Error::ErrorResponse(
                 ResponseValue::from_response(response).await?,
             )),
