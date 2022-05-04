@@ -349,17 +349,43 @@ impl App {
             }
 
             fn visit(
-                topjob: &str,
+                topjob: &JobFile,
                 jobfiles: &Vec<JobFile>,
                 thisjob: &JobFile,
                 seen: &mut HashSet<String>,
             ) -> Result<()> {
                 if !seen.insert(thisjob.name.to_string()) {
-                    bail!(
-                        "job file {:?} creates a dependency cycle ({:?})",
-                        topjob,
-                        seen
-                    );
+                    if thisjob.name == topjob.name {
+                        /*
+                         * If we find our way back to the original job file that
+                         * we were looking at, there is definitely a cycle.
+                         */
+                        bail!(
+                            "job file {:?} creates a dependency cycle ({:?})",
+                            topjob.path,
+                            seen,
+                        );
+                    } else {
+                        /*
+                         * Otherwise, there might be a cycle or there might
+                         * just be a job that appears more than once in the
+                         * dependency graph; e.g.,
+                         *
+                         *      first <---- second-a
+                         *       ^             ^
+                         *       |             |
+                         *       `--------- second-b
+                         *
+                         * Here, "second-b" depends on "second-a" and also on
+                         * "first".  We will visit the "first" node twice as we
+                         * flood outward from "second-b", but there is no cycle.
+                         * To avoid accidentally looping forever, we only look
+                         * at each job once; if there is a real cycle it will be
+                         * detected when we start the walk from a job that
+                         * depends eventually on itself.
+                         */
+                        return Ok(());
+                    }
                 }
 
                 for dep in thisjob.dependencies.values() {
@@ -371,7 +397,7 @@ impl App {
                         bail!(
                             "job file {:?} depends on job {:?} that is not \
                             present in the plan",
-                            topjob,
+                            topjob.path,
                             dep.job,
                         );
                     }
@@ -381,7 +407,7 @@ impl App {
             }
 
             let mut seen = HashSet::new();
-            visit(&job.path, &jobfiles, &job, &mut seen)?;
+            visit(&job, &jobfiles, &job, &mut seen)?;
         }
 
         Ok(LoadedFromSha {
