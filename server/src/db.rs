@@ -658,6 +658,8 @@ impl Database {
 
             diesel::update(job_depend::dsl::job_depend)
                 .set((job_depend::dsl::satisfied.eq(true),))
+                .filter(job_depend::dsl::job.eq(j.id))
+                .filter(job_depend::dsl::name.eq(&d.name))
                 .execute(tx)?;
 
             Ok(())
