@@ -230,6 +230,22 @@ async fn main() -> Result<()> {
     });
 
     /*
+     * Install a custom panic hook that will try to exit the process after a
+     * short delay.  This is unfortunate, but I am not sure how else to avoid a
+     * panicked worker thread leaving the process stuck without some of its
+     * functionality.
+     */
+    let orig_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        orig_hook(info);
+        eprintln!("FATAL: THREAD PANIC DETECTED; EXITING IN 5 SECONDS...");
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(5));
+            std::process::exit(101);
+        });
+    }));
+
+    /*
      * Create our local web server for interaction with iPXE and the OS on
      * hosts.
      */
