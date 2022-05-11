@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2022 Oxide Computer Company
  */
 
 use std::collections::HashMap;
@@ -232,24 +232,15 @@ impl Database {
         /*
          * Estimate how long the job was waiting in the queue for a worker.
          */
-        let wait = if let Ok(dur) =
+        self.i_job_time_record(tx, j.id, "assigned", Utc::now())?;
+        let wait = if let Some(dur) =
+            self.i_job_time_delta(tx, j.id, "ready", "assigned")?
+        {
+            format!(" (queued for {})", dur.render())
+        } else if let Ok(dur) =
             Utc::now().signed_duration_since(j.id.datetime()).to_std()
         {
-            let mut out = String::new();
-            let mut secs = dur.as_secs();
-            let hours = secs / 3600;
-            if hours > 0 {
-                secs -= hours * 3600;
-                out += &format!(" {} h", hours);
-            }
-            let minutes = secs / 60;
-            if minutes > 0 || hours > 0 {
-                secs -= minutes * 60;
-                out += &format!(" {} m", minutes);
-            }
-            out += &format!(" {} s", secs);
-
-            format!(" (queued for{})", out)
+            format!(" (queued for {})", dur.render())
         } else {
             "".to_string()
         };
@@ -845,12 +836,27 @@ impl Database {
             cancelled: false,
         };
 
+        /*
+         * Use the timestamp from the generated ID as the submit time.
+         */
+        let start = j.id.datetime();
+
         let c = &mut self.1.lock().unwrap().conn;
 
         c.immediate_transaction(|tx| {
             let ic =
                 diesel::insert_into(job::dsl::job).values(&j).execute(tx)?;
             assert_eq!(ic, 1);
+
+            self.i_job_time_record(tx, j.id, "submit", start)?;
+            if !waiting {
+                /*
+                 * If the job is not waiting, record the submit time as the time
+                 * at which dependencies are satisfied and the job is ready to
+                 * run.
+                 */
+                self.i_job_time_record(tx, j.id, "ready", start)?;
+            }
 
             for (i, ct) in tasks.iter().enumerate() {
                 let ic = diesel::insert_into(task::dsl::task)
@@ -1193,6 +1199,32 @@ impl Database {
                 conflict!("job {} was not waiting, cannot wakeup", j.id);
             }
 
+            /*
+             * Record the time at which the job became ready to run.
+             */
+            self.i_job_time_record(tx, j.id, "ready", Utc::now())?;
+
+            /*
+             *
+             * Estimate the length of time that we were waiting for dependencies
+             * to complete running.
+             */
+            let mut msg = "job dependencies complete; ready to run".to_string();
+            if let Some(dur) =
+                self.i_job_time_delta(tx, j.id, "submit", "ready")?
+            {
+                msg += &format!(" (waiting for {})", dur.render());
+            }
+            self.i_job_event_insert(
+                tx,
+                j.id,
+                None,
+                "control",
+                Utc::now(),
+                None,
+                &msg,
+            )?;
+
             let uc = diesel::update(job::dsl::job)
                 .filter(job::dsl::id.eq(j.id))
                 .filter(job::dsl::waiting.eq(true))
@@ -1328,8 +1360,83 @@ impl Database {
                 .execute(tx)?;
             assert_eq!(uc, 1);
 
+            self.i_job_time_record(tx, j.id, "complete", Utc::now())?;
+
             Ok(true)
         })
+    }
+
+    pub fn i_job_time_record(
+        &self,
+        tx: &mut SqliteConnection,
+        job: JobId,
+        name: &str,
+        when: DateTime<Utc>,
+    ) -> Result<()> {
+        use schema::job_time;
+
+        diesel::insert_into(job_time::dsl::job_time)
+            .values(JobTime {
+                job,
+                name: name.to_string(),
+                time: IsoDate(when),
+            })
+            .on_conflict_do_nothing()
+            .execute(tx)?;
+        Ok(())
+    }
+
+    pub fn i_job_time_delta(
+        &self,
+        tx: &mut SqliteConnection,
+        job: JobId,
+        from: &str,
+        until: &str,
+    ) -> Result<Option<std::time::Duration>> {
+        use schema::job_time;
+
+        let from: JobTime = if let Some(t) = job_time::dsl::job_time
+            .find((job, from))
+            .get_result(tx)
+            .optional()?
+        {
+            t
+        } else {
+            return Ok(None);
+        };
+
+        let until: JobTime = if let Some(t) = job_time::dsl::job_time
+            .find((job, until))
+            .get_result(tx)
+            .optional()?
+        {
+            t
+        } else {
+            return Ok(None);
+        };
+
+        let dur = until.time.0.signed_duration_since(from.time.0);
+        if dur.num_milliseconds() < 0 {
+            return Ok(None);
+        }
+
+        Ok(Some(dur.to_std()?))
+    }
+
+    pub fn job_times(
+        &self,
+        job: JobId,
+    ) -> Result<HashMap<String, DateTime<Utc>>> {
+        use schema::job_time;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        Ok(job_time::dsl::job_time
+            .filter(job_time::dsl::job.eq(job))
+            .get_results::<JobTime>(c)?
+            .drain(..)
+            .map(|jt| (jt.name, jt.time.0))
+            .collect())
     }
 
     pub fn task_complete(

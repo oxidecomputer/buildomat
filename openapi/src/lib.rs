@@ -108,6 +108,14 @@ pub mod types {
         pub target: String,
         pub target_real: String,
         pub tasks: Vec<Task>,
+        #[serde(
+            default,
+            skip_serializing_if = "std::collections::HashMap::is_empty"
+        )]
+        pub times: std::collections::HashMap<
+            String,
+            chrono::DateTime<chrono::offset::Utc>,
+        >,
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone)]

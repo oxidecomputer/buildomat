@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2022 Oxide Computer Company
  */
 
 #![allow(unused_imports)]
@@ -27,16 +27,6 @@ use rusty_ulid::Ulid;
 const WIDTH_ISODATE: usize = 20;
 
 mod config;
-
-trait IdExt {
-    fn id(&self) -> Result<Ulid>;
-}
-
-impl IdExt for Worker {
-    fn id(&self) -> Result<Ulid> {
-        to_ulid(&self.id)
-    }
-}
 
 #[derive(Default)]
 struct Stuff {
@@ -1048,6 +1038,39 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
             println!("    target: {}", job.target);
         } else {
             println!("    target: {} -> {}", job.target, job.target_real);
+        }
+        if let Some(t) = job.times.get("complete") {
+            println!(
+                "    completed at: {} ({} ago)",
+                t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                t.age().render(),
+            );
+        } else if let Some(t) = job.times.get("submit") {
+            println!(
+                "    submitted at: {} ({} ago)",
+                t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                t.age().render(),
+            );
+        } else if let Ok(id) = job.id() {
+            let t = id.creation();
+            println!(
+                "    submitted at: {} ({} ago)",
+                t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                t.age().render(),
+            );
+        }
+        let mut times = Vec::new();
+        if let Some(t) = job.duration("submit", "ready") {
+            times.push(format!("waited {}", t.render()));
+        }
+        if let Some(t) = job.duration("ready", "assigned") {
+            times.push(format!("queued {}", t.render()));
+        }
+        if let Some(t) = job.duration("assigned", "complete") {
+            times.push(format!("ran for {}", t.render()));
+        }
+        if !times.is_empty() {
+            println!("    times: {}", times.join(", "));
         }
     }
 

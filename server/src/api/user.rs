@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2022 Oxide Computer Company
  */
 
 use super::prelude::*;
@@ -288,6 +288,7 @@ pub(crate) fn format_job(
     output_rules: Vec<String>,
     tags: HashMap<String, String>,
     target: &db::Target,
+    times: HashMap<String, DateTime<Utc>>,
 ) -> Job {
     Job {
         id: j.id.to_string(),
@@ -300,6 +301,7 @@ pub(crate) fn format_job(
         state: format_job_state(j),
         tags,
         cancelled: j.cancelled,
+        times,
     }
 }
 
@@ -341,6 +343,7 @@ pub(crate) async fn job_get(
         c.db.job_output_rules(job.id).or_500()?,
         c.db.job_tags(job.id).or_500()?,
         &c.db.target_get(job.target()).or_500()?,
+        c.db.job_times(job.id).or_500()?,
     )))
 }
 
@@ -366,7 +369,8 @@ pub(crate) async fn jobs_get(
                 let tasks = c.db.job_tasks(j.id)?;
                 let tags = c.db.job_tags(j.id)?;
                 let target = c.db.target_get(j.target())?;
-                Ok(format_job(j, &tasks, output_rules, tags, &target))
+                let times = c.db.job_times(j.id)?;
+                Ok(format_job(j, &tasks, output_rules, tags, &target, times))
             })
             .collect::<Result<Vec<_>>>()
             .or_500()?;
@@ -386,6 +390,8 @@ pub(crate) struct Job {
     state: String,
     tags: HashMap<String, String>,
     cancelled: bool,
+    #[serde(default)]
+    times: HashMap<String, DateTime<Utc>>,
 }
 
 #[derive(Serialize, JsonSchema)]

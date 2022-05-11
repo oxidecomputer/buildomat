@@ -232,3 +232,12 @@ CREATE TABLE job_depend (
 -- v 34
 ALTER TABLE job_input ADD COLUMN
     other_job       TEXT;
+
+-- v 35
+CREATE TABLE job_time (
+    job             TEXT    NOT NULL,
+    name            TEXT    NOT NULL,
+    time            TEXT    NOT NULL,
+
+    PRIMARY KEY (job, name)
+);

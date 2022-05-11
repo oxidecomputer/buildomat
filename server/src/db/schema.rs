@@ -1,3 +1,7 @@
+/*
+ * Copyright 2022 Oxide Computer Company
+ */
+
 table! {
     user (id) {
         id -> Text,
@@ -164,5 +168,13 @@ table! {
         on_failed -> Bool,
         on_completed -> Bool,
         satisfied -> Bool,
+    }
+}
+
+table! {
+    job_time (job, name) {
+        job -> Text,
+        name -> Text,
+        time -> Text,
     }
 }

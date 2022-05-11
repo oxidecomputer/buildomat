@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2022 Oxide Computer Company
  */
 
 use anyhow::{anyhow, bail, Result};
@@ -8,7 +8,6 @@ use chrono::prelude::*;
 use dropshot::{
     endpoint, ConfigDropshot, HttpError, HttpResponseOk, RequestContext,
 };
-use rusty_ulid::Ulid;
 use schemars::JsonSchema;
 #[allow(unused_imports)]
 use serde::{Deserialize, Serialize};
@@ -20,16 +19,6 @@ use std::sync::Arc;
 use wollongong_database::types::*;
 
 use super::{variety, App};
-
-trait IdExt {
-    fn id(&self) -> Result<Ulid>;
-}
-
-impl IdExt for buildomat_openapi::types::Worker {
-    fn id(&self) -> Result<Ulid> {
-        to_ulid(&self.id)
-    }
-}
 
 fn sign(body: &[u8], secret: &str) -> String {
     let hmac = hmac_sha256::HMAC::mac(body, secret.as_bytes());
@@ -390,6 +379,45 @@ async fn status(
                 job.target, job.target_real
             );
         }
+
+        if let Some(t) = job.times.get("complete") {
+            out += &format!(
+                "&nbsp;&nbsp;&nbsp;<b>completed at:</b> {} ({} ago)<br>\n",
+                t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                t.age().render(),
+            );
+        } else if let Some(t) = job.times.get("submit") {
+            out += &format!(
+                "&nbsp;&nbsp;&nbsp;<b>submitted at:</b> {} ({} ago)<br>\n",
+                t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                t.age().render(),
+            );
+        } else if let Ok(id) = job.id() {
+            let t = id.creation();
+            out += &format!(
+                "&nbsp;&nbsp;&nbsp;<b>submitted at:</b> {} ({} ago)<br>\n",
+                t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                t.age().render(),
+            );
+        }
+
+        let mut times = Vec::new();
+        if let Some(t) = job.duration("submit", "ready") {
+            times.push(format!("waited {}", t.render()));
+        }
+        if let Some(t) = job.duration("ready", "assigned") {
+            times.push(format!("queued {}", t.render()));
+        }
+        if let Some(t) = job.duration("assigned", "complete") {
+            times.push(format!("ran for {}", t.render()));
+        }
+        if !times.is_empty() {
+            out += &format!(
+                "&nbsp;&nbsp;&nbsp;<b>times:</b> {}<br>\n",
+                times.join(", ")
+            );
+        }
+
         if !out.is_empty() {
             out = format!("<br>\n{}\n", out);
         }
@@ -420,9 +448,12 @@ async fn status(
                 out += &format!(" ({})", things.join(", "));
             }
             out += &format!(
-                " created {} ({}s ago)\n",
-                w.id().to_500()?.creation(),
-                w.id().to_500()?.age().as_secs(),
+                " created {} ({} ago)\n",
+                w.id()
+                    .to_500()?
+                    .creation()
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                w.id().to_500()?.age().render(),
             );
 
             if !w.jobs.is_empty() {

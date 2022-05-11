@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2022 Oxide Computer Company
  */
 
 use super::prelude::*;
@@ -261,6 +261,7 @@ pub(crate) async fn admin_jobs_get(
                     c.db.job_output_rules(job.id)?,
                     c.db.job_tags(job.id)?,
                     &c.db.target_get(job.target())?,
+                    c.db.job_times(job.id)?,
                 ))
             })
             .collect::<Result<Vec<_>>>()
@@ -291,6 +292,7 @@ pub(crate) async fn admin_job_get(
         c.db.job_output_rules(job.id).or_500()?,
         c.db.job_tags(job.id).or_500()?,
         &c.db.target_get(job.target()).or_500()?,
+        c.db.job_times(job.id).or_500()?,
     )))
 }
 #[endpoint {

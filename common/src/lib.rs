@@ -1,3 +1,7 @@
+/*
+ * Copyright 2022 Oxide Computer Company
+ */
+
 use std::io::Read;
 use std::str::FromStr;
 use std::sync::Mutex;
@@ -148,5 +152,88 @@ impl OutputExt for std::process::Output {
         }
 
         out
+    }
+}
+
+pub trait DurationExt {
+    fn render(&self) -> String;
+}
+
+impl DurationExt for std::time::Duration {
+    fn render(&self) -> String {
+        let mut out = String::new();
+        let mut secs = self.as_secs();
+        let hours = secs / 3600;
+        if hours > 0 {
+            secs -= hours * 3600;
+            out += &format!(" {} h", hours);
+        }
+        let minutes = secs / 60;
+        if minutes > 0 || hours > 0 {
+            secs -= minutes * 60;
+            out += &format!(" {} m", minutes);
+        }
+        out += &format!(" {} s", secs);
+
+        out.trim().to_string()
+    }
+}
+
+pub trait DateTimeExt {
+    fn age(&self) -> Duration;
+}
+
+impl DateTimeExt for DateTime<Utc> {
+    fn age(&self) -> Duration {
+        if let Ok(dur) = Utc::now().signed_duration_since(*self).to_std() {
+            dur
+        } else {
+            Duration::from_secs(0)
+        }
+    }
+}
+
+pub trait ClientJobExt {
+    fn duration(&self, from: &str, until: &str) -> Option<Duration>;
+}
+
+impl ClientJobExt for buildomat_openapi::types::Job {
+    fn duration(&self, from: &str, until: &str) -> Option<Duration> {
+        let from = if let Some(from) = self.times.get(from) {
+            from
+        } else {
+            return None;
+        };
+        let until = if let Some(until) = self.times.get(until) {
+            until
+        } else {
+            return None;
+        };
+
+        if let Ok(dur) = until.signed_duration_since(*from).to_std() {
+            if dur.is_zero() {
+                None
+            } else {
+                Some(dur)
+            }
+        } else {
+            None
+        }
+    }
+}
+
+pub trait ClientIdExt {
+    fn id(&self) -> Result<Ulid>;
+}
+
+impl ClientIdExt for buildomat_openapi::types::Worker {
+    fn id(&self) -> Result<Ulid> {
+        to_ulid(&self.id)
+    }
+}
+
+impl ClientIdExt for buildomat_openapi::types::Job {
+    fn id(&self) -> Result<Ulid> {
+        to_ulid(&self.id)
     }
 }

@@ -1,3 +1,7 @@
+/*
+ * Copyright 2022 Oxide Computer Company
+ */
+
 use super::schema::*;
 use chrono::prelude::*;
 use diesel::deserialize::FromSql;
@@ -306,4 +310,13 @@ impl JobDepend {
             satisfied: false,
         }
     }
+}
+
+#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
+#[table_name = "job_time"]
+#[primary_key(job, name)]
+pub struct JobTime {
+    pub job: JobId,
+    pub name: String,
+    pub time: IsoDate,
 }
