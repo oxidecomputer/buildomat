@@ -3,7 +3,7 @@
  */
 
 use crate::{App, FlushOut, FlushState};
-use anyhow::Result;
+use anyhow::{bail, Result};
 use buildomat_common::*;
 use chrono::SecondsFormat;
 use serde::{Deserialize, Serialize};
@@ -805,7 +805,32 @@ pub(crate) async fn run(
             tags,
             depends,
         };
-        let jsr = b.job_submit(body).await?.into_inner();
+        let jsr = match b.job_submit(body).await {
+            Ok(rv) => rv.into_inner(),
+            Err(buildomat_openapi::Error::ErrorResponse(rv))
+                if rv.status().is_client_error() =>
+            {
+                /*
+                 * We assume that a client error means that the job is invalid
+                 * in some way that is not a transient issue.  Report it to the
+                 * user so that they can take corrective action.
+                 */
+                info!(
+                    log,
+                    "check run {} could not submit buildomat job ({}): {}",
+                    cr.id,
+                    rv.status(),
+                    rv.message,
+                );
+                p.complete = true;
+                p.error = Some(format!("Could not submit job: {}", rv.message));
+                cr.set_private(p)?;
+                cr.flushed = false;
+                db.update_check_run(cr)?;
+                return Ok(false);
+            }
+            Err(e) => bail!("job submit failure: {:?}", e),
+        };
 
         p.buildomat_id = Some(jsr.id);
         cr.flushed = false;
