@@ -10,16 +10,16 @@ use std::path::Path;
 #[macro_export]
 macro_rules! sql_for_enum {
     ($name:ident) => {
-        impl<DB> ToSql<diesel::sql_types::Text, DB> for $name
+        impl ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite> for $name
         where
-            DB: diesel::backend::Backend,
-            String: ToSql<diesel::sql_types::Text, DB>,
+            String: ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite>,
         {
-            fn to_sql<W: std::io::Write>(
+            fn to_sql(
                 &self,
-                out: &mut diesel::serialize::Output<W, DB>,
+                out: &mut diesel::serialize::Output<diesel::sqlite::Sqlite>,
             ) -> diesel::serialize::Result {
-                self.to_string().to_sql(out)
+                out.set_value(self.to_string());
+                Ok(diesel::serialize::IsNull::No)
             }
         }
 
@@ -44,19 +44,19 @@ macro_rules! json_new_type {
         #[derive(
             Clone, Debug, FromSqlRow, diesel::expression::AsExpression,
         )]
-        #[sql_type = "diesel::sql_types::Text"]
+        #[diesel(sql_type = diesel::sql_types::Text)]
         pub struct $name(pub $mytype);
 
-        impl<DB> ToSql<diesel::sql_types::Text, DB> for $name
+        impl ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite> for $name
         where
-            DB: diesel::backend::Backend,
-            String: ToSql<diesel::sql_types::Text, DB>,
+            String: ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite>,
         {
-            fn to_sql<W: std::io::Write>(
+            fn to_sql(
                 &self,
-                out: &mut diesel::serialize::Output<W, DB>,
+                out: &mut diesel::serialize::Output<diesel::sqlite::Sqlite>,
             ) -> diesel::serialize::Result {
-                serde_json::to_string(&self.0)?.to_sql(out)
+                out.set_value(serde_json::to_string(&self.0)?);
+                Ok(diesel::serialize::IsNull::No)
             }
         }
 
@@ -97,7 +97,7 @@ pub use json_new_type;
 
 #[macro_export]
 macro_rules! integer_new_type {
-    ($name:ident, $mytype:ty, $intype:ty, $sqltype:ident, $sqlts:literal) => {
+    ($name:ident, $mytype:ty, $intype:ty, $sqltype:ident, $sqlts:ty) => {
         #[derive(
             Clone,
             Copy,
@@ -108,20 +108,21 @@ macro_rules! integer_new_type {
             FromSqlRow,
             diesel::expression::AsExpression,
         )]
-        #[sql_type = $sqlts]
+        #[diesel(sql_type = $sqlts)]
         pub struct $name(pub $mytype);
 
-        impl<DB> ToSql<diesel::sql_types::$sqltype, DB> for $name
+        impl ToSql<diesel::sql_types::$sqltype, diesel::sqlite::Sqlite>
+            for $name
         where
-            DB: diesel::backend::Backend,
-            $intype: ToSql<diesel::sql_types::$sqltype, DB>,
+            $intype: ToSql<diesel::sql_types::$sqltype, diesel::sqlite::Sqlite>,
         {
-            fn to_sql<W: std::io::Write>(
+            fn to_sql(
                 &self,
-                out: &mut diesel::serialize::Output<W, DB>,
+                out: &mut diesel::serialize::Output<diesel::sqlite::Sqlite>,
             ) -> diesel::serialize::Result {
                 assert!(self.0 <= (<$intype>::MAX as $mytype));
-                (self.0 as $intype).to_sql(out)
+                out.set_value((self.0 as $intype));
+                Ok(diesel::serialize::IsNull::No)
             }
         }
 
@@ -176,19 +177,19 @@ macro_rules! ulid_new_type {
             FromSqlRow,
             diesel::expression::AsExpression,
         )]
-        #[sql_type = "diesel::sql_types::Text"]
+        #[diesel(sql_type = diesel::sql_types::Text)]
         pub struct $name(pub rusty_ulid::Ulid);
 
-        impl<DB> ToSql<diesel::sql_types::Text, DB> for $name
+        impl ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite> for $name
         where
-            DB: diesel::backend::Backend,
-            String: ToSql<diesel::sql_types::Text, DB>,
+            String: ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite>,
         {
-            fn to_sql<W: std::io::Write>(
+            fn to_sql(
                 &self,
-                out: &mut diesel::serialize::Output<W, DB>,
+                out: &mut diesel::serialize::Output<diesel::sqlite::Sqlite>,
             ) -> diesel::serialize::Result {
-                self.0.to_string().to_sql(out)
+                out.set_value(self.0.to_string());
+                Ok(diesel::serialize::IsNull::No)
             }
         }
 
@@ -244,20 +245,21 @@ pub use ulid_new_type;
  */
 
 #[derive(Clone, Copy, Debug, FromSqlRow, diesel::expression::AsExpression)]
-#[sql_type = "diesel::sql_types::Text"]
+#[diesel(sql_type = diesel::sql_types::Text)]
 pub struct IsoDate(pub DateTime<Utc>);
 
-impl<DB> ToSql<diesel::sql_types::Text, DB> for IsoDate
+impl ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite> for IsoDate
 where
-    DB: diesel::backend::Backend,
-    String: ToSql<diesel::sql_types::Text, DB>,
+    String: ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite>,
 {
-    fn to_sql<W: std::io::Write>(
+    fn to_sql(
         &self,
-        out: &mut diesel::serialize::Output<W, DB>,
+        out: &mut diesel::serialize::Output<diesel::sqlite::Sqlite>,
     ) -> diesel::serialize::Result {
-        let s = self.0.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
-        s.to_sql(out)
+        out.set_value(
+            self.0.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
+        );
+        Ok(diesel::serialize::IsNull::No)
     }
 }
 
@@ -363,7 +365,7 @@ pub fn sqlite_setup<P: AsRef<Path>, S: AsRef<str>>(
 
     #[derive(QueryableByName)]
     struct UserVersion {
-        #[sql_type = "diesel::sql_types::Integer"]
+        #[diesel(sql_type = diesel::sql_types::Integer)]
         user_version: i32,
     }
 

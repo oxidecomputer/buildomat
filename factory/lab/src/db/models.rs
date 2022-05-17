@@ -10,12 +10,12 @@ use std::time::Duration;
 use buildomat_common::db::*;
 pub use buildomat_common::db::{Dictionary, IsoDate};
 
-integer_new_type!(InstanceSeq, u64, i64, BigInt, "diesel::sql_types::BigInt");
-integer_new_type!(EventSeq, u64, i64, BigInt, "diesel::sql_types::BigInt");
+integer_new_type!(InstanceSeq, u64, i64, BigInt, diesel::sql_types::BigInt);
+integer_new_type!(EventSeq, u64, i64, BigInt, diesel::sql_types::BigInt);
 
 #[derive(Clone, Debug, Queryable, Insertable, Identifiable)]
-#[table_name = "instance"]
-#[primary_key(nodename, seq)]
+#[diesel(table_name = instance)]
+#[diesel(primary_key(nodename, seq))]
 pub struct Instance {
     pub nodename: String,
     pub seq: InstanceSeq,
@@ -37,7 +37,7 @@ pub struct Instance {
     FromSqlRow,
     diesel::expression::AsExpression,
 )]
-#[sql_type = "diesel::sql_types::Text"]
+#[diesel(sql_type = diesel::sql_types::Text)]
 pub enum InstanceState {
     /**
      * The instance has been created.  We will instruct iPXE to download the
@@ -137,8 +137,8 @@ impl Instance {
 }
 
 #[derive(Debug, Queryable, Insertable, Identifiable)]
-#[table_name = "instance_event"]
-#[primary_key(nodename, instance, seq)]
+#[diesel(table_name = instance_event)]
+#[diesel(primary_key(nodename, instance, seq))]
 pub struct InstanceEvent {
     pub nodename: String,
     pub instance: InstanceSeq,

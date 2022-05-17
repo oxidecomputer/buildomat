@@ -9,9 +9,9 @@ anyhow = "1.0.41"
 buildomat-common = { path = "../../common" }
 wollongong-common = { path = "../common" }
 chrono = { version = "0.4.19", features = ["serde"] }
-diesel = { git = "https://github.com/diesel-rs/diesel", rev = "54122fb305daf12d3f05ff174a8024dec6323318", features = ["sqlite", "extras", "serde_json"] }
+diesel = { git = "https://github.com/diesel-rs/diesel", branch = "2.0.x", features = ["sqlite", "extras", "serde_json"] }
 rand = "0.8.4"
-rusty_ulid = "0.11.0"
+rusty_ulid = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_with = "1.10.0"

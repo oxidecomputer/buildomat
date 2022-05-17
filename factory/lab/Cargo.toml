@@ -6,7 +6,7 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow = "1"
-rusty_ulid = "0.11"
+rusty_ulid = "1"
 slog = "2.7"
 slog-term = "2.7"
 base64 = "0.13"
@@ -16,7 +16,7 @@ toml = "0.5"
 buildomat-openapi = { path = "../../openapi" }
 buildomat-common = { path = "../../common" }
 getopts = "0.2"
-diesel = { git = "https://github.com/diesel-rs/diesel", rev = "54122fb305daf12d3f05ff174a8024dec6323318", features = ["sqlite", "extras", "serde_json"] }
+diesel = { git = "https://github.com/diesel-rs/diesel", branch = "2.0.x", features = ["sqlite", "extras", "serde_json"] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot" }
 hyper = "0.14.16"
 hyper-staticfile = { version = "0.8.0", git = "https://github.com/jclulow/hyper-staticfile", branch = "jclulow" }

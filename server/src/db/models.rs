@@ -12,9 +12,9 @@ use std::time::Duration;
 use buildomat_common::db::*;
 pub use buildomat_common::db::{Dictionary, IsoDate};
 
-integer_new_type!(UnixUid, u32, i32, Integer, "diesel::sql_types::Integer");
-integer_new_type!(UnixGid, u32, i32, Integer, "diesel::sql_types::Integer");
-integer_new_type!(DataSize, u64, i64, BigInt, "diesel::sql_types::BigInt");
+integer_new_type!(UnixUid, u32, i32, Integer, diesel::sql_types::Integer);
+integer_new_type!(UnixGid, u32, i32, Integer, diesel::sql_types::Integer);
+integer_new_type!(DataSize, u64, i64, BigInt, diesel::sql_types::BigInt);
 
 ulid_new_type!(UserId);
 ulid_new_type!(JobId);
@@ -25,8 +25,8 @@ ulid_new_type!(FactoryId);
 ulid_new_type!(TargetId);
 
 #[derive(Debug, Queryable, Insertable, Identifiable)]
-#[table_name = "user"]
-#[primary_key(id)]
+#[diesel(table_name = user)]
+#[diesel(primary_key(id))]
 pub struct User {
     pub id: UserId,
     pub name: String,
@@ -35,8 +35,8 @@ pub struct User {
 }
 
 #[derive(Debug, Queryable, Insertable, Identifiable)]
-#[table_name = "user_privilege"]
-#[primary_key(user, privilege)]
+#[diesel(table_name = user_privilege)]
+#[diesel(primary_key(user, privilege))]
 pub struct Privilege {
     pub user: UserId,
     pub privilege: String,
@@ -63,8 +63,8 @@ impl std::ops::Deref for AuthUser {
 }
 
 #[derive(Debug, Queryable, Insertable, Identifiable)]
-#[table_name = "task"]
-#[primary_key(job, seq)]
+#[diesel(table_name = task)]
+#[diesel(primary_key(job, seq))]
 pub struct Task {
     pub job: JobId,
     pub seq: i32,
@@ -98,8 +98,8 @@ impl Task {
 }
 
 #[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[table_name = "job_event"]
-#[primary_key(job, seq)]
+#[diesel(table_name = job_event)]
+#[diesel(primary_key(job, seq))]
 pub struct JobEvent {
     pub job: JobId,
     pub task: Option<i32>,
@@ -126,8 +126,8 @@ impl JobEvent {
 }
 
 #[derive(Debug, Queryable, Insertable, Identifiable)]
-#[table_name = "job_output"]
-#[primary_key(job, path)]
+#[diesel(table_name = job_output)]
+#[diesel(primary_key(job, path))]
 pub struct JobOutput {
     pub job: JobId,
     pub path: String,
@@ -135,8 +135,8 @@ pub struct JobOutput {
 }
 
 #[derive(Debug, Queryable, Insertable, Identifiable)]
-#[table_name = "job_input"]
-#[primary_key(job, name)]
+#[diesel(table_name = job_input)]
+#[diesel(primary_key(job, name))]
 pub struct JobInput {
     pub job: JobId,
     pub name: String,
@@ -151,8 +151,8 @@ impl JobInput {
 }
 
 #[derive(Debug, Queryable, Insertable, Identifiable)]
-#[table_name = "job_file"]
-#[primary_key(job, id)]
+#[diesel(table_name = job_file)]
+#[diesel(primary_key(job, id))]
 pub struct JobFile {
     pub job: JobId,
     pub id: JobFileId,
@@ -164,8 +164,8 @@ pub struct JobFile {
 }
 
 #[derive(Debug, Queryable, Insertable, Identifiable)]
-#[table_name = "published_file"]
-#[primary_key(owner, series, version, name)]
+#[diesel(table_name = published_file)]
+#[diesel(primary_key(owner, series, version, name))]
 pub struct PublishedFile {
     pub owner: UserId,
     pub series: String,
@@ -176,8 +176,8 @@ pub struct PublishedFile {
 }
 
 #[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[table_name = "worker"]
-#[primary_key(id)]
+#[diesel(table_name = worker)]
+#[diesel(primary_key(id))]
 pub struct Worker {
     pub id: WorkerId,
     pub bootstrap: String,
@@ -231,8 +231,8 @@ impl Worker {
 }
 
 #[derive(Clone, Debug, Queryable, Insertable, Identifiable)]
-#[table_name = "job"]
-#[primary_key(id)]
+#[diesel(table_name = job)]
+#[diesel(primary_key(id))]
 pub struct Job {
     pub id: JobId,
     pub owner: UserId,
@@ -265,8 +265,8 @@ impl Job {
 }
 
 #[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[table_name = "factory"]
-#[primary_key(id)]
+#[diesel(table_name = factory)]
+#[diesel(primary_key(id))]
 pub struct Factory {
     pub id: FactoryId,
     pub name: String,
@@ -275,8 +275,8 @@ pub struct Factory {
 }
 
 #[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[table_name = "target"]
-#[primary_key(id)]
+#[diesel(table_name = target)]
+#[diesel(primary_key(id))]
 pub struct Target {
     pub id: TargetId,
     pub name: String,
@@ -286,8 +286,8 @@ pub struct Target {
 }
 
 #[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[table_name = "job_depend"]
-#[primary_key(job, name)]
+#[diesel(table_name = job_depend)]
+#[diesel(primary_key(job, name))]
 pub struct JobDepend {
     pub job: JobId,
     pub name: String,
@@ -313,8 +313,8 @@ impl JobDepend {
 }
 
 #[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[table_name = "job_time"]
-#[primary_key(job, name)]
+#[diesel(table_name = job_time)]
+#[diesel(primary_key(job, name))]
 pub struct JobTime {
     pub job: JobId,
     pub name: String,

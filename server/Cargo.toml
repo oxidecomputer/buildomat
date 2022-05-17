@@ -8,15 +8,15 @@ license = "MPL-2.0"
 anyhow = "1"
 base64 = "0.13"
 chrono = "0.4"
-diesel = { git = "https://github.com/diesel-rs/diesel", rev = "54122fb305daf12d3f05ff174a8024dec6323318", features = ["sqlite", "extras"] }
+diesel = { git = "https://github.com/diesel-rs/diesel", branch = "2.0.x", features = ["sqlite", "extras"] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot" }
 getopts = "0.2"
 hyper = "0.14"
-hyper-staticfile = "0.6"
-rusoto_core = "0.47.0"
-rusoto_credential = "0.47.0"
-rusoto_s3 = "0.47.0"
-rusty_ulid = "0.11"
+hyper-staticfile = { version = "0.8.0", git = "https://github.com/jclulow/hyper-staticfile", branch = "jclulow" }
+rusoto_core = "0.48.0"
+rusoto_credential = "0.48.0"
+rusoto_s3 = "0.48.0"
+rusty_ulid = "1"
 schemars = { version = "0.8", features = [ "chrono" ] }
 serde = { version = "1", features = [ "derive" ] }
 serde_json = "1.0.66"

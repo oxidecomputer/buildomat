@@ -11,14 +11,14 @@ use wollongong_common::hooktypes;
 
 use super::schema::*;
 
-integer_new_type!(DeliverySeq, usize, i64, BigInt, "diesel::sql_types::BigInt");
+integer_new_type!(DeliverySeq, usize, i64, BigInt, diesel::sql_types::BigInt);
 
 ulid_new_type!(CheckSuiteId);
 ulid_new_type!(CheckRunId);
 
 #[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[table_name = "delivery"]
-#[primary_key(seq)]
+#[diesel(table_name = delivery)]
+#[diesel(primary_key(seq))]
 pub struct Delivery {
     pub seq: DeliverySeq,
     pub uuid: String,
@@ -36,8 +36,8 @@ impl Delivery {
 }
 
 #[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[table_name = "repository"]
-#[primary_key(id)]
+#[diesel(table_name = repository)]
+#[diesel(primary_key(id))]
 pub struct Repository {
     pub id: i64,
     pub owner: String,
@@ -45,16 +45,16 @@ pub struct Repository {
 }
 
 #[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[table_name = "install"]
-#[primary_key(id)]
+#[diesel(table_name = install)]
+#[diesel(primary_key(id))]
 pub struct Install {
     pub id: i64,
     pub owner: i64,
 }
 
 #[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[table_name = "user"]
-#[primary_key(id)]
+#[diesel(table_name = user)]
+#[diesel(primary_key(id))]
 pub struct User {
     pub id: i64,
     pub login: String,
@@ -73,7 +73,7 @@ pub struct User {
     FromSqlRow,
     diesel::expression::AsExpression,
 )]
-#[sql_type = "diesel::sql_types::Text"]
+#[diesel(sql_type = diesel::sql_types::Text)]
 pub enum UserType {
     User,
     Bot,
@@ -143,7 +143,7 @@ impl std::fmt::Display for UserType {
     FromSqlRow,
     diesel::expression::AsExpression,
 )]
-#[sql_type = "diesel::sql_types::Text"]
+#[diesel(sql_type = diesel::sql_types::Text)]
 pub enum CheckRunVariety {
     Control,
     AlwaysPass,
@@ -190,7 +190,7 @@ impl std::fmt::Display for CheckRunVariety {
 }
 
 #[derive(Debug, Clone, Copy, FromSqlRow, diesel::expression::AsExpression)]
-#[sql_type = "diesel::sql_types::Text"]
+#[diesel(sql_type = diesel::sql_types::Text)]
 pub enum CheckSuiteState {
     Created,
     Parked,
@@ -264,8 +264,8 @@ pub struct Plan {
 json_new_type!(JsonPlan, Plan);
 
 #[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[table_name = "check_suite"]
-#[primary_key(id)]
+#[diesel(table_name = check_suite)]
+#[diesel(primary_key(id))]
 pub struct CheckSuite {
     pub id: CheckSuiteId,
     pub repo: i64,
@@ -283,8 +283,8 @@ pub struct CheckSuite {
 }
 
 #[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[table_name = "check_run"]
-#[primary_key(id)]
+#[diesel(table_name = check_run)]
+#[diesel(primary_key(id))]
 pub struct CheckRun {
     pub id: CheckRunId,
     pub check_suite: CheckSuiteId,
