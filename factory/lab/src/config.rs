@@ -29,6 +29,7 @@ pub(crate) struct ConfigFileFactory {
 #[derive(Deserialize, Debug, Clone)]
 pub(crate) struct ConfigFileTarget {
     pub nodename: String,
+    pub os_dir: String,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -40,5 +41,4 @@ pub(crate) struct ConfigFileHost {
     pub lom_ip: String,
     pub lom_username: String,
     pub lom_password: String,
-    pub os_dir: String,
 }

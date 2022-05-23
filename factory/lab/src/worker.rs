@@ -182,14 +182,15 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
      */
     let supported_targets = ready_hosts
         .iter()
-        .filter_map(|nodename| {
+        .map(|nodename| {
             c.config
                 .target
                 .iter()
                 .filter(|(_, target)| &target.nodename == nodename)
                 .map(|(id, _)| id.to_string())
-                .next()
+                .collect::<Vec<_>>()
         })
+        .flatten()
         .collect::<Vec<_>>();
 
     if !supported_targets.is_empty() {

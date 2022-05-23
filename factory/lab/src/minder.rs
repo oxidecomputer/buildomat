@@ -122,6 +122,8 @@ trait CentralExt {
         &self,
         name: &str,
     ) -> HResult<&super::config::ConfigFileHost>;
+
+    fn target_os_dir(&self, target: &str) -> HResult<PathBuf>;
 }
 
 impl CentralExt for Central {
@@ -136,6 +138,18 @@ impl CentralExt for Central {
                 None,
                 StatusCode::BAD_REQUEST,
                 "invalid host".to_string(),
+            ))
+        }
+    }
+
+    fn target_os_dir(&self, target: &str) -> HResult<PathBuf> {
+        if let Some(t) = self.config.target.get(target) {
+            Ok(PathBuf::from(&t.os_dir))
+        } else {
+            Err(dropshot::HttpError::for_client_error(
+                None,
+                StatusCode::BAD_REQUEST,
+                "host has invalid target".to_string(),
             ))
         }
     }
@@ -171,12 +185,12 @@ async fn os_file(
 
     info!(ctx.log, "[{}] os file request for {:?}", path.host, path.file);
 
-    let hc = c.host_config(&path.host)?;
-    let booting =
+    let _hc = c.host_config(&path.host)?;
+    let (booting, target) =
         if let Some(i) = c.db.instance_for_host(&path.host).or_500()? {
-            i.is_preboot()
+            (i.is_preboot(), Some(i.target().to_string()))
         } else {
-            false
+            (false, None)
         };
 
     if !booting {
@@ -186,7 +200,7 @@ async fn os_file(
         ));
     }
 
-    let mut fp = PathBuf::from(&hc.os_dir);
+    let mut fp = c.target_os_dir(target.as_deref().unwrap())?;
     for component in path.file.iter() {
         assert!(!component.contains("/"));
         if component == "." || component == ".." {
