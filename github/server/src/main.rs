@@ -32,9 +32,16 @@ pub struct RepoConfig {
      * Should we require that users submitting jobs be members of the
      * organisation that owns the repository?  Users outside that organisation
      * will require approval from a user inside the organisation.
+     *
+     * If not specified, this value defaults to "true"; i.e., users outside the
+     * organisation require approval by default.
      */
-    #[serde(default)]
+    #[serde(default = "true_if_missing")]
     pub org_only: bool,
+}
+
+fn true_if_missing() -> bool {
+    true
 }
 
 #[derive(Deserialize)]
