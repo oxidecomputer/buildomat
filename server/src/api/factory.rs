@@ -152,7 +152,14 @@ pub(crate) async fn factory_worker_get(
     f.owns(log, &w)?;
 
     Ok(HttpResponseOk(FactoryWorkerResult {
-        worker: Some(FactoryWorker::from(&w)),
+        worker: if w.deleted {
+            /*
+             * This worker has been deleted already.
+             */
+            None
+        } else {
+            Some(FactoryWorker::from(&w))
+        },
     }))
 }
 
