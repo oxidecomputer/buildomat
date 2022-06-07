@@ -330,7 +330,10 @@ pub(crate) async fn run(
                     p.event_minseq = ev.seq + 1;
                 }
 
-                if ev.stream == "stdout" || ev.stream == "stderr" {
+                let stdio = ev.stream == "stdout" || ev.stream == "stderr";
+                let console = ev.stream == "console";
+
+                if stdio || console {
                     /*
                      * Some commands, like "cargo build --verbose", generate
                      * exceptionally long output lines, running into the
@@ -345,7 +348,8 @@ pub(crate) async fn run(
                      * Users will still be able to see the full output in our
                      * detailed view where we get to render the whole page.
                      */
-                    let mut line = "| ".to_string();
+                    let mut line =
+                        if console { "|C| " } else { "| " }.to_string();
                     let mut chars = ev.payload.chars();
                     for _ in 0..100 {
                         if let Some(c) = chars.next() {
