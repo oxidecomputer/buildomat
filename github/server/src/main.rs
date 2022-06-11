@@ -1760,6 +1760,13 @@ async fn process_check_suite(app: &Arc<App>, cs: &CheckSuiteId) -> Result<()> {
                             u.login,
                         );
                         cs.approved_by = Some(u.id);
+                    } else {
+                        info!(
+                            log,
+                            "check suite {} by {} (pull) needs authorisation",
+                            cs.id,
+                            u.login,
+                        );
                     }
                 }
             }
