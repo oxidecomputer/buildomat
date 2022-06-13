@@ -129,6 +129,66 @@ SEQ   ACK RECVTIME             EVENT          ACTION
 The `wollongong-dbtool del unack SEQ` command can be used to trigger the
 reprocessing of an invididual webhook message.
 
+## Per-repository Configuration
+
+Buildomat works as a [GitHub App](https://docs.github.com/en/developers/apps),
+which is generally "installed" at the level of an
+[Organisation](https://docs.github.com/en/organizations).  Installing the App
+allows buildomat to receive notifications about events, such as git pushes and
+pull requests, from all repositories (public and private) within the
+organisation.  In order to avoid accidents, buildomat requires that the service
+be explicitly configured for a repository before it will take any actions.
+
+Per-repository configuration is achieved by creating a file in the default
+branch of the repository in question, named `.github/buildomat/config.toml`.
+This file is written in [TOML](https://toml.io/), with a handful of simple
+values.  Supported properties in this file include:
+
+- `enable` **(boolean)**
+
+  Must be present and have the value `true` in order for buildomat to consider
+  the repository for jobs; e.g.,
+
+  ```toml
+  enable = true
+  ```
+
+- `org_only` **(boolean, defaults to `true` if missing)**
+
+  If set to `true`, or missing from the file, buildomat will not automatically
+  run jobs in response to pull requests opened by users that are not a member
+  of the GitHub Organisation which owns the repository.  If set to `false`, any
+  GitHub user can cause a job to be executed.
+
+  This property is important for security if your repository is able to create
+  any jobs that have access to secrets, or to restricted networks.
+
+- `allow_users` **(array of strings, each a GitHub login name)**
+
+  If specified, jobs will be started automatically for users in this list,
+  regardless of whether they are a member of the Organisation that owns the
+  repository or not, and regardless of the value of the `org_only` property.
+
+  This is often useful for pre-authorising jobs driven by Pull Requests
+  made by various automated systems; e.g.,
+
+  ```toml
+  allow_users = [
+          "dependabot[bot]",
+          "renovate[bot]",
+  ]
+  ```
+
+Note that buildomat will only ever read this configuration file from the most
+recent commit in the default branch of the repository, not from the contents of
+another branch or pull request.  This is of particular importance for
+security-sensitive properties like `org_only`, where the policy set by users
+with full write access to the repository must not be overridden by changes from
+potentially untrusted users.  If a pull request with a malicious policy change
+is merged, it will then be in the default branch and active for subsequent pull
+requests; maintainers must carefully review pull requests that change this
+file.
+
 ## Licence
 
 Unless otherwise noted, all components are licenced under the [Mozilla Public
