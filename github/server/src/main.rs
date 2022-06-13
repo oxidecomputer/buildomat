@@ -1312,7 +1312,8 @@ async fn flush_check_runs(
 
         let out = match cr.variety {
             CheckRunVariety::Control => {
-                let sha = cs.plan_sha.as_ref();
+                let sha = cs.plan_sha.as_deref();
+                let sha = sha.unwrap_or("<?>");
                 let p: ControlPrivate = cr.get_private()?;
 
                 let approval = if let Some(aby) = cs.approved_by {
@@ -1334,7 +1335,7 @@ async fn flush_check_runs(
                     FlushOut {
                         title: "Plan loaded, creating check runs...".into(),
                         summary: format!(
-                            "Plan loaded from commit {:?}.{}",
+                            "Plan loaded from commit {}.{}",
                             sha, approval,
                         ),
                         detail: "".into(),
@@ -1363,7 +1364,7 @@ async fn flush_check_runs(
                     FlushOut {
                         title: "No job files.".into(),
                         summary: format!(
-                            "Plan loaded from commit {:?}, but there were \
+                            "Plan loaded from commit {}, but there were \
                             no job files in {}",
                             sha, app.config.confroot
                         ),
@@ -1375,7 +1376,7 @@ async fn flush_check_runs(
                     FlushOut {
                         title: "Checks underway.".into(),
                         summary: format!(
-                            "Plan loaded from commit {:?}.{}",
+                            "Plan loaded from commit {}.{}",
                             sha, approval,
                         ),
                         detail: "".into(),
