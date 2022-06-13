@@ -38,6 +38,13 @@ pub struct RepoConfig {
      */
     #[serde(default = "true_if_missing")]
     pub org_only: bool,
+
+    /**
+     * A list of login names for users that should be authorised for jobs on
+     * this repository, even if they are not members of the organisation.
+     */
+    #[serde(default)]
+    pub allow_users: Vec<String>,
 }
 
 fn true_if_missing() -> bool {
@@ -1724,19 +1731,29 @@ async fn process_check_suite(app: &Arc<App>, cs: &CheckSuiteId) -> Result<()> {
                  */
                 if let Some(id) = cs.requested_by {
                     let u = db.load_user(id)?;
-                    let org = db.load_user(install.owner)?;
-                    let res = gh
-                        .orgs()
-                        .check_membership_for_user(&org.login, &u.login)
-                        .await;
-                    if res.is_ok() {
+                    if rc.loaded.allow_users.iter().any(|l| &u.login == l) {
                         info!(
                             log,
-                            "check suite {} authorised by {} (request)",
+                            "check suite {} authorised by {} (request, config)",
                             cs.id,
                             u.login,
                         );
                         cs.approved_by = Some(u.id);
+                    } else {
+                        let org = db.load_user(install.owner)?;
+                        let res = gh
+                            .orgs()
+                            .check_membership_for_user(&org.login, &u.login)
+                            .await;
+                        if res.is_ok() {
+                            info!(
+                                log,
+                                "check suite {} authorised by {} (request)",
+                                cs.id,
+                                u.login,
+                            );
+                            cs.approved_by = Some(u.id);
+                        }
                     }
                 }
             }
@@ -1748,26 +1765,37 @@ async fn process_check_suite(app: &Arc<App>, cs: &CheckSuiteId) -> Result<()> {
                  */
                 if let Some(id) = cs.pr_by {
                     let u = db.load_user(id)?;
-                    let org = db.load_user(install.owner)?;
-                    let res = gh
-                        .orgs()
-                        .check_membership_for_user(&org.login, &u.login)
-                        .await;
-                    if res.is_ok() {
+                    if rc.loaded.allow_users.iter().any(|l| &u.login == l) {
                         info!(
                             log,
-                            "check suite {} authorised by {} (pull)",
+                            "check suite {} authorised by {} (pull, config)",
                             cs.id,
                             u.login,
                         );
                         cs.approved_by = Some(u.id);
                     } else {
-                        info!(
-                            log,
-                            "check suite {} by {} (pull) needs authorisation",
-                            cs.id,
-                            u.login,
-                        );
+                        let org = db.load_user(install.owner)?;
+                        let res = gh
+                            .orgs()
+                            .check_membership_for_user(&org.login, &u.login)
+                            .await;
+                        if res.is_ok() {
+                            info!(
+                                log,
+                                "check suite {} authorised by {} (pull)",
+                                cs.id,
+                                u.login,
+                            );
+                            cs.approved_by = Some(u.id);
+                        } else {
+                            info!(
+                                log,
+                                "check suite {} by {} (pull) needs \
+                                authorisation",
+                                cs.id,
+                                u.login,
+                            );
+                        }
                     }
                 }
             }
