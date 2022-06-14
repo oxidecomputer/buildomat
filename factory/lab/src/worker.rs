@@ -51,8 +51,14 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
         /*
          * Fetch the state for this worker from the core server:
          */
-        let w = if let Some(w) =
-            c.client.factory_worker_get(&i.worker).await?.into_inner().worker
+        let w = if let Some(w) = c
+            .client
+            .factory_worker_get()
+            .worker(i.worker.to_string())
+            .send()
+            .await?
+            .into_inner()
+            .worker
         {
             debug!(log, "instance {} is for worker {}", i.id(), w.id);
             w
@@ -111,7 +117,7 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
      * any worker records left that do not have an associate instance, they must
      * be scrubbed as detritus from prior failed runs.
      */
-    for w in c.client.factory_workers().await?.into_inner() {
+    for w in c.client.factory_workers().send().await?.into_inner() {
         let rm = if let Some(p) = w.private.as_deref() {
             if let Ok(ii) = parse_instance_id(p) {
                 if let Some(i) = c.db.instance_get(&ii.0, ii.1)? {
@@ -147,7 +153,11 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
         };
 
         if rm {
-            c.client.factory_worker_destroy(&w.id).await?;
+            c.client
+                .factory_worker_destroy()
+                .worker(w.id.to_string())
+                .send()
+                .await?;
         }
     }
 
@@ -199,7 +209,9 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
          */
         if let Some(lease) = c
             .client
-            .factory_lease(&FactoryWhatsNext { supported_targets })
+            .factory_lease()
+            .body(FactoryWhatsNext { supported_targets })
+            .send()
             .await?
             .into_inner()
             .lease
@@ -218,11 +230,13 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
                      */
                     let w = c
                         .client
-                        .factory_worker_create(&FactoryWorkerCreate {
+                        .factory_worker_create()
+                        .body(FactoryWorkerCreate {
                             job: None,
                             target: lease.target.to_string(),
                             wait_for_flush: true,
                         })
+                        .send()
                         .await?;
                     info!(
                         log,
@@ -243,10 +257,10 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
                     );
 
                     c.client
-                        .factory_worker_associate(
-                            &w.id,
-                            &FactoryWorkerAssociate { private: i.id() },
-                        )
+                        .factory_worker_associate()
+                        .worker(w.id.to_string())
+                        .body(FactoryWorkerAssociate { private: i.id() })
+                        .send()
                         .await?;
                     info!(
                         log,
@@ -301,14 +315,14 @@ async fn upload_worker_one(log: &Logger, c: &Central) -> Result<()> {
         while let Some(ie) = c.db.instance_next_event_to_upload(&i)? {
             let res = c
                 .client
-                .factory_worker_append(
-                    &i.worker,
-                    &FactoryWorkerAppend {
-                        payload: ie.payload.to_string(),
-                        stream: ie.stream.to_string(),
-                        time: ie.time.0,
-                    },
-                )
+                .factory_worker_append()
+                .worker(i.worker.to_string())
+                .body(FactoryWorkerAppend {
+                    payload: ie.payload.to_string(),
+                    stream: ie.stream.to_string(),
+                    time: ie.time.0,
+                })
+                .send()
                 .await?;
 
             if res.retry {
@@ -327,7 +341,12 @@ async fn upload_worker_one(log: &Logger, c: &Central) -> Result<()> {
         }
 
         if !i.flushed {
-            let w = c.client.factory_worker_get(&i.worker).await?;
+            let w = c
+                .client
+                .factory_worker_get()
+                .worker(i.worker.to_string())
+                .send()
+                .await?;
             if let Some(w) = &w.worker {
                 if w.online {
                     /*
@@ -336,7 +355,11 @@ async fn upload_worker_one(log: &Logger, c: &Central) -> Result<()> {
                      * we have been saving.  Report that we have flushed those
                      * logs so that the job can start.
                      */
-                    c.client.factory_worker_flush(&i.worker).await?;
+                    c.client
+                        .factory_worker_flush()
+                        .worker(i.worker.to_string())
+                        .send()
+                        .await?;
                     c.db.instance_mark_flushed(&i)?;
                     info!(
                         log,
