@@ -86,8 +86,8 @@ pub mod types {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub job: Option<String>,
         pub target: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub wait_for_flush: Option<bool>,
+        #[serde(default)]
+        pub wait_for_flush: bool,
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone)]

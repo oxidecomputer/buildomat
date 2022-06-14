@@ -221,7 +221,7 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
                         .factory_worker_create(&FactoryWorkerCreate {
                             job: None,
                             target: lease.target.to_string(),
-                            wait_for_flush: Some(true),
+                            wait_for_flush: true,
                         })
                         .await?;
                     info!(
