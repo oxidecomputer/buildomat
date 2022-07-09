@@ -75,29 +75,8 @@ async fn create_instance(
     lease_id: &str,
 ) -> Result<String> {
     let id = worker.id.to_string();
-    let mut script = String::new();
-    script += "#!/usr/bin/bash\n";
 
-    script += "set -o errexit\n";
-    script += "set -o pipefail\n";
-
-    script += "while :; do\n";
-    script += "\trm -f /var/tmp/agent\n";
-    script += "\tif ! curl -sSf -o /var/tmp/agent '%URL%/file/agent'; then\n";
-    script += "\t\tsleep 1\n";
-    script += "\t\tcontinue\n";
-    script += "\tfi\n";
-    script += "\tchmod +rx /var/tmp/agent\n";
-    script += "\tif ! /var/tmp/agent install '%URL%' '%STRAP%'; then\n";
-    script += "\t\tsleep 1\n";
-    script += "\t\tcontinue\n";
-    script += "\tfi\n";
-    script += "\tbreak\n";
-    script += "done\n";
-
-    script += "exit 0\n";
-
-    let script = script
+    let script = include_str!("../scripts/user_data.sh")
         .replace("%URL%", &config.general.baseurl)
         .replace("%STRAP%", &worker.bootstrap);
 

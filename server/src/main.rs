@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{anyhow, bail, Context, Result};
 use dropshot::{
     endpoint, ApiDescription, ConfigDropshot, HttpError, HttpServerStarter,
-    RequestContext,
+    Query as TypedQuery, RequestContext,
 };
 use getopts::Options;
 #[allow(unused_imports)]
@@ -26,6 +26,7 @@ use hyper::{
 use hyper_staticfile::FileBytesStream;
 use rusoto_s3::S3;
 use rusty_ulid::Ulid;
+use schemars::JsonSchema;
 use serde::Deserialize;
 #[allow(unused_imports)]
 use slog::{error, info, warn, Logger};
@@ -545,14 +546,45 @@ impl Central {
     }
 }
 
+#[allow(dead_code)]
+#[derive(Deserialize, JsonSchema, Debug)]
+pub(crate) struct FileAgentQuery {
+    kernel: Option<String>,
+    proc: Option<String>,
+    mach: Option<String>,
+    plat: Option<String>,
+    id: Option<String>,
+    id_like: Option<String>,
+    version_id: Option<String>,
+}
+
+impl FileAgentQuery {
+    fn is_linux(&self) -> bool {
+        match self.kernel.as_deref() {
+            Some("Linux") => true,
+            Some(_) | None => false,
+        }
+    }
+}
+
 #[endpoint {
     method = GET,
     path = "/file/agent",
 }]
 async fn file_agent(
-    _rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: Arc<RequestContext<Arc<Central>>>,
+    query: TypedQuery<FileAgentQuery>,
 ) -> SResult<Response<Body>, HttpError> {
-    let f = tokio::fs::File::open("buildomat-agent").await.or_500()?;
+    let log = &rqctx.log;
+    let q = query.into_inner();
+
+    info!(log, "agent request; query = {:?}", q);
+
+    let filename =
+        if q.is_linux() { "buildomat-agent-linux" } else { "buildomat-agent" };
+    info!(log, "using agent file {:?}", filename);
+
+    let f = tokio::fs::File::open(filename).await.or_500()?;
     let fbs = FileBytesStream::new(f);
 
     Ok(Response::builder().body(fbs.into_body())?)
