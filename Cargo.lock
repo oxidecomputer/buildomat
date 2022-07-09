@@ -1166,7 +1166,7 @@ dependencies = [
 [[package]]
 name = "octorust"
 version = "0.1.34"
-source = "git+https://github.com/oxidecomputer/third-party-api-clients?branch=jclulow#2546a85c4c12e0fd0cd8ba9440cc51ea638c6701"
+source = "git+https://github.com/oxidecomputer/third-party-api-clients?branch=jclulow#455b40535c1bd94fca7f60990a0e9a2f18bc0042"
 dependencies = [
  "anyhow",
  "async-recursion",
