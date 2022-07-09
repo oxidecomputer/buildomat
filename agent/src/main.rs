@@ -15,7 +15,7 @@ use std::process::Command;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use chrono::prelude::*;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -26,6 +26,7 @@ use buildomat_openapi::types::*;
 
 mod download;
 mod exec;
+#[cfg(target_os = "illumos")]
 mod uadmin;
 mod upload;
 
@@ -34,10 +35,18 @@ use tokio::io::AsyncWriteExt;
 
 const CONFIG_PATH: &str = "/opt/buildomat/etc/agent.json";
 const AGENT: &str = "/opt/buildomat/lib/agent";
-const METHOD: &str = "/opt/buildomat/lib/start.sh";
-const MANIFEST: &str = "/var/svc/manifest/site/buildomat-agent.xml";
-const INPUT_DATASET: &str = "rpool/input";
 const INPUT_PATH: &str = "/input";
+#[cfg(target_os = "illumos")]
+mod os_constants {
+    pub const METHOD: &str = "/opt/buildomat/lib/start.sh";
+    pub const MANIFEST: &str = "/var/svc/manifest/site/buildomat-agent.xml";
+    pub const INPUT_DATASET: &str = "rpool/input";
+}
+#[cfg(target_os = "linux")]
+mod os_constants {
+    pub const UNIT: &str = "/etc/systemd/system/buildomat-agent.service";
+}
+use os_constants::*;
 
 #[derive(Serialize, Deserialize)]
 struct ConfigFile {
@@ -333,8 +342,13 @@ fn hard_reset() -> Result<()> {
      * bothering to sync file systems, however, seems to make destruction much
      * quicker!
      */
-    uadmin::uadmin(uadmin::Action::Reboot(uadmin::Next::Boot))
-        .context("hard_reset: uadmin")?;
+    #[cfg(target_os = "illumos")]
+    {
+        use anyhow::Context;
+
+        uadmin::uadmin(uadmin::Action::Reboot(uadmin::Next::Boot))
+            .context("hard_reset: uadmin")?;
+    }
 
     Ok(())
 }
@@ -389,49 +403,97 @@ async fn main() -> Result<()> {
             std::fs::copy(&exe, AGENT)?;
             make_executable(AGENT)?;
 
-            /*
-             * Copy SMF method script and manifest into place.
-             */
-            let method = include_str!("../smf/start.sh");
-            make_dirs_for(METHOD)?;
-            rmfile(METHOD)?;
-            write_text(METHOD, method)?;
-            make_executable(METHOD)?;
+            #[cfg(target_os = "illumos")]
+            {
+                /*
+                 * Copy SMF method script and manifest into place.
+                 */
+                let method = include_str!("../smf/start.sh");
+                make_dirs_for(METHOD)?;
+                rmfile(METHOD)?;
+                write_text(METHOD, method)?;
+                make_executable(METHOD)?;
 
-            let manifest = include_str!("../smf/agent.xml");
-            rmfile(MANIFEST)?;
-            write_text(MANIFEST, manifest)?;
+                let manifest = include_str!("../smf/agent.xml");
+                rmfile(MANIFEST)?;
+                write_text(MANIFEST, manifest)?;
 
-            /*
-             * Create the input directory.
-             */
-            let status = Command::new("/sbin/zfs")
-                .arg("create")
-                .arg("-o")
-                .arg(&format!("mountpoint={}", INPUT_PATH))
-                .arg(INPUT_DATASET)
-                .env_clear()
-                .current_dir("/")
-                .status();
-            match status {
-                Ok(o) if o.success() => (),
-                Ok(o) => bail!("zfs create failure: {:?}", o),
-                Err(e) => bail!("could not execute zfs create: {:?}", e),
+                /*
+                 * Create the input directory.
+                 */
+                let status = Command::new("/sbin/zfs")
+                    .arg("create")
+                    .arg("-o")
+                    .arg(&format!("mountpoint={}", INPUT_PATH))
+                    .arg(INPUT_DATASET)
+                    .env_clear()
+                    .current_dir("/")
+                    .status();
+                match status {
+                    Ok(o) if o.success() => (),
+                    Ok(o) => bail!("zfs create failure: {:?}", o),
+                    Err(e) => bail!("could not execute zfs create: {:?}", e),
+                }
+
+                /*
+                 * Import SMF service.
+                 */
+                let status = Command::new("/usr/sbin/svccfg")
+                    .arg("import")
+                    .arg(MANIFEST)
+                    .env_clear()
+                    .current_dir("/")
+                    .status();
+                match status {
+                    Ok(o) if o.success() => (),
+                    Ok(o) => bail!("svccfg import failure: {:?}", o),
+                    Err(e) => bail!("could not execute svccfg import: {:?}", e),
+                }
             }
 
-            /*
-             * Import SMF service.
-             */
-            let status = Command::new("/usr/sbin/svccfg")
-                .arg("import")
-                .arg(MANIFEST)
-                .env_clear()
-                .current_dir("/")
-                .status();
-            match status {
-                Ok(o) if o.success() => (),
-                Ok(o) => bail!("svccfg import failure: {:?}", o),
-                Err(e) => bail!("could not execute svccfg import: {:?}", e),
+            #[cfg(target_os = "linux")]
+            {
+                /*
+                 * Create the input directory.
+                 */
+                std::fs::create_dir_all(INPUT_PATH)?;
+
+                /*
+                 * Write a systemd unit file for the agent service.
+                 */
+                let unit = include_str!("../systemd/agent.service");
+                make_dirs_for(UNIT)?;
+                rmfile(UNIT)?;
+                write_text(UNIT, unit)?;
+
+                /*
+                 * Ask systemd to load the unit file we just wrote.
+                 */
+                let status = Command::new("/bin/systemctl")
+                    .arg("daemon-reload")
+                    .env_clear()
+                    .current_dir("/")
+                    .status();
+                match status {
+                    Ok(o) if o.success() => {}
+                    Ok(o) => bail!("systemd reload failure: {:?}", o),
+                    Err(e) => bail!("could not execute daemon-reload: {:?}", e),
+                }
+
+                /*
+                 * Attempt to start the service:
+                 */
+                let status = Command::new("/bin/systemctl")
+                    .arg("start")
+                    .arg("buildomat-agent.service")
+                    .env_clear()
+                    .current_dir("/")
+                    .status();
+                match status {
+                    Ok(o) if o.success() => {}
+                    Ok(o) => bail!("systemd start failure: {:?}", o),
+                    Err(e) => bail!("could not execute systemctl: {:?}", e),
+                }
             }
 
             return Ok(());

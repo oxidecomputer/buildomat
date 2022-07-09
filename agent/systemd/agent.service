@@ -1,0 +1,10 @@
+[Unit]
+Description=buildomat agent
+
+[Service]
+Type=simple
+ExecStart=/opt/buildomat/lib/agent run
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
