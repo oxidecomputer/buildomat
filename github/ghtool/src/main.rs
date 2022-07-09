@@ -41,6 +41,48 @@ impl Stuff {
     }
 }
 
+async fn do_again(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("DELIVERY_ID"));
+
+    let a = args!(l);
+    if a.args().len() != 1 {
+        bad_args!(l, "specify one delivery ID");
+    }
+    let id = a.args()[0].parse()?;
+
+    let s = l.context();
+    let c = s.app_client();
+
+    c.apps().redeliver_webhook_delivery(id).await?;
+
+    Ok(())
+}
+
+async fn do_webhooks(mut l: Level<Stuff>) -> Result<()> {
+    no_args!(l);
+
+    let s = l.context();
+    let c = s.app_client();
+
+    /*
+     * XXX We would like to be able to page back through the listing, but our
+     * GitHub client library is not structured to allow this.  We would need
+     * access to the Link header value, but that's eaten by the client (sigh).
+     * Hopefully the 100 most recent deliveries is enough for now!
+     */
+    let recentdels = c.apps().list_webhook_deliveries(100, "").await?;
+
+    for del in recentdels {
+        let when = del.delivered_at.unwrap();
+        println!(
+            "{:<16} {} {} {}",
+            del.id, when, del.status_code, del.status,
+        );
+    }
+
+    Ok(())
+}
+
 async fn do_installs(mut l: Level<Stuff>) -> Result<()> {
     no_args!(l);
 
@@ -63,6 +105,40 @@ async fn do_info(mut l: Level<Stuff>) -> Result<()> {
     let ghapp = c.apps().get_authenticated().await?;
 
     println!("{:#?}", ghapp);
+
+    Ok(())
+}
+
+async fn do_repos(mut l: Level<Stuff>) -> Result<()> {
+    l.reqopt("i", "", "install ID", "INSTALL");
+    l.optflag("b", "", "brief output");
+
+    let a = no_args!(l);
+
+    let i = a.opts().opt_str("i").unwrap();
+    let b = a.opts().opt_present("b");
+
+    let c = l.context().install_client(i.parse()?);
+
+    let mut p = 0;
+    loop {
+        let res = c.apps().list_repos_accessible_to_installation(0, p).await?;
+
+        if res.repositories.is_empty() {
+            break;
+        }
+        p += 1;
+
+        if b {
+            println!("page {}", p);
+            for r in res.repositories {
+                let o = r.owner.unwrap();
+                println!("{:>16} {}/{}", r.id, o.login, r.name);
+            }
+        } else {
+            println!("{:#?}", res);
+        }
+    }
 
     Ok(())
 }
@@ -138,8 +214,11 @@ async fn main() -> Result<()> {
 
     l.cmd("info", "get information about the configured app", cmd!(do_info))?;
     l.cmd("installs", "dump info about installations", cmd!(do_installs))?;
+    l.cmd("repos", "list repos visible to an installation", cmd!(do_repos))?;
     l.cmd("org", "organisation commands", cmd!(do_org))?;
     l.cmd("user", "user commands", cmd!(do_user))?;
+    l.cmd("webhooks", "webhook deliveries", cmd!(do_webhooks))?;
+    l.cmd("again", "webhook redelivery?", cmd!(do_again))?;
 
     let mut s = sel!(l);
 
