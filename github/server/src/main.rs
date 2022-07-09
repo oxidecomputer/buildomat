@@ -2123,10 +2123,22 @@ async fn main() -> Result<()> {
 
         let c = app0.install_client(i.id);
 
-        let pg = c.apps().list_repos_accessible_to_installation(100, 0).await?;
+        let mut pn = 0;
+        loop {
+            let pg =
+                c.apps().list_repos_accessible_to_installation(100, pn).await?;
 
-        for r in pg.repositories.iter() {
-            println!("    repo: {}", r.url.as_ref().unwrap());
+            if pg.repositories.is_empty() {
+                break;
+            }
+            pn += 1;
+
+            for r in pg.repositories.iter() {
+                if let Some(owner) = &r.owner {
+                    println!("    repo: {} {}/{}", r.id, owner.login, r.name);
+                    app0.db.store_repository(r.id, &owner.login, &r.name)?;
+                }
+            }
         }
     }
 
