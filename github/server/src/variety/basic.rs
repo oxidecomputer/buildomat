@@ -607,20 +607,7 @@ pub(crate) async fn run(
             gid: None,
             uid: None,
             workdir: None,
-            script: "\
-                #!/bin/bash\n\
-                set -o errexit\n\
-                set -o pipefail\n\
-                set -o xtrace\n\
-                groupadd -g 12345 build\n\
-                useradd -u 12345 -g build -d /home/build -s /bin/bash \
-                -c 'build' -P 'Primary Administrator' build\n\
-                zfs create -o mountpoint=/work rpool/work\n\
-                mkdir -p /home/build\n\
-                chown build:build /home/build /work\n\
-                chmod 0700 /home/build /work\n\
-                "
-            .into(),
+            script: include_str!("../../scripts/variety/basic/setup.sh").into(),
         });
 
         /*
