@@ -9,6 +9,7 @@ anyhow = "1.0.41"
 base64 = "0.13"
 buildomat-openapi = { path = "../../openapi" }
 buildomat-common = { path = "../../common" }
+buildomat-bunyan = { path = "../../bunyan" }
 chrono = { version = "0.4.19", features = ["serde"] }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot" }
 hmac-sha256 = "1"
@@ -27,3 +28,7 @@ tokio = { version = "1.8.1", features = ["full"] }
 toml = "0.5.8"
 wollongong-common = { path = "../common" }
 wollongong-database = { path = "../database" }
+tempfile = "3.3.0"
+futures = "0.3.21"
+tokio-util = { version = "0.6.9", features = ["io"] }
+html-escape = "0.2.11"

@@ -1,6 +1,7 @@
 [workspace]
 members = [
 	"agent",
+	"bunyan",
 	"client",
 	"common",
 	"factory/aws",

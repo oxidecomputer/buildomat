@@ -142,6 +142,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "buildomat-bunyan"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "serde",
+ "serde_json",
+ "serde_repr",
+ "serde_with",
+]
+
+[[package]]
 name = "buildomat-common"
 version = "0.0.0"
 dependencies = [
@@ -757,6 +770,15 @@ dependencies = [
  "libc",
  "match_cfg",
  "winapi",
+]
+
+[[package]]
+name = "html-escape"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8e7479fa1ef38eb49fb6a42c426be515df2d063f06cb8efd3e50af073dbc26c"
+dependencies = [
+ "utf8-width",
 ]
 
 [[package]]
@@ -1823,6 +1845,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_repr"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2ad84e47328a31223de7fed7a4f5087f2d6ddfe586cf3ca25b7a165bc0a5aed"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "serde_tokenstream"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2299,6 +2332,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "utf8-width"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5190c9442dcdaf0ddd50f37420417d219ae5261bbf5db120d0f9bab996c9cba1"
+
+[[package]]
 name = "uuid"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2602,11 +2641,14 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "base64 0.13.0",
+ "buildomat-bunyan",
  "buildomat-common",
  "buildomat-openapi",
  "chrono",
  "dropshot",
+ "futures",
  "hmac-sha256",
+ "html-escape",
  "hyper",
  "jsonwebtoken",
  "nom_pem",
@@ -2617,8 +2659,10 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "tempfile",
  "thiserror",
  "tokio",
+ "tokio-util 0.6.10",
  "toml",
  "wollongong-common",
  "wollongong-database",

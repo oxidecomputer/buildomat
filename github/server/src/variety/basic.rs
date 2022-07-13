@@ -6,11 +6,13 @@ use crate::{App, FlushOut, FlushState};
 use anyhow::{bail, Result};
 use buildomat_common::*;
 use chrono::SecondsFormat;
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use slog::{debug, error, info, o, trace, warn, Logger};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use wollongong_database::types::*;
 
 const KILOBYTE: f64 = 1024.0;
@@ -172,8 +174,16 @@ pub(crate) async fn flush(
     if !p.job_outputs.is_empty() {
         summary += "The job produced the following artefacts:\n";
         for bo in p.job_outputs.iter() {
-            summary +=
-                &format!("* [`{}`]({}) ({})\n", bo.path, bo.href, bo.size);
+            summary += &format!("* [`{}`]({}) ({})", bo.path, bo.href, bo.size);
+            if bo.path.ends_with(".log") {
+                /*
+                 * Add an additional link to view a pretty-printed copy of
+                 * what might be a bunyan log:
+                 */
+                summary +=
+                    &format!(" [\\[rendered\\]]({}?format=x-bunyan)", bo.href);
+            }
+            summary += "\n";
         }
         if p.job_outputs_extra > 0 {
             summary += &format!(
@@ -840,14 +850,181 @@ pub(crate) async fn run(
     Ok(true)
 }
 
+async fn bunyan_to_html(
+    f: &mut tokio::fs::File,
+    dec: &mut buildomat_bunyan::BunyanDecoder,
+    num: &mut usize,
+) -> Result<()> {
+    while let Some(bl) = dec.pop() {
+        *num += 1;
+
+        let colour = match &bl {
+            buildomat_bunyan::BunyanLine::Entry(be) => match be.level() {
+                buildomat_bunyan::BunyanLevel::Trace => "#96f5fa",
+                buildomat_bunyan::BunyanLevel::Debug => "#adc2ff",
+                buildomat_bunyan::BunyanLevel::Info => "#adffb0",
+                buildomat_bunyan::BunyanLevel::Warn => "#ffecad",
+                buildomat_bunyan::BunyanLevel::Error => "#ffb5ad",
+                buildomat_bunyan::BunyanLevel::Fatal => "#ffadf1",
+            },
+            buildomat_bunyan::BunyanLine::Other(_) => "#ffffff",
+        };
+
+        /*
+         * The first column ia a permalink with the line number.
+         */
+        let mut out = format!(
+            "<tr style=\"background-color: {}\">\
+            <td style=\"vertical-align: top; text-align: right; \">\
+            <a id=\"L{}\">\
+            <a href=\"#L{}\" \
+            style=\"white-space: pre; \
+            font-family: monospace; \
+            text-decoration: none; \
+            color: #111111; \
+            \">{}</a></a>\
+            </td>",
+            colour, num, num, num,
+        );
+
+        match bl {
+            buildomat_bunyan::BunyanLine::Entry(be) => {
+                /*
+                 * The second column is the event timestamp.
+                 */
+                out += &format!(
+                    "<td style=\"vertical-align: top;\">\
+                    <span style=\"white-space: pre; \
+                    font-family: monospace; \
+                    \">{}</span>\
+                    </td>",
+                    be.time().to_rfc3339_opts(SecondsFormat::Millis, true)
+                );
+
+                /*
+                 * The third column is the log level.
+                 */
+                out += &format!(
+                    "<td style=\"vertical-align: top;\">\
+                    <span style=\"white-space: pre; \
+                    font-family: monospace; \
+                    \"><b>{}</b></span>\
+                    </td>",
+                    be.level().render(),
+                );
+
+                /*
+                 * The fourth column is an attempt to render the rest of the
+                 * content in a readable way.
+                 */
+                let mut n =
+                    format!("<b>{}</b>", html_escape::encode_safe(be.name()));
+                if let Some(c) = be.component() {
+                    if c != be.name() {
+                        n += &format!(" ({})", html_escape::encode_safe(c));
+                    }
+                }
+
+                /*
+                 * For multi-line messages, indent subsequent lines by 4 spaces,
+                 * so that they are at least somewhat distinguishable from the
+                 * next log message.
+                 */
+                let msg = be
+                    .msg()
+                    .lines()
+                    .enumerate()
+                    .map(|(i, l)| {
+                        let mut s = if i > 0 { "    " } else { "" }.to_string();
+                        s.push_str(&html_escape::encode_safe(l));
+                        s
+                    })
+                    .collect::<Vec<String>>()
+                    .join("\n");
+
+                out += &format!(
+                    "<td style=\"vertical-align: top;\">\
+                    <span style=\"white-space: pre-wrap; \
+                    word-wrap: break-word; \
+                    font-family: monospace; \
+                    \">{}: {}\n",
+                    n, msg,
+                );
+
+                for (k, v) in be.extras() {
+                    out += &format!(
+                        "    <b>{}</b> = ",
+                        html_escape::encode_safe(k.as_str())
+                    );
+                    out += &html_escape::encode_safe(&match v {
+                        serde_json::Value::Null => "null".into(),
+                        serde_json::Value::Bool(v) => format!("{}", v),
+                        serde_json::Value::Number(n) => format!("{}", n),
+                        serde_json::Value::String(s) => {
+                            let mut out = String::new();
+                            for c in s.chars() {
+                                if c != '"' && c != '\'' {
+                                    out.push_str(
+                                        &c.escape_default().to_string(),
+                                    );
+                                } else {
+                                    out.push(c);
+                                }
+                            }
+                            out
+                        }
+                        serde_json::Value::Array(a) => format!("{:?}", a),
+                        serde_json::Value::Object(o) => format!("{:?}", o),
+                    });
+                    out += "\n";
+                }
+
+                out += "</span></td>";
+            }
+            buildomat_bunyan::BunyanLine::Other(line) => {
+                /*
+                 * For regular lines, we do not have a timestamp or a level,
+                 * so skip those:
+                 */
+                out += "<td colspan=\"2\">&nbsp;</td>";
+
+                /*
+                 * Output the entire line in the final column:
+                 */
+                out += &format!(
+                    "<td style=\"vertical-align: top;\">\
+                    <span style=\"white-space: pre-wrap; \
+                    word-wrap: break-word; \
+                    font-family: monospace; \
+                    \">{}</span>\
+                    </td>",
+                    html_escape::encode_safe(line.trim()),
+                );
+            }
+        }
+
+        out += "</tr>\n";
+
+        f.write_all(&out.as_bytes()).await?;
+    }
+    Ok(())
+}
+
 pub(crate) async fn artefact(
     app: &Arc<App>,
     cs: &CheckSuite,
     cr: &CheckRun,
     output: &str,
     name: &str,
+    format: Option<&str>,
 ) -> Result<Option<hyper::Response<hyper::Body>>> {
     let p: BasicPrivate = cr.get_private()?;
+
+    let bunyan = match format {
+        Some("x-bunyan") => true,
+        None => false,
+        Some(other) => bail!("invalid format {:?}", other),
+    };
 
     if let Some(id) = &p.buildomat_id {
         let bm = app.buildomat(&app.db.load_repository(cs.repo)?);
@@ -868,6 +1045,63 @@ pub(crate) async fn artefact(
          * want in the URL!
          */
         let ct = guess_mime_type(name);
+
+        if bunyan {
+            if ct != "text/plain" {
+                bail!("cannot reformat a file that is not plain text");
+            }
+
+            if cl > 100 * 1024 * 1024 {
+                bail!("file too large for reformat");
+            }
+
+            /*
+             * Open an anonymous temporary file into which we will write the
+             * reformatted data.
+             */
+            let mut tf = tokio::fs::File::from_std(tempfile::tempfile()?);
+
+            tf.write_all(
+                "<!doctype html><html>\
+                <head><meta charset=\"UTF-8\"></head>\
+                <body>\n\
+                <table style=\"border: none;\">\n"
+                    .as_bytes(),
+            )
+            .await?;
+
+            let mut data = backend.into_inner();
+
+            let mut dec = buildomat_bunyan::BunyanDecoder::new();
+
+            let mut num = 0;
+            while let Some(ch) = data.next().await.transpose()? {
+                dec.feed(&ch)?;
+                bunyan_to_html(&mut tf, &mut dec, &mut num).await?;
+            }
+            dec.fin()?;
+            bunyan_to_html(&mut tf, &mut dec, &mut num).await?;
+
+            tf.write_all("</table></body></html>\n".as_bytes()).await?;
+            tf.flush().await?;
+
+            /*
+             * Rewind the file to the beginning and use it to provide the
+             * response to the client.
+             */
+            tf.seek(std::io::SeekFrom::Start(0)).await?;
+            let md = tf.metadata().await?;
+
+            let stream = tokio_util::io::ReaderStream::new(tf);
+
+            return Ok(Some(
+                hyper::Response::builder()
+                    .status(hyper::StatusCode::OK)
+                    .header(hyper::header::CONTENT_TYPE, "text/html")
+                    .header(hyper::header::CONTENT_LENGTH, md.len())
+                    .body(hyper::Body::wrap_stream(stream))?,
+            ));
+        }
 
         return Ok(Some(
             hyper::Response::builder()
@@ -915,8 +1149,8 @@ pub(crate) async fn details(
             for &n in keys.iter() {
                 out += &format!(
                     "<li><b>{}:</b> {}\n",
-                    n,
-                    job.tags.get(n).unwrap()
+                    html_escape::encode_safe(n),
+                    html_escape::encode_safe(job.tags.get(n).unwrap()),
                 );
             }
             out += "</ul>\n";
@@ -929,8 +1163,20 @@ pub(crate) async fn details(
                 let bo = BasicOutput::new(app, cs, cr, &o);
                 out += &format!(
                     "<li><a href=\"{}\">{}</a> ({})\n",
-                    bo.href, bo.path, bo.size,
+                    bo.href,
+                    html_escape::encode_safe(&bo.path),
+                    bo.size,
                 );
+                if bo.path.ends_with(".log") {
+                    /*
+                     * Add an additional link to view a pretty-printed copy of
+                     * what might be a bunyan log:
+                     */
+                    out += &format!(
+                        " <a href=\"{}?format=x-bunyan\">[rendered]</a>\n",
+                        bo.href
+                    );
+                }
             }
             out += "</ul>\n";
         }
@@ -998,7 +1244,7 @@ pub(crate) async fn details(
                     font-family: monospace; \
                     \">{}</span>\
                 </td>",
-                ev.payload,
+                html_escape::encode_safe(&ev.payload),
             );
 
             out += "</tr>";

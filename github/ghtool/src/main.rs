@@ -74,10 +74,7 @@ async fn do_webhooks(mut l: Level<Stuff>) -> Result<()> {
 
     for del in recentdels {
         let when = del.delivered_at.unwrap();
-        println!(
-            "{:<16} {} {} {}",
-            del.id, when, del.status_code, del.status,
-        );
+        println!("{:<16} {} {} {}", del.id, when, del.status_code, del.status,);
     }
 
     Ok(())

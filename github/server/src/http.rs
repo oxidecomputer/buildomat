@@ -93,6 +93,11 @@ impl ArtefactPath {
     }
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct ArtefactQuery {
+    pub format: Option<String>,
+}
+
 #[endpoint {
     method = GET,
     path = "/artefact/{check_suite}/{url_key}/{check_run}/{output}/{name}"
@@ -100,9 +105,11 @@ impl ArtefactPath {
 async fn artefact(
     rc: Arc<RequestContext<Arc<App>>>,
     path: dropshot::Path<ArtefactPath>,
+    query: dropshot::Query<ArtefactQuery>,
 ) -> SResult<hyper::Response<hyper::Body>, HttpError> {
     let app = rc.context();
     let path = path.into_inner();
+    let query = query.into_inner();
 
     let cs = app.db.load_check_suite(&path.check_suite()?).to_500()?;
     let cr = app.db.load_check_run(&path.check_run()?).to_500()?;
@@ -111,11 +118,16 @@ async fn artefact(
     }
 
     let response = match cr.variety {
-        CheckRunVariety::Basic => {
-            variety::basic::artefact(app, &cs, &cr, &path.output, &path.name)
-                .await
-                .to_500()?
-        }
+        CheckRunVariety::Basic => variety::basic::artefact(
+            app,
+            &cs,
+            &cr,
+            &path.output,
+            &path.name,
+            query.format.as_deref(),
+        )
+        .await
+        .to_500()?,
         _ => None,
     };
 
