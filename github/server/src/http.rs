@@ -491,16 +491,45 @@ async fn status(
         out += "</ul>\n";
     }
 
-    if jobs.iter().any(|job| !seen.contains(&job.id)) {
-        out += "<h2>Queued Jobs</h2>\n";
-        out += "<ul>\n";
+    for (heading, state) in [
+        ("Queued Jobs (waiting for capacity)", Some("queued")),
+        ("Waiting Jobs (waiting for a dependency)", Some("waiting")),
+        ("Other Jobs", None),
+    ] {
+        let mut did_heading = false;
+
         for job in jobs.iter() {
             if seen.contains(&job.id) {
                 continue;
             }
 
-            if job.state == "completed" || job.state == "failed" {
+            let display = if job.state == "completed" || job.state == "failed" {
+                /*
+                 * Completed jobs will be displayed in a later section.
+                 */
+                false
+            } else if let Some(state) = state.as_deref() {
+                /*
+                 * This round, we are displaying jobs of a particular status.
+                 */
+                state == &job.state
+            } else {
+                /*
+                 * Catch all the stragglers.
+                 */
+                true
+            };
+
+            if !display {
                 continue;
+            }
+
+            seen.insert(job.id.to_string());
+
+            if !did_heading {
+                did_heading = true;
+                out += &format!("<h2>{}</h2>\n", heading);
+                out += "<ul>\n";
             }
 
             let owner = b.user_get(&job.owner).await.to_500()?;
@@ -510,7 +539,10 @@ async fn status(
             out += &dump_info(&job);
             out += "<br>\n";
         }
-        out += "</ul>\n";
+
+        if did_heading {
+            out += "</ul>\n";
+        }
     }
 
     out += "<h2>Recently Completed Jobs</h2>\n";

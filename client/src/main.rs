@@ -1121,23 +1121,44 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
     w.lap("worker display");
 
     /*
-     * Display all jobs that have not been displayed already, and which are not
-     * complete.
+     * Display all active jobs that have not been displayed already, and which
+     * are not complete.
      */
-    for job in jobs.iter() {
-        if seen.contains(&job.id) {
-            continue;
+    for state in [Some("queued"), Some("waiting"), None] {
+        for job in jobs.iter() {
+            if seen.contains(&job.id) {
+                continue;
+            }
+
+            let display = if job.state == "completed" || job.state == "failed" {
+                /*
+                 * Completed jobs will be displayed later.
+                 */
+                false
+            } else if let Some(state) = state.as_deref() {
+                /*
+                 * This round, we are displaying jobs of a particular status.
+                 */
+                state == &job.state
+            } else {
+                /*
+                 * Catch all the stragglers.
+                 */
+                true
+            };
+
+            if !display {
+                continue;
+            }
+
+            seen.insert(job.id.to_string());
+
+            let owner = users.get(&job.owner).unwrap_or(&job.owner);
+
+            println!("~~ {} job {} (user {})", job.state, job.id, owner);
+            dump_info(&job);
+            println!();
         }
-
-        if job.state == "completed" || job.state == "failed" {
-            continue;
-        }
-
-        let owner = users.get(&job.owner).unwrap_or(&job.owner);
-
-        println!("~~ queued job {} (user {})", job.id, owner);
-        dump_info(&job);
-        println!();
     }
     w.lap("job display");
 
