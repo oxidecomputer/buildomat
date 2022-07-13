@@ -957,8 +957,19 @@ impl Stopwatch {
 
 async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
     l.optflag("v", "", "debugging output");
+    l.optopt("r", "", "number of recently completed jobs to display", "COUNT");
 
     let a = no_args!(l);
+    let nrc = if let Some(arg) = a.opts().opt_str("r") {
+        let nrc = arg.parse::<u64>()?;
+        if nrc == 0 {
+            None
+        } else {
+            Some(nrc)
+        }
+    } else {
+        Some(10)
+    };
 
     let s = l.context();
 
@@ -991,7 +1002,11 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
     /*
      * Load some of recently completed jobs:
      */
-    let oldjobs = s.admin().admin_jobs_get(None, Some(10)).await?.into_inner();
+    let oldjobs = if let Some(nrc) = nrc {
+        s.admin().admin_jobs_get(None, Some(nrc)).await?.into_inner()
+    } else {
+        Default::default()
+    };
     w.lap("admin_jobs_get completed");
 
     /*
