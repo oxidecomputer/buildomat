@@ -19,7 +19,7 @@ pub(crate) struct PublicFilePath {
 pub(crate) async fn public_file_download(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<PublicFilePath>,
-) -> std::result::Result<Response<Body>, HttpError> {
+) -> DSResult<Response<Body>> {
     let c = rqctx.context();
     let log = &rqctx.log;
 

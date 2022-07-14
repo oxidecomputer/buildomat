@@ -5,16 +5,11 @@
 use super::prelude::*;
 
 trait WorkerOwns {
-    fn owns(&self, log: &Logger, worker: &db::Worker)
-        -> SResult<(), HttpError>;
+    fn owns(&self, log: &Logger, worker: &db::Worker) -> DSResult<()>;
 }
 
 impl WorkerOwns for db::Factory {
-    fn owns(
-        &self,
-        log: &Logger,
-        worker: &db::Worker,
-    ) -> SResult<(), HttpError> {
+    fn owns(&self, log: &Logger, worker: &db::Worker) -> DSResult<()> {
         if worker.factory() == self.id {
             return Ok(());
         }
@@ -46,7 +41,7 @@ pub(crate) struct FactoryPingResult {
 }]
 pub(crate) async fn factory_ping(
     rqctx: Arc<RequestContext<Arc<Central>>>,
-) -> SResult<HttpResponseOk<FactoryPingResult>, HttpError> {
+) -> DSResult<HttpResponseOk<FactoryPingResult>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -68,7 +63,7 @@ pub(crate) struct WorkerPath {
 }
 
 impl WorkerPath {
-    fn worker(&self) -> SResult<db::WorkerId, HttpError> {
+    fn worker(&self) -> DSResult<db::WorkerId> {
         self.worker.parse::<db::WorkerId>().or_500()
     }
 }
@@ -100,7 +95,7 @@ impl From<&db::Worker> for FactoryWorker {
 }]
 pub(crate) async fn factory_workers(
     rqctx: Arc<RequestContext<Arc<Central>>>,
-) -> SResult<HttpResponseOk<Vec<FactoryWorker>>, HttpError> {
+) -> DSResult<HttpResponseOk<Vec<FactoryWorker>>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -136,7 +131,7 @@ pub(crate) struct FactoryWorkerResult {
 pub(crate) async fn factory_worker_get(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<WorkerPath>,
-) -> SResult<HttpResponseOk<FactoryWorkerResult>, HttpError> {
+) -> DSResult<HttpResponseOk<FactoryWorkerResult>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -320,7 +315,7 @@ pub(crate) async fn factory_worker_associate(
 pub(crate) async fn factory_worker_destroy(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<WorkerPath>,
-) -> SResult<HttpResponseOk<bool>, HttpError> {
+) -> DSResult<HttpResponseOk<bool>> {
     let c = rqctx.context();
     let log = &rqctx.log;
     let req = rqctx.request.lock().await;
@@ -353,7 +348,7 @@ pub(crate) struct FactoryWorkerCreate {
 }
 
 impl FactoryWorkerCreate {
-    fn job(&self) -> SResult<Option<db::JobId>, HttpError> {
+    fn job(&self) -> DSResult<Option<db::JobId>> {
         if let Some(job) = self.job.as_deref() {
             Ok(Some(job.parse::<db::JobId>().or_500()?))
         } else {
@@ -361,7 +356,7 @@ impl FactoryWorkerCreate {
         }
     }
 
-    fn target(&self) -> SResult<db::TargetId, HttpError> {
+    fn target(&self) -> DSResult<db::TargetId> {
         self.target.parse::<db::TargetId>().or_500()
     }
 }
@@ -373,7 +368,7 @@ impl FactoryWorkerCreate {
 pub(crate) async fn factory_worker_create(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     body: TypedBody<FactoryWorkerCreate>,
-) -> SResult<HttpResponseCreated<FactoryWorker>, HttpError> {
+) -> DSResult<HttpResponseCreated<FactoryWorker>> {
     let c = rqctx.context();
     let log = &rqctx.log;
     let req = rqctx.request.lock().await;
@@ -396,7 +391,7 @@ pub(crate) struct FactoryWhatsNext {
 }
 
 impl FactoryWhatsNext {
-    fn supported_targets(&self) -> SResult<Vec<db::TargetId>, HttpError> {
+    fn supported_targets(&self) -> DSResult<Vec<db::TargetId>> {
         self.supported_targets
             .iter()
             .map(|s| Ok(s.parse()?))
@@ -429,7 +424,7 @@ pub(crate) struct FactoryLeaseResult {
 pub(crate) async fn factory_lease(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     body: TypedBody<FactoryWhatsNext>,
-) -> SResult<HttpResponseOk<FactoryLeaseResult>, HttpError> {
+) -> DSResult<HttpResponseOk<FactoryLeaseResult>> {
     let c = rqctx.context();
     let log = &rqctx.log;
     let req = rqctx.request.lock().await;
@@ -476,7 +471,7 @@ pub(crate) struct FactoryJobPath {
 }
 
 impl FactoryJobPath {
-    fn job(&self) -> SResult<db::JobId, HttpError> {
+    fn job(&self) -> DSResult<db::JobId> {
         self.job.parse::<db::JobId>().or_500()
     }
 }
@@ -488,7 +483,7 @@ impl FactoryJobPath {
 pub(crate) async fn factory_lease_renew(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<FactoryJobPath>,
-) -> SResult<HttpResponseOk<bool>, HttpError> {
+) -> DSResult<HttpResponseOk<bool>> {
     let c = rqctx.context();
     let log = &rqctx.log;
     let req = rqctx.request.lock().await;

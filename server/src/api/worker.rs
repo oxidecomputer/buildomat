@@ -5,11 +5,11 @@
 use super::prelude::*;
 
 trait JobOwns {
-    fn owns(&self, log: &Logger, job: &db::Job) -> SResult<(), HttpError>;
+    fn owns(&self, log: &Logger, job: &db::Job) -> DSResult<()>;
 }
 
 impl JobOwns for db::Worker {
-    fn owns(&self, log: &Logger, job: &db::Job) -> SResult<(), HttpError> {
+    fn owns(&self, log: &Logger, job: &db::Job) -> DSResult<()> {
         if let Some(owner) = job.worker.as_ref() {
             if owner == &self.id {
                 return Ok(());
@@ -82,7 +82,7 @@ pub(crate) struct WorkerPingResult {
 }]
 pub(crate) async fn worker_ping(
     rqctx: Arc<RequestContext<Arc<Central>>>,
-) -> SResult<HttpResponseOk<WorkerPingResult>, HttpError> {
+) -> DSResult<HttpResponseOk<WorkerPingResult>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -157,7 +157,7 @@ pub(crate) async fn worker_ping(
 pub(crate) async fn worker_job_input_download(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<JobInputPath>,
-) -> SResult<Response<Body>, HttpError> {
+) -> DSResult<Response<Body>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -349,7 +349,7 @@ pub(crate) async fn worker_job_upload_chunk(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<JobPath>,
     chunk: UntypedBody,
-) -> SResult<HttpResponseCreated<UploadedChunk>, HttpError> {
+) -> DSResult<HttpResponseCreated<UploadedChunk>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -459,7 +459,7 @@ pub(crate) struct WorkerBootstrapResult {
 pub(crate) async fn worker_bootstrap(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     strap: TypedBody<WorkerBootstrap>,
-) -> SResult<HttpResponseCreated<WorkerBootstrapResult>, HttpError> {
+) -> DSResult<HttpResponseCreated<WorkerBootstrapResult>> {
     let c = rqctx.context();
     let log = &rqctx.log;
 

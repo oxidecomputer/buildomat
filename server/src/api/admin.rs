@@ -32,7 +32,7 @@ pub struct UserPath {
 }
 
 impl UserPath {
-    fn user(&self) -> SResult<db::UserId, HttpError> {
+    fn user(&self) -> DSResult<db::UserId> {
         db::UserId::from_str(&self.user).or_500()
     }
 }
@@ -43,7 +43,7 @@ pub struct TargetPath {
 }
 
 impl TargetPath {
-    fn target(&self) -> SResult<db::TargetId, HttpError> {
+    fn target(&self) -> DSResult<db::TargetId> {
         db::TargetId::from_str(&self.target).or_500()
     }
 }
@@ -55,7 +55,7 @@ pub struct TargetPrivilegePath {
 }
 
 impl TargetPrivilegePath {
-    fn target(&self) -> SResult<db::TargetId, HttpError> {
+    fn target(&self) -> DSResult<db::TargetId> {
         db::TargetId::from_str(&self.target).or_500()
     }
 }
@@ -67,7 +67,7 @@ pub struct UserPrivilegePath {
 }
 
 impl UserPrivilegePath {
-    fn user(&self) -> SResult<db::UserId, HttpError> {
+    fn user(&self) -> DSResult<db::UserId> {
         db::UserId::from_str(&self.user).or_500()
     }
 }
@@ -91,7 +91,7 @@ pub struct UserCreateResult {
 pub(crate) async fn user_create(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     new_user: TypedBody<UserCreate>,
-) -> SResult<HttpResponseCreated<UserCreateResult>, HttpError> {
+) -> DSResult<HttpResponseCreated<UserCreateResult>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -114,7 +114,7 @@ pub(crate) async fn user_create(
 }]
 pub(crate) async fn users_list(
     rqctx: Arc<RequestContext<Arc<Central>>>,
-) -> SResult<HttpResponseOk<Vec<User>>, HttpError> {
+) -> DSResult<HttpResponseOk<Vec<User>>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -143,7 +143,7 @@ pub(crate) async fn users_list(
 pub(crate) async fn user_get(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<UserPath>,
-) -> SResult<HttpResponseOk<User>, HttpError> {
+) -> DSResult<HttpResponseOk<User>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -225,7 +225,7 @@ pub struct AdminJobsGetQuery {
 pub(crate) async fn admin_jobs_get(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     query: TypedQuery<AdminJobsGetQuery>,
-) -> SResult<HttpResponseOk<Vec<super::user::Job>>, HttpError> {
+) -> DSResult<HttpResponseOk<Vec<super::user::Job>>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -276,7 +276,7 @@ pub(crate) async fn admin_jobs_get(
 pub(crate) async fn admin_job_get(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<JobPath>,
-) -> SResult<HttpResponseOk<super::user::Job>, HttpError> {
+) -> DSResult<HttpResponseOk<super::user::Job>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -373,7 +373,7 @@ pub struct WorkersListQuery {
 pub(crate) async fn workers_list(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     query: TypedQuery<WorkersListQuery>,
-) -> SResult<HttpResponseOk<WorkersResult>, HttpError> {
+) -> DSResult<HttpResponseOk<WorkersResult>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -461,7 +461,7 @@ pub struct FactoryCreateResult {
 pub(crate) async fn factory_create(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     new_fac: TypedBody<FactoryCreate>,
-) -> SResult<HttpResponseCreated<FactoryCreateResult>, HttpError> {
+) -> DSResult<HttpResponseCreated<FactoryCreateResult>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -503,7 +503,7 @@ impl TargetCreateResult {
 pub(crate) async fn target_create(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     new_targ: TypedBody<TargetCreate>,
-) -> SResult<HttpResponseCreated<TargetCreateResult>, HttpError> {
+) -> DSResult<HttpResponseCreated<TargetCreateResult>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -522,7 +522,7 @@ pub(crate) async fn target_create(
 }]
 pub(crate) async fn targets_list(
     rqctx: Arc<RequestContext<Arc<Central>>>,
-) -> SResult<HttpResponseOk<Vec<Target>>, HttpError> {
+) -> DSResult<HttpResponseOk<Vec<Target>>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -552,7 +552,7 @@ pub(crate) async fn targets_list(
 pub(crate) async fn target_require_privilege(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<TargetPrivilegePath>,
-) -> SResult<HttpResponseUpdatedNoContent, HttpError> {
+) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -574,7 +574,7 @@ pub(crate) async fn target_require_privilege(
 pub(crate) async fn target_require_no_privilege(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<TargetPath>,
-) -> SResult<HttpResponseUpdatedNoContent, HttpError> {
+) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -595,7 +595,7 @@ pub struct TargetRedirect {
 }
 
 impl TargetRedirect {
-    fn redirect(&self) -> SResult<Option<db::TargetId>, HttpError> {
+    fn redirect(&self) -> DSResult<Option<db::TargetId>> {
         self.redirect
             .as_deref()
             .map(|s| db::TargetId::from_str(s).or_500())
@@ -611,7 +611,7 @@ pub(crate) async fn target_redirect(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<TargetPath>,
     body: TypedBody<TargetRedirect>,
-) -> SResult<HttpResponseUpdatedNoContent, HttpError> {
+) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -650,7 +650,7 @@ pub(crate) async fn target_rename(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<TargetPath>,
     body: TypedBody<TargetRename>,
-) -> SResult<HttpResponseCreated<TargetCreateResult>, HttpError> {
+) -> DSResult<HttpResponseCreated<TargetCreateResult>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;

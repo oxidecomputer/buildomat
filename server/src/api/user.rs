@@ -47,7 +47,7 @@ pub(crate) async fn job_events_get(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<JobsPath>,
     query: TypedQuery<JobsEventsQuery>,
-) -> std::result::Result<HttpResponseOk<Vec<JobEvent>>, HttpError> {
+) -> DSResult<HttpResponseOk<Vec<JobEvent>>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -89,7 +89,7 @@ pub(crate) async fn job_events_get(
 pub(crate) async fn job_outputs_get(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<JobsPath>,
-) -> std::result::Result<HttpResponseOk<Vec<JobOutput>>, HttpError> {
+) -> DSResult<HttpResponseOk<Vec<JobOutput>>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -127,7 +127,7 @@ pub(crate) async fn job_outputs_get(
 pub(crate) async fn job_output_download(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<JobsOutputsPath>,
-) -> std::result::Result<Response<Body>, HttpError> {
+) -> DSResult<Response<Body>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -168,7 +168,7 @@ pub(crate) struct JobOutputPublish {
 }
 
 impl JobOutputPublish {
-    fn safe(&self) -> std::result::Result<(), HttpError> {
+    fn safe(&self) -> DSResult<()> {
         let Self { series, version, name } = self;
         Self::one_safe(&series)?;
         Self::one_safe(&version)?;
@@ -176,7 +176,7 @@ impl JobOutputPublish {
         Ok(())
     }
 
-    fn one_safe(n: &str) -> std::result::Result<(), HttpError> {
+    fn one_safe(n: &str) -> DSResult<()> {
         if (2..=48).contains(&n.chars().count())
             && n.chars().all(|c| {
                 c.is_ascii_digit()
@@ -205,7 +205,7 @@ pub(crate) async fn job_output_publish(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<JobsOutputsPath>,
     body: TypedBody<JobOutputPublish>,
-) -> std::result::Result<HttpResponseUpdatedNoContent, HttpError> {
+) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -317,7 +317,7 @@ pub(crate) struct JobGetPath {
 pub(crate) async fn job_get(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<JobGetPath>,
-) -> std::result::Result<HttpResponseOk<Job>, HttpError> {
+) -> DSResult<HttpResponseOk<Job>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -353,7 +353,7 @@ pub(crate) async fn job_get(
 }]
 pub(crate) async fn jobs_get(
     rqctx: Arc<RequestContext<Arc<Central>>>,
-) -> std::result::Result<HttpResponseOk<Vec<Job>>, HttpError> {
+) -> DSResult<HttpResponseOk<Vec<Job>>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -451,7 +451,7 @@ pub(crate) struct JobSubmitResult {
 pub(crate) async fn job_submit(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     new_job: TypedBody<JobSubmit>,
-) -> std::result::Result<HttpResponseCreated<JobSubmitResult>, HttpError> {
+) -> DSResult<HttpResponseCreated<JobSubmitResult>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
