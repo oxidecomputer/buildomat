@@ -137,6 +137,7 @@ struct FileResponse {
 #[derive(Deserialize, Debug)]
 struct ConfigFile {
     pub admin: ConfigFileAdmin,
+    #[allow(dead_code)]
     pub general: ConfigFileGeneral,
     pub storage: ConfigFileStorage,
     pub sqlite: ConfigFileSqlite,
@@ -145,6 +146,7 @@ struct ConfigFile {
 
 #[derive(Deserialize, Debug)]
 struct ConfigFileGeneral {
+    #[allow(dead_code)]
     pub baseurl: String,
 }
 

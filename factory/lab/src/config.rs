@@ -34,6 +34,7 @@ pub(crate) struct ConfigFileTarget {
 
 #[derive(Deserialize, Debug, Clone)]
 pub(crate) struct ConfigFileHost {
+    #[allow(dead_code)]
     pub ip: String,
     pub console: String,
     pub lab_baseurl: String,
