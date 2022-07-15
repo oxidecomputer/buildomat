@@ -478,6 +478,60 @@ async fn do_job_dump(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_job_timings(mut l: Level<Stuff>) -> Result<()> {
+    l.optopt("I", "", "measure an interval", "FROM,TO");
+
+    let a = args!(l);
+
+    let measure = a
+        .opts()
+        .opt_str("I")
+        .map(|a| {
+            a.split_once(',')
+                .ok_or_else(|| anyhow!("invalid interval specification"))
+                .and_then(|(f, t)| Ok((f.to_string(), t.to_string())))
+        })
+        .transpose()?;
+
+    let c = l.context().user();
+
+    for id in a.args() {
+        let job = c.job_get(id).await?;
+
+        if let Some((mfrom, mto)) = &measure {
+            match (job.times.get(mfrom), job.times.get(mto)) {
+                (Some(tfrom), Some(tto)) => {
+                    let dur = tto.signed_duration_since(*tfrom);
+                    println!(
+                        "{} {} {}",
+                        job.id,
+                        tfrom
+                            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                        dur.num_seconds()
+                    );
+                }
+                _ => {
+                    println!("{} missing", job.id);
+                }
+            }
+        } else {
+            let mut times = job.times.iter().collect::<Vec<_>>();
+            times.sort_by(|a, b| a.1.cmp(&b.1));
+
+            for time in times {
+                println!(
+                    "{} {} {}",
+                    job.id,
+                    time.1.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                    time.0,
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
 async fn do_job_copy(mut l: Level<Stuff>) -> Result<()> {
     l.usage_args(Some("JOB SRC DST"));
 
@@ -575,6 +629,7 @@ async fn do_job(mut l: Level<Stuff>) -> Result<()> {
     l.cmd("tail", "listen for events from a job", cmd!(do_job_tail))?;
     l.cmd("outputs", "list job outputs", cmd!(do_job_outputs))?;
     l.cmd("dump", "dump information about jobs", cmd!(do_job_dump))?;
+    l.cmd("timings", "timing information about a job", cmd!(do_job_timings))?;
     l.cmda(
         "copy",
         "cp",
