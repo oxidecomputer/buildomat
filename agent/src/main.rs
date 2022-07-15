@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2022 Oxide Computer Company
  */
 
 #![allow(clippy::many_single_char_names)]
@@ -815,8 +815,11 @@ async fn main() -> Result<()> {
                         break;
                     }
                     Ok(upload::Activity::Error(s)) => {
-                        cw.append_msg(&format!("upload error: {:?}", s)).await;
+                        cw.append_msg(&format!("upload error: {}", s)).await;
                         upload_errors = true;
+                    }
+                    Ok(upload::Activity::Warning(s)) => {
+                        cw.append_msg(&format!("upload warning: {}", s)).await;
                     }
                     Err(mpsc::RecvTimeoutError::Timeout) => {
                         break;

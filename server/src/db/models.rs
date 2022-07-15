@@ -126,6 +126,35 @@ impl JobEvent {
 }
 
 #[derive(Debug, Queryable, Insertable, Identifiable)]
+#[diesel(table_name = job_output_rule)]
+#[diesel(primary_key(job, seq))]
+pub struct JobOutputRule {
+    pub job: JobId,
+    pub seq: i32,
+    pub rule: String,
+    pub ignore: bool,
+    pub size_change_ok: bool,
+    pub require_match: bool,
+}
+
+impl JobOutputRule {
+    pub fn from_create(
+        cd: &super::CreateOutputRule,
+        job: JobId,
+        seq: usize,
+    ) -> JobOutputRule {
+        JobOutputRule {
+            job,
+            seq: seq.try_into().unwrap(),
+            rule: cd.rule.to_string(),
+            ignore: cd.ignore,
+            size_change_ok: cd.size_change_ok,
+            require_match: cd.require_match,
+        }
+    }
+}
+
+#[derive(Debug, Queryable, Insertable, Identifiable)]
 #[diesel(table_name = job_output)]
 #[diesel(primary_key(job, path))]
 pub struct JobOutput {

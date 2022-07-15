@@ -67,6 +67,14 @@ pub struct CreateDepend {
     pub on_completed: bool,
 }
 
+#[derive(Debug, PartialEq)]
+pub struct CreateOutputRule {
+    pub rule: String,
+    pub ignore: bool,
+    pub size_change_ok: bool,
+    pub require_match: bool,
+}
+
 impl Database {
     pub fn new<P: AsRef<Path>>(
         log: Logger,
@@ -542,15 +550,14 @@ impl Database {
             .collect())
     }
 
-    pub fn job_output_rules(&self, job: JobId) -> Result<Vec<String>> {
+    pub fn job_output_rules(&self, job: JobId) -> Result<Vec<JobOutputRule>> {
         use schema::job_output_rule::dsl;
 
         let c = &mut self.1.lock().unwrap().conn;
         Ok(dsl::job_output_rule
-            .select(dsl::rule)
             .filter(dsl::job.eq(job))
             .order_by(dsl::seq.asc())
-            .get_results::<String>(c)?)
+            .get_results(c)?)
     }
 
     pub fn job_depends(&self, job: JobId) -> Result<Vec<JobDepend>> {
@@ -776,7 +783,7 @@ impl Database {
         target_name: &str,
         target: TargetId,
         tasks: Vec<CreateTask>,
-        output_rules: &[String],
+        output_rules: Vec<CreateOutputRule>,
         inputs: &[String],
         tags: I,
         depends: Vec<CreateDepend>,
@@ -901,11 +908,7 @@ impl Database {
             for (i, rule) in output_rules.iter().enumerate() {
                 let ic =
                     diesel::insert_into(job_output_rule::dsl::job_output_rule)
-                        .values((
-                            job_output_rule::dsl::job.eq(j.id),
-                            job_output_rule::dsl::seq.eq(i as i32),
-                            job_output_rule::dsl::rule.eq(rule),
-                        ))
+                        .values(JobOutputRule::from_create(rule, j.id, i))
                         .execute(tx)?;
                 assert_eq!(ic, 1);
             }

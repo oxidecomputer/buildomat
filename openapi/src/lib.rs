@@ -342,8 +342,16 @@ pub mod types {
         pub id: String,
         pub inputs: Vec<WorkerPingInput>,
         pub name: String,
-        pub output_rules: Vec<String>,
+        pub output_rules: Vec<WorkerPingOutputRule>,
         pub tasks: Vec<WorkerPingTask>,
+    }
+
+    #[derive(Clone, Debug, Deserialize, Serialize)]
+    pub struct WorkerPingOutputRule {
+        pub ignore: bool,
+        pub require_match: bool,
+        pub rule: String,
+        pub size_change_ok: bool,
     }
 
     #[derive(Clone, Debug, Deserialize, Serialize)]

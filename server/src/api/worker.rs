@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2022 Oxide Computer Company
  */
 
 use super::prelude::*;
@@ -62,10 +62,18 @@ pub(crate) struct WorkerPingInput {
 }
 
 #[derive(Serialize, JsonSchema)]
+pub(crate) struct WorkerPingOutputRule {
+    rule: String,
+    ignore: bool,
+    size_change_ok: bool,
+    require_match: bool,
+}
+
+#[derive(Serialize, JsonSchema)]
 pub(crate) struct WorkerPingJob {
     id: String,
     name: String,
-    output_rules: Vec<String>,
+    output_rules: Vec<WorkerPingOutputRule>,
     tasks: Vec<WorkerPingTask>,
     inputs: Vec<WorkerPingInput>,
 }
@@ -106,7 +114,18 @@ pub(crate) async fn worker_ping(
             Some(WorkerPingJob {
                 id: job.id.to_string(),
                 name: job.name,
-                output_rules: c.db.job_output_rules(job.id).or_500()?,
+                output_rules: c
+                    .db
+                    .job_output_rules(job.id)
+                    .or_500()?
+                    .iter()
+                    .map(|jor| WorkerPingOutputRule {
+                        rule: jor.rule.to_string(),
+                        ignore: jor.ignore,
+                        size_change_ok: jor.size_change_ok,
+                        require_match: jor.require_match,
+                    })
+                    .collect::<Vec<_>>(),
                 tasks: c
                     .db
                     .job_tasks(job.id)

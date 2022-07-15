@@ -285,11 +285,34 @@ pub(crate) fn format_job_state(j: &db::Job) -> String {
 pub(crate) fn format_job(
     j: &db::Job,
     t: &[db::Task],
-    output_rules: Vec<String>,
+    output_rules: Vec<db::JobOutputRule>,
     tags: HashMap<String, String>,
     target: &db::Target,
     times: HashMap<String, DateTime<Utc>>,
 ) -> Job {
+    /*
+     * Job output rules are presently specified as strings with some prefix
+     * sigils based on behavioural directives.  We need to reconstruct the
+     * string version of this based on the structured version in the database.
+     */
+    let output_rules = output_rules
+        .iter()
+        .map(|jor| {
+            let mut out = String::with_capacity(jor.rule.capacity() + 3);
+            if jor.ignore {
+                out.push('!');
+            }
+            if jor.size_change_ok {
+                out.push('%');
+            }
+            if jor.require_match {
+                out.push('=');
+            }
+            out += &jor.rule;
+            out
+        })
+        .collect::<Vec<_>>();
+
     Job {
         id: j.id.to_string(),
         name: j.name.to_string(),
@@ -444,6 +467,114 @@ pub(crate) struct JobSubmitResult {
     id: String,
 }
 
+fn parse_output_rule(input: &str) -> DSResult<db::CreateOutputRule> {
+    enum State {
+        Start,
+        SlashOrEquals,
+        SlashOrPercent,
+        Slash,
+        Rule,
+    }
+    let mut s = State::Start;
+
+    let mut rule = String::new();
+    let mut ignore = false;
+    let mut size_change_ok = false;
+    let mut require_match = false;
+
+    for c in input.chars() {
+        match s {
+            State::Start => match c {
+                '/' => {
+                    rule.push(c);
+                    s = State::Rule;
+                }
+                '!' => {
+                    ignore = true;
+                    s = State::Slash;
+                }
+                '=' => {
+                    require_match = true;
+                    s = State::SlashOrPercent;
+                }
+                '%' => {
+                    size_change_ok = true;
+                    s = State::SlashOrEquals;
+                }
+                other => {
+                    return Err(HttpError::for_client_error(
+                        None,
+                        StatusCode::BAD_REQUEST,
+                        format!("wanted sigil/absolute path, not {:?}", other),
+                    ));
+                }
+            },
+            State::SlashOrEquals => match c {
+                '/' => {
+                    rule.push(c);
+                    s = State::Rule;
+                }
+                '=' => {
+                    require_match = true;
+                    s = State::Slash;
+                }
+                other => {
+                    return Err(HttpError::for_client_error(
+                        None,
+                        StatusCode::BAD_REQUEST,
+                        format!("{:?} unexpected in output rule", other),
+                    ));
+                }
+            },
+            State::SlashOrPercent => match c {
+                '/' => {
+                    rule.push(c);
+                    s = State::Rule;
+                }
+                '%' => {
+                    size_change_ok = true;
+                    s = State::Slash;
+                }
+                other => {
+                    return Err(HttpError::for_client_error(
+                        None,
+                        StatusCode::BAD_REQUEST,
+                        format!("{:?} unexpected in output rule", other),
+                    ));
+                }
+            },
+            State::Slash => match c {
+                '/' => {
+                    rule.push(c);
+                    s = State::Rule;
+                }
+                other => {
+                    return Err(HttpError::for_client_error(
+                        None,
+                        StatusCode::BAD_REQUEST,
+                        format!("wanted '/', not {:?}, in output rule", other),
+                    ));
+                }
+            },
+            State::Rule => rule.push(c),
+        }
+    }
+
+    if !rule.starts_with("/") {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::BAD_REQUEST,
+            format!("output rule pattern must be absolute path"),
+        ));
+    }
+
+    if ignore {
+        assert!(!require_match && !size_change_ok);
+    }
+
+    Ok(db::CreateOutputRule { rule, ignore, require_match, size_change_ok })
+}
+
 #[endpoint {
     method = POST,
     path = "/0/jobs",
@@ -574,6 +705,12 @@ pub(crate) async fn job_submit(
         })
         .collect::<DSResult<Vec<_>>>()?;
 
+    let output_rules = new_job
+        .output_rules
+        .iter()
+        .map(|rule| parse_output_rule(rule.as_str()))
+        .collect::<DSResult<Vec<_>>>()?;
+
     let t =
         c.db.job_create(
             owner.id,
@@ -581,7 +718,7 @@ pub(crate) async fn job_submit(
             &new_job.target,
             target.id,
             tasks,
-            &new_job.output_rules,
+            output_rules,
             &new_job.inputs,
             new_job.tags,
             depends,
@@ -599,7 +736,7 @@ pub(crate) async fn job_upload_chunk(
     rqctx: Arc<RequestContext<Arc<Central>>>,
     path: TypedPath<JobsPath>,
     chunk: UntypedBody,
-) -> SResult<HttpResponseCreated<UploadedChunk>, HttpError> {
+) -> DSResult<HttpResponseCreated<UploadedChunk>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -783,7 +920,7 @@ pub(crate) struct WhoamiResult {
 }]
 pub(crate) async fn whoami(
     rqctx: Arc<RequestContext<Arc<Central>>>,
-) -> SResult<HttpResponseOk<WhoamiResult>, HttpError> {
+) -> DSResult<HttpResponseOk<WhoamiResult>> {
     let c = rqctx.context();
     let req = rqctx.request.lock().await;
     let log = &rqctx.log;
@@ -791,4 +928,111 @@ pub(crate) async fn whoami(
     let u = c.require_user(log, &req).await?;
 
     Ok(HttpResponseOk(WhoamiResult { id: u.id.to_string(), name: u.user.name }))
+}
+
+#[cfg(test)]
+mod test {
+    use super::super::prelude::*;
+    use super::parse_output_rule;
+
+    #[test]
+    fn test_parse_output_rule() -> Result<()> {
+        let cases = vec![
+            (
+                "/var/log/*.log",
+                db::CreateOutputRule {
+                    rule: "/var/log/*.log".into(),
+                    ignore: false,
+                    size_change_ok: false,
+                    require_match: false,
+                },
+            ),
+            (
+                "!/var/log/*.log",
+                db::CreateOutputRule {
+                    rule: "/var/log/*.log".into(),
+                    ignore: true,
+                    size_change_ok: false,
+                    require_match: false,
+                },
+            ),
+            (
+                "=/var/log/*.log",
+                db::CreateOutputRule {
+                    rule: "/var/log/*.log".into(),
+                    ignore: false,
+                    size_change_ok: false,
+                    require_match: true,
+                },
+            ),
+            (
+                "%/var/log/*.log",
+                db::CreateOutputRule {
+                    rule: "/var/log/*.log".into(),
+                    ignore: false,
+                    size_change_ok: true,
+                    require_match: false,
+                },
+            ),
+            (
+                "=%/var/log/*.log",
+                db::CreateOutputRule {
+                    rule: "/var/log/*.log".into(),
+                    ignore: false,
+                    size_change_ok: true,
+                    require_match: true,
+                },
+            ),
+            (
+                "%=/var/log/*.log",
+                db::CreateOutputRule {
+                    rule: "/var/log/*.log".into(),
+                    ignore: false,
+                    size_change_ok: true,
+                    require_match: true,
+                },
+            ),
+        ];
+
+        for (rule, want) in cases {
+            println!("case {:?} -> {:?}", rule, want);
+            let got = parse_output_rule(rule)?;
+            assert_eq!(got, want);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_output_rule_failures() -> Result<()> {
+        let cases = vec![
+            "",
+            "target/some/file",
+            "!var/log/*.log",
+            "%var/log/*.log",
+            "=var/log/*.log",
+            "!!/var/log/*.log",
+            "!=/var/log/*.log",
+            "!%/var/log/*.log",
+            "%!/var/log/*.log",
+            "=!/var/log/*.log",
+            "==/var/log/*.log",
+            "%%/var/log/*.log",
+            "=%=/var/log/*.log",
+            "%=%/var/log/*.log",
+            "=%!/var/log/*.log",
+            "%=!/var/log/*.log",
+        ];
+
+        for should_fail in cases {
+            println!();
+            println!("should fail {:?}", should_fail);
+            match parse_output_rule(should_fail) {
+                Err(e) => println!("  yes, fail! {:?}", e.external_message),
+                Ok(res) => panic!("  wanted failure, got {:?}", res),
+            }
+        }
+
+        Ok(())
+    }
 }

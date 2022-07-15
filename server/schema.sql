@@ -241,3 +241,15 @@ CREATE TABLE job_time (
 
     PRIMARY KEY (job, name)
 );
+
+-- v 36
+ALTER TABLE job_output_rule ADD COLUMN
+    ignore          INTEGER NOT NULL    DEFAULT 0;
+
+-- v 37
+ALTER TABLE job_output_rule ADD COLUMN
+    size_change_ok  INTEGER NOT NULL    DEFAULT 0;
+
+-- v 38
+ALTER TABLE job_output_rule ADD COLUMN
+    require_match   INTEGER NOT NULL    DEFAULT 0;

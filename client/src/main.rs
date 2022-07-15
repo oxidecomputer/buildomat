@@ -467,7 +467,12 @@ async fn do_job_copy(mut l: Level<Stuff>) -> Result<()> {
     let c = l.context().user();
     for o in c.job_outputs_get(job).await?.into_inner() {
         if o.path == src {
-            println!("downloading {} -> {} ({}KB)", o.path, dst, o.size / 1024);
+            eprintln!(
+                "downloading {} -> {} ({}KB)",
+                o.path,
+                dst,
+                o.size / 1024,
+            );
             let mut res = c.job_output_download(job, &o.id).await?.into_inner();
 
             let mut f = std::fs::OpenOptions::new()

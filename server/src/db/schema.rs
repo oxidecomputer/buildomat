@@ -64,6 +64,9 @@ table! {
         job -> Text,
         seq -> Integer,
         rule -> Text,
+        ignore -> Bool,
+        size_change_ok -> Bool,
+        require_match -> Bool,
     }
 }
 
