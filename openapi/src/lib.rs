@@ -1,9 +1,11 @@
 mod progenitor_client;
 
+#[allow(unused_imports)]
+use progenitor_client::{encode_path, RequestBuilderExt};
 pub use progenitor_client::{ByteStream, Error, ResponseValue};
 pub mod types {
     use serde::{Deserialize, Serialize};
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct DependSubmit {
         pub copy_outputs: bool,
         pub on_completed: bool,
@@ -12,7 +14,7 @@ pub mod types {
     }
 
     #[doc = "Error information from a response."]
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct Error {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub error_code: Option<String>,
@@ -20,41 +22,41 @@ pub mod types {
         pub request_id: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct FactoryCreate {
         pub name: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct FactoryCreateResult {
         pub id: String,
         pub name: String,
         pub token: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct FactoryLease {
         pub job: String,
         pub target: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct FactoryLeaseResult {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub lease: Option<FactoryLease>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct FactoryPingResult {
         pub ok: bool,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct FactoryWhatsNext {
         pub supported_targets: Vec<String>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct FactoryWorker {
         pub bootstrap: String,
         pub id: String,
@@ -64,24 +66,24 @@ pub mod types {
         pub recycle: bool,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct FactoryWorkerAppend {
         pub payload: String,
         pub stream: String,
         pub time: chrono::DateTime<chrono::offset::Utc>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct FactoryWorkerAppendResult {
         pub retry: bool,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct FactoryWorkerAssociate {
         pub private: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct FactoryWorkerCreate {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub job: Option<String>,
@@ -90,13 +92,13 @@ pub mod types {
         pub wait_for_flush: bool,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct FactoryWorkerResult {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub worker: Option<FactoryWorker>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct Job {
         pub cancelled: bool,
         pub id: String,
@@ -118,14 +120,14 @@ pub mod types {
         >,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct JobAddInput {
         pub chunks: Vec<String>,
         pub name: String,
         pub size: i64,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct JobEvent {
         pub payload: String,
         pub seq: u32,
@@ -137,21 +139,21 @@ pub mod types {
         pub time_remote: Option<chrono::DateTime<chrono::offset::Utc>>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct JobOutput {
         pub id: String,
         pub path: String,
         pub size: u64,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct JobOutputPublish {
         pub name: String,
         pub series: String,
         pub version: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct JobSubmit {
         #[serde(
             default,
@@ -171,12 +173,12 @@ pub mod types {
         pub tasks: Vec<TaskSubmit>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct JobSubmitResult {
         pub id: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct Target {
         pub desc: String,
         pub id: String,
@@ -187,30 +189,30 @@ pub mod types {
         pub redirect: Option<String>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct TargetCreate {
         pub desc: String,
         pub name: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct TargetCreateResult {
         pub id: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct TargetRedirect {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub redirect: Option<String>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct TargetRename {
         pub new_name: String,
         pub signpost_description: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct Task {
         pub env: std::collections::HashMap<String, String>,
         pub env_clear: bool,
@@ -225,7 +227,7 @@ pub mod types {
         pub workdir: Option<String>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct TaskSubmit {
         pub env: std::collections::HashMap<String, String>,
         pub env_clear: bool,
@@ -239,12 +241,12 @@ pub mod types {
         pub workdir: Option<String>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct UploadedChunk {
         pub id: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct User {
         pub id: String,
         pub name: String,
@@ -252,25 +254,25 @@ pub mod types {
         pub time_create: chrono::DateTime<chrono::offset::Utc>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct UserCreate {
         pub name: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct UserCreateResult {
         pub id: String,
         pub name: String,
         pub token: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct WhoamiResult {
         pub id: String,
         pub name: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct Worker {
         pub bootstrap: bool,
         pub deleted: bool,
@@ -285,42 +287,42 @@ pub mod types {
         pub target: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct WorkerAddOutput {
         pub chunks: Vec<String>,
         pub path: String,
         pub size: i64,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct WorkerAppendJob {
         pub payload: String,
         pub stream: String,
         pub time: chrono::DateTime<chrono::offset::Utc>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct WorkerBootstrap {
         pub bootstrap: String,
         pub token: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct WorkerBootstrapResult {
         pub id: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct WorkerCompleteJob {
         pub failed: bool,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct WorkerCompleteTask {
         pub failed: bool,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct WorkerJob {
         pub id: String,
         pub name: String,
@@ -329,13 +331,13 @@ pub mod types {
         pub tags: std::collections::HashMap<String, String>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct WorkerPingInput {
         pub id: String,
         pub name: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct WorkerPingJob {
         pub id: String,
         pub inputs: Vec<WorkerPingInput>,
@@ -344,14 +346,14 @@ pub mod types {
         pub tasks: Vec<WorkerPingTask>,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct WorkerPingResult {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub job: Option<WorkerPingJob>,
         pub poweroff: bool,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct WorkerPingTask {
         pub env: std::collections::HashMap<String, String>,
         pub env_clear: bool,
@@ -363,7 +365,7 @@ pub mod types {
         pub workdir: String,
     }
 
-    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct WorkersResult {
         pub workers: Vec<Worker>,
     }
@@ -371,8 +373,8 @@ pub mod types {
 
 #[derive(Clone)]
 pub struct Client {
-    baseurl: String,
-    client: reqwest::Client,
+    pub(crate) baseurl: String,
+    pub(crate) client: reqwest::Client,
 }
 
 impl Client {
@@ -397,7 +399,9 @@ impl Client {
     pub fn client(&self) -> &reqwest::Client {
         &self.client
     }
+}
 
+impl Client {
     #[doc = "Sends a `POST` request to `/0/admin/factory`"]
     pub async fn factory_create<'a>(
         &'a self,
@@ -405,7 +409,7 @@ impl Client {
     ) -> Result<ResponseValue<types::FactoryCreateResult>, Error<types::Error>>
     {
         let url = format!("{}/0/admin/factory", self.baseurl,);
-        let request = self.client.post(url).json(body).build()?;
+        let request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -459,7 +463,7 @@ impl Client {
         let url = format!(
             "{}/0/admin/jobs/{}",
             self.baseurl,
-            progenitor_client::encode_path(&job.to_string()),
+            encode_path(&job.to_string()),
         );
         let request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
@@ -483,7 +487,7 @@ impl Client {
     ) -> Result<ResponseValue<types::TargetCreateResult>, Error<types::Error>>
     {
         let url = format!("{}/0/admin/target", self.baseurl,);
-        let request = self.client.post(url).json(body).build()?;
+        let request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -527,9 +531,9 @@ impl Client {
         let url = format!(
             "{}/0/admin/targets/{}/redirect",
             self.baseurl,
-            progenitor_client::encode_path(&target.to_string()),
+            encode_path(&target.to_string()),
         );
-        let request = self.client.put(url).json(body).build()?;
+        let request = self.client.put(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -554,9 +558,9 @@ impl Client {
         let url = format!(
             "{}/0/admin/targets/{}/rename",
             self.baseurl,
-            progenitor_client::encode_path(&target.to_string()),
+            encode_path(&target.to_string()),
         );
-        let request = self.client.post(url).json(body).build()?;
+        let request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -579,7 +583,7 @@ impl Client {
         let url = format!(
             "{}/0/admin/targets/{}/require",
             self.baseurl,
-            progenitor_client::encode_path(&target.to_string()),
+            encode_path(&target.to_string()),
         );
         let request = self.client.delete(url).build()?;
         let result = self.client.execute(request).await;
@@ -605,8 +609,8 @@ impl Client {
         let url = format!(
             "{}/0/admin/targets/{}/require/{}",
             self.baseurl,
-            progenitor_client::encode_path(&target.to_string()),
-            progenitor_client::encode_path(&privilege.to_string()),
+            encode_path(&target.to_string()),
+            encode_path(&privilege.to_string()),
         );
         let request = self.client.put(url).build()?;
         let result = self.client.execute(request).await;
@@ -670,7 +674,7 @@ impl Client {
     ) -> Result<ResponseValue<types::FactoryLeaseResult>, Error<types::Error>>
     {
         let url = format!("{}/0/factory/lease", self.baseurl,);
-        let request = self.client.post(url).json(body).build()?;
+        let request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -693,7 +697,7 @@ impl Client {
         let url = format!(
             "{}/0/factory/lease/{}",
             self.baseurl,
-            progenitor_client::encode_path(&job.to_string()),
+            encode_path(&job.to_string()),
         );
         let request = self.client.post(url).build()?;
         let result = self.client.execute(request).await;
@@ -737,7 +741,7 @@ impl Client {
         body: &'a types::FactoryWorkerCreate,
     ) -> Result<ResponseValue<types::FactoryWorker>, Error<types::Error>> {
         let url = format!("{}/0/factory/worker", self.baseurl,);
-        let request = self.client.post(url).json(body).build()?;
+        let request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -761,7 +765,7 @@ impl Client {
         let url = format!(
             "{}/0/factory/worker/{}",
             self.baseurl,
-            progenitor_client::encode_path(&worker.to_string()),
+            encode_path(&worker.to_string()),
         );
         let request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
@@ -786,7 +790,7 @@ impl Client {
         let url = format!(
             "{}/0/factory/worker/{}",
             self.baseurl,
-            progenitor_client::encode_path(&worker.to_string()),
+            encode_path(&worker.to_string()),
         );
         let request = self.client.delete(url).build()?;
         let result = self.client.execute(request).await;
@@ -812,9 +816,9 @@ impl Client {
         let url = format!(
             "{}/0/factory/worker/{}",
             self.baseurl,
-            progenitor_client::encode_path(&worker.to_string()),
+            encode_path(&worker.to_string()),
         );
-        let request = self.client.patch(url).json(body).build()?;
+        let request = self.client.patch(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -841,9 +845,9 @@ impl Client {
         let url = format!(
             "{}/0/factory/worker/{}/append",
             self.baseurl,
-            progenitor_client::encode_path(&worker.to_string()),
+            encode_path(&worker.to_string()),
         );
-        let request = self.client.post(url).json(body).build()?;
+        let request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -866,7 +870,7 @@ impl Client {
         let url = format!(
             "{}/0/factory/worker/{}/flush",
             self.baseurl,
-            progenitor_client::encode_path(&worker.to_string()),
+            encode_path(&worker.to_string()),
         );
         let request = self.client.post(url).build()?;
         let result = self.client.execute(request).await;
@@ -912,7 +916,7 @@ impl Client {
         let url = format!(
             "{}/0/job/{}",
             self.baseurl,
-            progenitor_client::encode_path(&job.to_string()),
+            encode_path(&job.to_string()),
         );
         let request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
@@ -956,7 +960,7 @@ impl Client {
     ) -> Result<ResponseValue<types::JobSubmitResult>, Error<types::Error>>
     {
         let url = format!("{}/0/jobs", self.baseurl,);
-        let request = self.client.post(url).json(body).build()?;
+        let request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -979,7 +983,7 @@ impl Client {
         let url = format!(
             "{}/0/jobs/{}/cancel",
             self.baseurl,
-            progenitor_client::encode_path(&job.to_string()),
+            encode_path(&job.to_string()),
         );
         let request = self.client.post(url).build()?;
         let result = self.client.execute(request).await;
@@ -1005,9 +1009,19 @@ impl Client {
         let url = format!(
             "{}/0/jobs/{}/chunk",
             self.baseurl,
-            progenitor_client::encode_path(&job.to_string()),
+            encode_path(&job.to_string()),
         );
-        let request = self.client.post(url).body(body).build()?;
+        let request = self
+            .client
+            .post(url)
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                reqwest::header::HeaderValue::from_static(
+                    "application/octet-stream",
+                ),
+            )
+            .body(body)
+            .build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1031,7 +1045,7 @@ impl Client {
         let url = format!(
             "{}/0/jobs/{}/events",
             self.baseurl,
-            progenitor_client::encode_path(&job.to_string()),
+            encode_path(&job.to_string()),
         );
         let mut query = Vec::new();
         if let Some(v) = &minseq {
@@ -1062,9 +1076,9 @@ impl Client {
         let url = format!(
             "{}/0/jobs/{}/input",
             self.baseurl,
-            progenitor_client::encode_path(&job.to_string()),
+            encode_path(&job.to_string()),
         );
-        let request = self.client.post(url).json(body).build()?;
+        let request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1087,7 +1101,7 @@ impl Client {
         let url = format!(
             "{}/0/jobs/{}/outputs",
             self.baseurl,
-            progenitor_client::encode_path(&job.to_string()),
+            encode_path(&job.to_string()),
         );
         let request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
@@ -1113,8 +1127,8 @@ impl Client {
         let url = format!(
             "{}/0/jobs/{}/outputs/{}",
             self.baseurl,
-            progenitor_client::encode_path(&job.to_string()),
-            progenitor_client::encode_path(&output.to_string()),
+            encode_path(&job.to_string()),
+            encode_path(&output.to_string()),
         );
         let request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
@@ -1135,10 +1149,10 @@ impl Client {
         let url = format!(
             "{}/0/jobs/{}/outputs/{}/publish",
             self.baseurl,
-            progenitor_client::encode_path(&job.to_string()),
-            progenitor_client::encode_path(&output.to_string()),
+            encode_path(&job.to_string()),
+            encode_path(&output.to_string()),
         );
-        let request = self.client.post(url).json(body).build()?;
+        let request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1164,10 +1178,10 @@ impl Client {
         let url = format!(
             "{}/0/public/file/{}/{}/{}/{}",
             self.baseurl,
-            progenitor_client::encode_path(&username.to_string()),
-            progenitor_client::encode_path(&series.to_string()),
-            progenitor_client::encode_path(&version.to_string()),
-            progenitor_client::encode_path(&name.to_string()),
+            encode_path(&username.to_string()),
+            encode_path(&series.to_string()),
+            encode_path(&version.to_string()),
+            encode_path(&name.to_string()),
         );
         let request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
@@ -1205,7 +1219,7 @@ impl Client {
     ) -> Result<ResponseValue<types::UserCreateResult>, Error<types::Error>>
     {
         let url = format!("{}/0/users", self.baseurl,);
-        let request = self.client.post(url).json(body).build()?;
+        let request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1228,7 +1242,7 @@ impl Client {
         let url = format!(
             "{}/0/users/{}",
             self.baseurl,
-            progenitor_client::encode_path(&user.to_string()),
+            encode_path(&user.to_string()),
         );
         let request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
@@ -1254,8 +1268,8 @@ impl Client {
         let url = format!(
             "{}/0/users/{}/privilege/{}",
             self.baseurl,
-            progenitor_client::encode_path(&user.to_string()),
-            progenitor_client::encode_path(&privilege.to_string()),
+            encode_path(&user.to_string()),
+            encode_path(&privilege.to_string()),
         );
         let request = self.client.put(url).build()?;
         let result = self.client.execute(request).await;
@@ -1281,8 +1295,8 @@ impl Client {
         let url = format!(
             "{}/0/users/{}/privilege/{}",
             self.baseurl,
-            progenitor_client::encode_path(&user.to_string()),
-            progenitor_client::encode_path(&privilege.to_string()),
+            encode_path(&user.to_string()),
+            encode_path(&privilege.to_string()),
         );
         let request = self.client.delete(url).build()?;
         let result = self.client.execute(request).await;
@@ -1326,7 +1340,7 @@ impl Client {
     ) -> Result<ResponseValue<types::WorkerBootstrapResult>, Error<types::Error>>
     {
         let url = format!("{}/0/worker/bootstrap", self.baseurl,);
-        let request = self.client.post(url).json(body).build()?;
+        let request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1350,9 +1364,9 @@ impl Client {
         let url = format!(
             "{}/0/worker/job/{}/append",
             self.baseurl,
-            progenitor_client::encode_path(&job.to_string()),
+            encode_path(&job.to_string()),
         );
-        let request = self.client.post(url).json(body).build()?;
+        let request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1376,9 +1390,19 @@ impl Client {
         let url = format!(
             "{}/0/worker/job/{}/chunk",
             self.baseurl,
-            progenitor_client::encode_path(&job.to_string()),
+            encode_path(&job.to_string()),
         );
-        let request = self.client.post(url).body(body).build()?;
+        let request = self
+            .client
+            .post(url)
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                reqwest::header::HeaderValue::from_static(
+                    "application/octet-stream",
+                ),
+            )
+            .body(body)
+            .build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1402,9 +1426,9 @@ impl Client {
         let url = format!(
             "{}/0/worker/job/{}/complete",
             self.baseurl,
-            progenitor_client::encode_path(&job.to_string()),
+            encode_path(&job.to_string()),
         );
-        let request = self.client.post(url).json(body).build()?;
+        let request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1428,8 +1452,8 @@ impl Client {
         let url = format!(
             "{}/0/worker/job/{}/inputs/{}",
             self.baseurl,
-            progenitor_client::encode_path(&job.to_string()),
-            progenitor_client::encode_path(&input.to_string()),
+            encode_path(&job.to_string()),
+            encode_path(&input.to_string()),
         );
         let request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
@@ -1449,9 +1473,9 @@ impl Client {
         let url = format!(
             "{}/0/worker/job/{}/output",
             self.baseurl,
-            progenitor_client::encode_path(&job.to_string()),
+            encode_path(&job.to_string()),
         );
-        let request = self.client.post(url).json(body).build()?;
+        let request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1476,10 +1500,10 @@ impl Client {
         let url = format!(
             "{}/0/worker/job/{}/task/{}/append",
             self.baseurl,
-            progenitor_client::encode_path(&job.to_string()),
-            progenitor_client::encode_path(&task.to_string()),
+            encode_path(&job.to_string()),
+            encode_path(&task.to_string()),
         );
-        let request = self.client.post(url).json(body).build()?;
+        let request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1504,10 +1528,10 @@ impl Client {
         let url = format!(
             "{}/0/worker/job/{}/task/{}/complete",
             self.baseurl,
-            progenitor_client::encode_path(&job.to_string()),
-            progenitor_client::encode_path(&task.to_string()),
+            encode_path(&job.to_string()),
+            encode_path(&task.to_string()),
         );
-        let request = self.client.post(url).json(body).build()?;
+        let request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {

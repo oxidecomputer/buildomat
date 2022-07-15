@@ -1108,7 +1108,7 @@ pub(crate) async fn artefact(
                 .status(hyper::StatusCode::OK)
                 .header(hyper::header::CONTENT_TYPE, ct)
                 .header(hyper::header::CONTENT_LENGTH, cl)
-                .body(hyper::Body::wrap_stream(backend.into_inner()))?,
+                .body(hyper::Body::wrap_stream(backend.into_inner_stream()))?,
         ));
     }
 

@@ -68,7 +68,7 @@ impl<T> ToHttpError<T> for SResult<T, rusty_ulid::DecodingError> {
 impl<T, E> ToHttpError<T> for SResult<T, buildomat_openapi::Error<E>> {
     fn to_500(self) -> SResult<T, HttpError> {
         self.map_err(|e| {
-            let msg = format!("internal error: {}", e);
+            let msg = format!("internal error: {}", e.into_untyped());
             HttpError::for_internal_error(msg)
         })
     }
@@ -636,7 +636,7 @@ async fn published_file(
         .status(hyper::StatusCode::OK)
         .header(hyper::header::CONTENT_TYPE, ct)
         .header(hyper::header::CONTENT_LENGTH, cl)
-        .body(hyper::Body::wrap_stream(backend.into_inner()))?)
+        .body(hyper::Body::wrap_stream(backend.into_inner_stream()))?)
 }
 
 pub(crate) async fn server(

@@ -1,5 +1,7 @@
 // Copyright 2022 Oxide Computer Company
 
+#![allow(dead_code)]
+
 //! Support code for generated clients.
 
 use std::{
@@ -9,11 +11,36 @@ use std::{
 
 use bytes::Bytes;
 use futures_core::Stream;
-use serde::de::DeserializeOwned;
+use reqwest::RequestBuilder;
+use serde::{de::DeserializeOwned, Serialize};
 
 /// Represents an untyped byte stream for both success and error responses.
-pub type ByteStream =
-    Pin<Box<dyn Stream<Item = reqwest::Result<Bytes>> + Send + Sync>>;
+pub struct ByteStream(
+    Pin<Box<dyn Stream<Item = reqwest::Result<Bytes>> + Send + Sync>>,
+);
+
+impl ByteStream {
+    pub fn into_inner(
+        self,
+    ) -> Pin<Box<dyn Stream<Item = reqwest::Result<Bytes>> + Send + Sync>> {
+        self.0
+    }
+}
+
+impl Deref for ByteStream {
+    type Target =
+        Pin<Box<dyn Stream<Item = reqwest::Result<Bytes>> + Send + Sync>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for ByteStream {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 /// Success value returned by generated client methods.
 pub struct ResponseValue<T> {
@@ -42,7 +69,11 @@ impl ResponseValue<ByteStream> {
     pub fn stream(response: reqwest::Response) -> Self {
         let status = response.status();
         let headers = response.headers().clone();
-        Self { inner: Box::pin(response.bytes_stream()), status, headers }
+        Self {
+            inner: ByteStream(Box::pin(response.bytes_stream())),
+            status,
+            headers,
+        }
     }
 }
 
@@ -58,6 +89,15 @@ impl ResponseValue<()> {
 }
 
 impl<T> ResponseValue<T> {
+    /// Create an instance for testing
+    pub fn new(
+        inner: T,
+        status: reqwest::StatusCode,
+        headers: reqwest::header::HeaderMap,
+    ) -> Self {
+        Self { inner, status, headers }
+    }
+
     /// Consumes the ResponseValue, returning the wrapped value.
     pub fn into_inner(self) -> T {
         self.inner
@@ -95,6 +135,15 @@ impl<T> ResponseValue<T> {
     }
 }
 
+impl ResponseValue<ByteStream> {
+    /// Take ownership of the stream of bytes underpinning this response
+    pub fn into_inner_stream(
+        self,
+    ) -> Pin<Box<dyn Stream<Item = reqwest::Result<Bytes>> + Send + Sync>> {
+        self.into_inner().into_inner()
+    }
+}
+
 impl<T> Deref for ResponseValue<T> {
     type Target = T;
 
@@ -124,7 +173,7 @@ pub enum Error<E = ()> {
     /// The request did not conform to API requirements.
     InvalidRequest(String),
 
-    /// A server error either with the data, or with the connection.
+    /// A server error either due to the data, or with the connection.
     CommunicationError(reqwest::Error),
 
     /// A documented, expected error response.
@@ -180,7 +229,10 @@ impl<E> From<reqwest::Error> for Error<E> {
     }
 }
 
-impl<E> std::fmt::Display for Error<E> {
+impl<E> std::fmt::Display for Error<E>
+where
+    ResponseValue<E>: ErrorFormat,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::InvalidRequest(s) => {
@@ -189,8 +241,9 @@ impl<E> std::fmt::Display for Error<E> {
             Error::CommunicationError(e) => {
                 write!(f, "Communication Error: {}", e)
             }
-            Error::ErrorResponse(_) => {
-                write!(f, "Error Response")
+            Error::ErrorResponse(rve) => {
+                write!(f, "Error Response: ")?;
+                rve.fmt_info(f)
             }
             Error::InvalidResponsePayload(e) => {
                 write!(f, "Invalid Response Payload: {}", e)
@@ -201,12 +254,46 @@ impl<E> std::fmt::Display for Error<E> {
         }
     }
 }
-impl<E> std::fmt::Debug for Error<E> {
+
+trait ErrorFormat {
+    fn fmt_info(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
+}
+
+impl<E> ErrorFormat for ResponseValue<E>
+where
+    E: std::fmt::Debug,
+{
+    fn fmt_info(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "status: {}; headers: {:?}; value: {:?}",
+            self.status, self.headers, self.inner,
+        )
+    }
+}
+
+impl ErrorFormat for ResponseValue<ByteStream> {
+    fn fmt_info(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "status: {}; headers: {:?}; value: <stream>",
+            self.status, self.headers,
+        )
+    }
+}
+
+impl<E> std::fmt::Debug for Error<E>
+where
+    ResponseValue<E>: ErrorFormat,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Display::fmt(self, f)
     }
 }
-impl<E> std::error::Error for Error<E> {
+impl<E> std::error::Error for Error<E>
+where
+    ResponseValue<E>: ErrorFormat,
+{
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::CommunicationError(e) => Some(e),
@@ -230,4 +317,30 @@ const PATH_SET: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
 #[doc(hidden)]
 pub fn encode_path(pc: &str) -> String {
     percent_encoding::utf8_percent_encode(pc, PATH_SET).to_string()
+}
+
+#[doc(hidden)]
+pub trait RequestBuilderExt<E> {
+    fn form_urlencoded<T: Serialize + ?Sized>(
+        self,
+        body: &T,
+    ) -> Result<RequestBuilder, Error<E>>;
+}
+
+impl<E> RequestBuilderExt<E> for RequestBuilder {
+    fn form_urlencoded<T: Serialize + ?Sized>(
+        self,
+        body: &T,
+    ) -> Result<Self, Error<E>> {
+        Ok(self
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                reqwest::header::HeaderValue::from_static(
+                    "application/x-www-form-urlencoded",
+                ),
+            )
+            .body(serde_json::to_vec(&body).map_err(|_| {
+                Error::InvalidRequest("failed to serialize body".to_string())
+            })?))
+    }
 }
