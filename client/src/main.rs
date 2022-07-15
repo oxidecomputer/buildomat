@@ -415,11 +415,38 @@ async fn do_job_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("name", 32, true);
     l.add_column("state", 15, true);
 
+    l.optmulti("T", "", "job tag filter", "TAG=VALUE");
+    l.optopt("F", "", "job state filter", "STATE");
+
     let a = no_args!(l);
+    let ftags = a
+        .opts()
+        .opt_strs("T")
+        .iter()
+        .map(|a| {
+            a.split_once('=')
+                .ok_or_else(|| anyhow!("invalid tag filter"))
+                .and_then(|(k, v)| Ok((k.to_string(), v.to_string())))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let fstate = a.opts().opt_str("F");
 
     let mut t = a.table();
 
     for job in l.context().user().jobs_get().await?.into_inner() {
+        if ftags.iter().any(|(k, v)| {
+            let jv = job.tags.get(k);
+            jv != Some(v)
+        }) {
+            continue;
+        }
+
+        if let Some(s) = &fstate {
+            if s != &job.state {
+                continue;
+            }
+        }
+
         let mut r = Row::default();
         r.add_str("id", &job.id);
         r.add_str("name", &job.name);
