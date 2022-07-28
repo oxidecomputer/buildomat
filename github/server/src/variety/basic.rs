@@ -631,7 +631,7 @@ pub(crate) async fn run(
         buildenv.insert(
             "PATH".into(),
             "/home/build/.cargo/bin:\
-            /usr/bin:/usr/sbin:/sbin:/opt/ooce/bin:/opt/ooce/sbin"
+            /usr/bin:/bin:/usr/sbin:/sbin:/opt/ooce/bin:/opt/ooce/sbin"
                 .into(),
         );
         buildenv.insert(

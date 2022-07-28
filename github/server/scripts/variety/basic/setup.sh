@@ -30,6 +30,15 @@ Linux)
 	EOF
 	chmod 0755 /bin/pfexec
 
+	#
+	# Ubuntu 18.04 had a genuine pre-war separate /bin directory!
+	#
+	if [[ ! -L /bin ]]; then
+		for prog in pfexec; do
+			ln -s "../../bin/$prog" "/usr/bin/$prog"
+		done
+	fi
+
 	mkdir -p /work
 	;;
 *)

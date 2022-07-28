@@ -663,8 +663,8 @@ async fn main() -> Result<()> {
                         cmd.env("TZ", "UTC");
                         cmd.env(
                             "PATH",
-                            "/usr/sbin:/usr/bin:/sbin:/opt/ooce/bin:\
-                            /opt/ooce/sbin",
+                            "/usr/bin:/bin:/usr/sbin:/sbin:\
+                            /opt/ooce/bin:/opt/ooce/sbin",
                         );
                         cmd.env("LANG", "en_US.UTF-8");
                         cmd.env("LC_ALL", "en_US.UTF-8");
