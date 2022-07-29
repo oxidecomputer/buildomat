@@ -38,10 +38,35 @@ Linux)
 	chmod 0755 /bin/pfexec
 
 	#
+	# Simulate ptime to some extent:
+	#
+	cat >/bin/ptime <<-'EOF'
+	#!/bin/bash
+	verbose=no
+	while getopts m c; do
+		case "$c" in
+		m)
+			verbose=yes
+			;;
+		?)
+			printf 'Usage: %s [-m] command args...\n' "$0" >&2
+			exit 1
+		esac
+	done
+	shift "$(( OPTIND - 1 ))"
+	args=()
+	if [[ $verbose == yes ]]; then
+		args+=( '-v' )
+	fi
+	exec /usr/bin/time "${args[@]}" "$@"
+	EOF
+	chmod 0755 /bin/ptime
+
+	#
 	# Ubuntu 18.04 had a genuine pre-war separate /bin directory!
 	#
 	if [[ ! -L /bin ]]; then
-		for prog in pfexec; do
+		for prog in ptime pfexec; do
 			ln -s "../../bin/$prog" "/usr/bin/$prog"
 		done
 	fi
