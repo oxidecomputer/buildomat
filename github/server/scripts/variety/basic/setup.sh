@@ -15,6 +15,13 @@ SunOS)
 	zfs create -o mountpoint=/work rpool/work
 	;;
 Linux)
+	#
+	# The stock Ubuntu images we're using in AWS are often missing
+	# some basic conveniences:
+	#
+	apt-get -y update
+	apt-get -y install sysvbanner build-essential
+
 	groupadd -g 12345 build
 	useradd -u 12345 -g build -d /home/build -s /bin/bash \
 	    -c 'build' build
