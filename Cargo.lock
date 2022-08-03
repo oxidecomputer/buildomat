@@ -233,7 +233,6 @@ dependencies = [
  "percent-encoding",
  "reqwest",
  "serde",
- "serde_json",
  "serde_urlencoded",
 ]
 
