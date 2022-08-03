@@ -2120,26 +2120,6 @@ async fn main() -> Result<()> {
             )?;
             app0.db.store_install(i.id, i.account.simple_user.id)?;
         }
-
-        let c = app0.install_client(i.id);
-
-        let mut pn = 0;
-        loop {
-            let pg =
-                c.apps().list_repos_accessible_to_installation(100, pn).await?;
-
-            if pg.repositories.is_empty() {
-                break;
-            }
-            pn += 1;
-
-            for r in pg.repositories.iter() {
-                if let Some(owner) = &r.owner {
-                    println!("    repo: {} {}/{}", r.id, owner.login, r.name);
-                    app0.db.store_repository(r.id, &owner.login, &r.name)?;
-                }
-            }
-        }
     }
 
     /*
