@@ -680,12 +680,15 @@ pub(crate) async fn run(
         buildenv.insert("GITHUB_TOKEN".into(), token.clone());
 
         /*
-         * Write the temporary access token which gives brief read-only
-         * access to only this (potentially private) repository into the
-         * ~/.netrc file.  When git tries to access GitHub via HTTPS it
-         * does so using curl, which knows to look in this file for
-         * credentials.  This way, the token need not appear in the
-         * build environment or any commands that are run.
+         * Write the temporary access token which gives brief read-only access
+         * to only this (potentially private) repository into the ~/.netrc file.
+         * When git tries to access GitHub via HTTPS it does so using curl,
+         * which knows to look in this file for credentials.  This way, the
+         * token need not appear in the build environment or any commands that
+         * are run.
+         *
+         * We also provide an entry for "api.github.com" in case the job needs
+         * to use curl to access the GitHub API.
          */
         tasks.push(buildomat_openapi::types::TaskSubmit {
             name: "authentication".into(),
@@ -702,6 +705,11 @@ pub(crate) async fn run(
                 machine github.com\n\
                 login x-access-token\n\
                 password $GITHUB_TOKEN\n\
+                \n\
+                machine api.github.com\n\
+                login x-access-token\n\
+                password $GITHUB_TOKEN\n\
+                \n\
                 EOF\n\
                 "
             .into(),
