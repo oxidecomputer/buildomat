@@ -189,6 +189,381 @@ is merged, it will then be in the default branch and active for subsequent pull
 requests; maintainers must carefully review pull requests that change this
 file.
 
+## Specifying Jobs
+
+Once you have configured buildomat at the repository level, you can specify
+some number of jobs to execute automatically in response to pushes and pull
+requests.  While per-repository configuration is read from the default branch,
+jobs are read from the commit under test.
+
+Jobs are specified as `bash` programs with some configuration directives
+embedded in comments.  These job files must be named
+`.github/buildomat/jobs/*.sh`.  Unexpected additional files in
+`.github/buildomat/jobs` will result in an error.
+
+Job files should begin with an interpreter line, followed by TOML-formatted
+configuration prefixed with `#:` so that they will be identified as
+configuration by buildomat, but ignored by the shell.  For example, a minimal
+job that would just execute `uname -a`:
+
+```bash
+#!/bin/bash
+#:
+#: name = "build"
+#: variety = "basic"
+#:
+uname -a
+```
+
+The minimum set of properties that must always appear in the TOML frontmatter
+is:
+
+- `name` **(string)**
+
+  Must be present in all jobs.  This name is used for at least two things: as
+  the name of the Check Run in the GitHub user interface, and when specifying
+  that some other job depends on this job.  The job name must be unique amongst
+  all jobs within the commit under test.
+
+  In general, it is probably best to keep these short, lower-case, and without
+  spaces.  It is conventional to use the same name for the job file and the
+  job, e.g., `name = "build"` in file `.github/buildomat/jobs/build.sh`.
+
+- `variety` **(string)**
+
+  To allow the system to evolve over time, a job must specify a _variety_,
+  which defines some things about the way a job executes and what additional
+  configuration options are required or available.
+
+The rest of the configuration is variety-specific.
+
+### Variety: Basic
+
+Each **basic** variety job (selected by specifying `variety = "basic"` in the
+frontmatter) takes a single `bash` program and runs it in an ephemeral
+environment.  The composition of that environment, such as compute and memory
+capacity or the availability of specific toolchains and other software, depends
+on the `target` option.
+
+Basic variety jobs can produce output files (see the configuration options
+`output_rules` and `publish`).  They can also depend on the successful
+completion of other jobs, gaining access to any output files from the upstream
+job (see the `dependencies` option).  Jobs are generally executed in parallel,
+unless they are waiting for a dependency or for capacity to become available.
+
+#### Execution Environment
+
+By default, an ephemeral system (generally a virtual machine) will be
+provisioned for each job.  The system will be discarded at the end of the job,
+so no detritus is left behind.  Once the environment is provisioned, the `bash`
+program in the job file is executed as-is.
+
+Jobs are executed as an unprivileged user, `build`, with home directory
+`/home/build`.  If required, this user is able to escalate to `root` privileges
+through the use of [pfexec(1)](https://illumos.org/man/1/pfexec).  Systems that
+do not have a native `pfexec` will be furnished with a compatible wrapper
+around a native escalation facility, to ease the construction of cross-platform
+jobs.
+
+By default, the working directory for the job is based on the name of the
+repository; e.g., for https://github.com/oxidecomputer/buildomat, the working
+directory would be `/work/oxidecomputer/buildomat`.  The system will arrange
+for the repository to be cloned at that location with the commit under test
+checked out.  A simple job could directly invoke some build tool like `gmake`
+or `cargo build`, and the build would occur at the root of the clone.  The
+`skip_clone` configuration option can disable this behaviour.
+
+Most targets provide toolchains from common metapackages like
+`build-essential`; e.g., `gmake` and `gcc`.  If a Rust toolchain is required,
+one can be requested through the `rust_toolchain` configuration option.  This
+will be installed using [rustup](https://rustup.rs/).
+
+##### Environment Variables
+
+While the complete set of environment variables is generally target-specific,
+the common minimum for all targets includes:
+
+- `BUILDOMAT_JOB_ID` will be set to the unique ID of this job
+- `CI` will be set to `true`
+- `GITHUB_REPOSITORY` set to `owner/repository`; e.g., `oxidecomputer/buildomat`
+- `GITHUB_SHA` set to the commit ID of the commit under test
+- If the commit under test is part of a branch, then `GITHUB_BRANCH` will be
+  set to the branch name (e.g., `main`) and `GITHUB_REF` will be set to the ref
+  name; e.g., `res/heads/main`.
+- `HOME`, set to the home directory of the build user
+- `USER` and `LOGNAME`, set to the username of the build user
+- `PATH` set to include relevant directories for toolchains and other
+  useful software
+- `TZ` will be set to `UTC`
+- `LANG` and `LC_ALL` will be set to `en_US.UTF-8`
+
+##### Available Commands
+
+Cross-platform shell programming can be challenging due to differences between
+different operating systems.  To make this a little easier, we ensure that each
+buildomat target can provide a basic suite of tools that are helpful in
+constructing succint jobs:
+
+- [pfexec(1)](https://illumos.org/man/1/pfexec) allows escalation from the
+  unprivileged build user to `root`; e.g., `pfexec id -a`.
+- [ptime(1)](https://illumos.org/man/1/ptime) runs a program and provides
+  (with `-m`, detailed) timing information; e.g., `ptime -m cargo test`.
+- [banner(1)](https://illumos.org/man/1/banner) prints its arguments in
+  large letters on standard output, and is useful for producing headings
+  in job log output; e.g., `banner testing`.
+
+#### Configuration
+
+Configuration properties supported for basic jobs include:
+
+- `access_repos` **(array of strings)**
+
+  Jobs can be created in both public and private repositories.  Public
+  repositories are available to everybody, but private repositories require
+  appropriate credentials.  By default, an ephemeral, read-only token is
+  injected into the execution environment (in the `$HOME/.netrc` file) that is
+  able to access only the repository directly under test.
+
+  If a job requires access to additional private repositories beyond the
+  direct repository, they may be specified in this list, in the form
+  `owner/repository`; e.g.,
+
+  ```bash
+  #: access_repos = [
+  #:	"oxidecomputer/clandestine-project",
+  #:	"oxidecomputer/secret-plans",
+  #: ]
+  ```
+
+  Note that this option only works for repositories within the same
+  organisation as the direct repository.  Using the option will trigger a
+  requirement for job-level authorisation by a member of the organisation.
+
+- `dependencies` **(table)**
+
+  A job may depend on the successful completion of one or more other jobs from
+  the same commit under test.  If the dependency is cancelled or fails to
+  complete successfully for some other reason, that failure will be propagated
+  forward as a failure of this job.
+
+  Each entry in the dependencies table is itself a table with a name for the
+  dependency, and the following per-dependency properties:
+
+  * `job` **(string)**
+
+    Specifies the job that this job should wait on for execution.  The `job`
+    value must exactly match the `name` property of some other `basic` variety
+    job available in the same commit.
+
+  Any artefacts output by the job named in the dependency will be made
+  available automatically under `/input/$dependency` using the dependency
+  name.  For example, consider this dependency directive:
+
+  ```bash
+  #: [dependencies.otherjob]
+  #: job = "the-other-job!"
+  ```
+
+  If the job with the name `the-other-job!` produces an output file,
+  `/tmp/output.zip`, then it will be made available within this job as the file
+  `/input/otherjob/tmp/output.zip`.
+
+  Using this facility, one can easily split a job into a "build" phase that
+  runs under a target with access to toolchains, and one or more "test" phases
+  that can take the build output and run it in under another target that might
+  not have a toolchain or may have access to other resources that have limited
+  availability like test hardware.
+
+  Jobs can also depend on more than one other job, allowing a job to aggregate
+  artefacts from several other jobs together in one place.  This might be
+  useful when building binaries for more than one different OS, with a final
+  step that publishes multi-OS packages if all the other builds were
+  successful.
+
+  Cycles in the dependency graph are not allowed.
+
+- `output_rules` **(array of strings)**
+
+  Jobs may produce artefacts that we wish to survive beyond the lifetime of the
+  ephemeral build environment.  A job may specify one or more files for
+  preservation by the system; e.g., a build job may produce binaries or
+  packages that can then be downloaded and installed, or a test job may produce
+  JUnit XML files or other diagnostic logs that can be inspected by engineers.
+
+  The `output_rules` property is a list of `/`-anchored glob patterns that
+  match files in the ephemeral machine; e.g., `/tmp/*.txt` would match
+  `/tmp/something.txt` but not `/tmp/nothing.png`.
+
+  By default, it is not an error to specify a pattern that does not match any
+  files.  Provided the job is not cancelled, matching files are uploaded
+  whether the job program exits with a zero status (denoting success) or a
+  non-zero status (denoting failure).  These behaviours can be used to upload
+  diagnostic logs left behind by unexpected test failures that are cleaned up
+  on success; e.g.,
+
+  ```bash
+  #: output_rules = [
+  #:	"/tmp/test_output/*",
+  #: ]
+  ```
+
+  If the success of a job _requires_ that a particular artefact is produced,
+  the `=` prefix may be used to signify "this rule must match at least one
+  file".  If the rule does not match at least one output file, the job is
+  marked as failed even if the job program otherwise succeeded.  This can be
+  used to make sure that, say, a release binary build job produces an archive
+  with the expected name; e.g.,
+
+  ```bash
+  #: output_rules = [
+  #:	"=/work/pkg/important.tar.gz",
+  #:	"=/work/pkg/important.sha256.txt",
+  #: ]
+  ```
+
+  By default, the system attempts to ensure that a job has not accidentally
+  left background processes running that continue to modify the output
+  artefacts.  If the size or modified time of a file changes while it is being
+  uploaded, the job will fail.  To relax this restriction, the `%` prefix may
+  be used to signify that "this file is allowed to change while it is being
+  uploaded".  This is used to make best effort uploads of diagnostic log files
+  for background processes which may continue running even though the job is
+  nominally complete; e.g.,
+
+  ```bash
+  #: output_rules = [
+  #:	"%/var/svc/log/*.log",
+  #: ]
+  ```
+
+  To exclude specific files from upload, the `!` prefix can be used to signify
+  that "any file that matches this pattern should be ignored, even if it was
+  nominally included by another pattern".  Order in the array is not important;
+  a match of any exclusion rule will prevent that file from behing uploaded.
+  For example, to upload anything left in `/tmp` except for pictures:
+
+  ```bash
+  #: output_rules = [
+  #:	"/tmp/*",
+  #:	"!/tmp/*.jpg",
+  #: ]
+  ```
+
+  The must-match (`=`) and allow-change (`%`) prefixes may be combined in a
+  single output rule.  The exclusion prefix (`!`) may not be combined with any
+  other prefix.  For example, to require at least one log file (which may still
+  be growing) that is not `big-and-useless.log`:
+
+  ```bash
+  #: output_rules = [
+  #:	"=%/tmp/*.log",
+  #:	"!/tmp/big-and-useless.log",
+  #: ]
+  ```
+
+- `publish` **(array of tables)**
+
+  Some jobs may wish to publish a specific subset of their output artefacts at
+  a predictable URL based on the commit ID of the commit under test, for
+  reference by other jobs from other repositories, or end user tools.
+
+  Each table in the `publish` array of tables must contain these properties:
+
+  * `from_output` **(string)**
+
+    Specify the full path of the output artefact to be published without using
+    any wildcard syntax.  The output rule that provides this artefact should be
+    specified using a must-match (`=`) prefix so that the job fails if it is
+    not produced.  Each publish entry can specify exactly one output artefact.
+
+  * `series` **(string)**
+
+    Specify a series name to group a set of uploads together.  This is useful
+    to group related files together in the URL space, even if they are produced
+    by several different jobs.  This value should be short and URL-safe.
+
+  * `name` **(string)**
+
+    Specify the publically visible name of this file, which must be unique
+    within the series for this commit for this repository.  This value should
+    be short and URL-safe.
+
+  Each file published this way will be available at a predictable URL of the
+  form:
+
+  ```
+  https://buildomat.eng.oxide.computer/public/file/OWNER/REPO/SERIES/VERSION/NAME
+  ```
+
+  The `VERSION` value is the commit ID (full SHA) of the commit under test, and
+  the `SERIES` and `NAME` come from the `publish` entry.
+
+  For example, if commit `e65aace9237833ec775253cfde97f59a0af5bc3d` from
+  repository `oxidecomputer/software` included this publish directive:
+
+  ```bash
+  #: [[publish]]
+  #: from_output = "/work/important-packaged-files.tar.gz"
+  #: series = "packages"
+  #: name = "files.tar.gz"
+  ```
+
+  A published file would be available at the URL:
+
+  ```
+  https://buildomat.eng.oxide.computer/public/file/oxidecomputer/software/packages/e65aace9237833ec775253cfde97f59a0af5bc3d/files.tar.gz
+  ```
+
+  Note that files published this way from private repositories will be
+  available without authentication.
+
+- `rust_toolchain` **(string)**
+
+  If specified, `rustup` will be installed in the environment and the nominated
+  toolchain will be available as the default toolchain.  Any toolchain
+  specification that `rustup` accepts should work here; e.g., something general
+  like `stable` or `nightly`, or a specific nightly date, like
+  `nightly-2022-04-27`.
+
+  ```bash
+  #: rust_toolchain = "stable"
+  ```
+
+- `skip_clone` **(boolean)**
+
+  By default, a basic job will clone the repository and check out the commit
+  under test.  The working directory for the job will be named for
+  the GitHub repository; e.g., for https://github.com/oxidecomputer/buildomat,
+  the directory would be `/work/oxidecomputer/buildomat`.
+
+  If this option is specifed with the value `true`, no clone will be performed.
+  The working directory for the job will be `/work` without subdirectories.
+  This is useful in targets that do not provide toolchains or `git`, or where
+  no source files from the repository (beyond the job program itself) are
+  required for correct execution.
+
+  ```bash
+  #: skip_clone = true
+  ```
+
+- `target` **(string)**
+
+  The target for a job, which specifies the composition of the execution
+  environment, can be specified by name.  Some targets (e.g., `lab`) are
+  privileged, and not available to all repositories.
+
+  The list of unrestricted targets available for all jobs includes:
+
+  - `helios-latest`; an illumos execution environment (Oxide Helios
+    distribution) running in an ephemeral virtual machine, with a reasonable
+    set of build tools.  32GB of RAM and 200GB of disk should be available.
+  - `omnios-r151038`; an illumos execution environment (OmniOS r151038 LTS)
+    running in an ephemeral virtual machine, with a reasonable set of build
+    tools.  32GB of RAM and 200GB of disk should be available.
+  - `ubuntu-18.04`, `ubuntu-20.04`, and `ubuntu-22.04`; an Ubuntu execution
+    environment running in an ephemeral virtual machine, with a reasonable set
+    of build tools.  32GB of RAM and 200GB of disk should be available.
+
 ## Licence
 
 Unless otherwise noted, all components are licenced under the [Mozilla Public
