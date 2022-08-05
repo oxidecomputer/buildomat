@@ -13,6 +13,16 @@ SunOS)
 	    -c 'build' -P 'Primary Administrator' build
 
 	zfs create -o mountpoint=/work rpool/work
+
+	#
+	# Some illumos images use autofs by default for /home, which is not
+	# what we want here.
+	#
+	if home_fs=$(awk '$2 == "/home" { print $3 }' /etc/mnttab) &&
+	    [[ "$home_fs" == autofs ]]; then
+		sed -i -e '/^\/home/d' /etc/auto_master
+		automount -v
+	fi
 	;;
 Linux)
 	#
