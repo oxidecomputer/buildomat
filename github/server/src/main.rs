@@ -599,6 +599,8 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                     owner.email.as_deref(),
                 )?;
                 app.db.store_install(inst.id, owner.id)?;
+                app.db.delivery_ack(del.seq, ack)?;
+                continue;
             }
             "installation" | "installation_repositories" => {
                 /*
