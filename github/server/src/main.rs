@@ -962,18 +962,36 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                 let inst = app.db.load_install(cs.install)?;
                 let org = app.db.load_user(inst.owner)?;
 
-                let gh = app.install_client(inst.id);
-
-                let res = gh
-                    .orgs()
-                    .check_membership_for_user(&org.login, &u.login)
-                    .await;
-                if res.is_ok() {
-                    info!(log, "delivery {} authorisation is OK", del.seq);
+                /*
+                 * The GitHub organisational membership check regrettably (and
+                 * thus predictably) does not work when applied to a repository
+                 * that is not an organisation, even though it would make the
+                 * user model attractively orthogonal for a user to be a member
+                 * of themselves.  Check first if the authorising user and the
+                 * installation owner are the same:
+                 */
+                if org.id == u.id && org.login == u.login {
+                    info!(
+                        log,
+                        "delivery {} authorisation is OK (owner)", del.seq
+                    );
                 } else {
-                    warn!(log, "delivery {} authorisation failure", del.seq);
-                    app.db.delivery_ack(del.seq, ack)?;
-                    continue;
+                    let gh = app.install_client(inst.id);
+
+                    let res = gh
+                        .orgs()
+                        .check_membership_for_user(&org.login, &u.login)
+                        .await;
+                    if res.is_ok() {
+                        info!(log, "delivery {} authorisation is OK", del.seq);
+                    } else {
+                        warn!(
+                            log,
+                            "delivery {} authorisation failure", del.seq
+                        );
+                        app.db.delivery_ack(del.seq, ack)?;
+                        continue;
+                    }
                 }
 
                 /*
@@ -1733,7 +1751,21 @@ async fn process_check_suite(app: &Arc<App>, cs: &CheckSuiteId) -> Result<()> {
                  */
                 if let Some(id) = cs.requested_by {
                     let u = db.load_user(id)?;
-                    if rc.loaded.allow_users.iter().any(|l| &u.login == l) {
+                    let iu = db.load_user(install.owner)?;
+                    if u.id == iu.id && u.login == iu.login {
+                        info!(
+                            log,
+                            "check suite {} authorised by {} (owner)",
+                            cs.id,
+                            u.login,
+                        );
+                        cs.approved_by = Some(u.id);
+                    } else if rc
+                        .loaded
+                        .allow_users
+                        .iter()
+                        .any(|l| &u.login == l)
+                    {
                         info!(
                             log,
                             "check suite {} authorised by {} (request, config)",
@@ -1767,7 +1799,21 @@ async fn process_check_suite(app: &Arc<App>, cs: &CheckSuiteId) -> Result<()> {
                  */
                 if let Some(id) = cs.pr_by {
                     let u = db.load_user(id)?;
-                    if rc.loaded.allow_users.iter().any(|l| &u.login == l) {
+                    let iu = db.load_user(install.owner)?;
+                    if u.id == iu.id && u.login == iu.login {
+                        info!(
+                            log,
+                            "check suite {} authorised by {} (owner)",
+                            cs.id,
+                            u.login,
+                        );
+                        cs.approved_by = Some(u.id);
+                    } else if rc
+                        .loaded
+                        .allow_users
+                        .iter()
+                        .any(|l| &u.login == l)
+                    {
                         info!(
                             log,
                             "check suite {} authorised by {} (pull, config)",
