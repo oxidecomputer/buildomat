@@ -28,8 +28,37 @@ pub(crate) struct ConfigFileFactory {
 
 #[derive(Deserialize, Debug, Clone)]
 pub(crate) struct ConfigFileTarget {
-    pub nodename: String,
+    pub nodename: Option<String>,
+    #[serde(default)]
+    pub nodenames: Vec<String>,
     pub os_dir: String,
+}
+
+impl ConfigFileTarget {
+    pub fn runs_on_node(&self, nodename: &str) -> bool {
+        if let Some(n) = self.nodename.as_deref() {
+            if n == nodename {
+                return true;
+            }
+        }
+        for n in self.nodenames.iter() {
+            if n.as_str() == nodename {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn nodenames(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if let Some(n) = self.nodename.as_deref() {
+            out.push(n.to_string());
+        }
+        for n in self.nodenames.iter() {
+            out.push(n.to_string());
+        }
+        out
+    }
 }
 
 #[derive(Deserialize, Debug, Clone)]

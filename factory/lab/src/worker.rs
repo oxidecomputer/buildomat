@@ -186,7 +186,7 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
             c.config
                 .target
                 .iter()
-                .filter(|(_, target)| &target.nodename == nodename)
+                .filter(|(_, target)| target.runs_on_node(nodename.as_str()))
                 .map(|(id, _)| id.to_string())
                 .collect::<Vec<_>>()
         })
@@ -210,7 +210,17 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
              * and create an instance.
              */
             if let Some(t) = c.config.target.get(&lease.target) {
-                if ready_hosts.contains(&t.nodename) {
+                /*
+                 * From the global list of ready hosts, we want to pick any node
+                 * that supports this particular target:
+                 */
+                let ready_for_target = ready_hosts
+                    .iter()
+                    .filter(|nodename| t.runs_on_node(nodename.as_str()))
+                    .next()
+                    .cloned();
+
+                if let Some(nodename) = ready_for_target {
                     /*
                      * This host is ready and available.  Create a worker, then
                      * create an instance on this host, then associate it with
@@ -230,7 +240,7 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
                     );
 
                     let i = c.db.instance_create(
-                        &t.nodename,
+                        &nodename,
                         &lease.target,
                         &w.id,
                         &w.bootstrap,
@@ -262,7 +272,7 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
                     warn!(
                     log,
                     "server asked for target (host {}) that is not ready: {}",
-                    t.nodename,
+                    t.nodenames().join(", or "),
                     lease.target
                 );
                 }
