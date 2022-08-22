@@ -220,11 +220,10 @@ pub(crate) async fn factory_worker_append(
             );
             false
         }
-    } else if w.recycle && w.token.is_none() {
+    } else if w.recycle {
         /*
-         * This worker has been recycled withing ever having completed
-         * bootstrap, and without having been assigned a job.  Ignore any
-         * console output that arrives.
+         * This worker has been recycled without having been assigned a job.
+         * Ignore any console output that arrives.
          */
         false
     } else {
