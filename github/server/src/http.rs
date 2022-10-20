@@ -311,7 +311,7 @@ async fn status(
      */
     let jobs = b.admin_jobs_get(Some(true), None).await.to_500()?;
     let oldjobs = {
-        let mut oldjobs = b.admin_jobs_get(None, Some(20)).await.to_500()?;
+        let mut oldjobs = b.admin_jobs_get(None, Some(40)).await.to_500()?;
         /*
          * Display most recent job first by sorting the ID backwards; a ULID
          * begins with a timestamp prefix, so a lexicographical sort is ordered
