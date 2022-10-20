@@ -59,25 +59,81 @@ async fn do_again(mut l: Level<Stuff>) -> Result<()> {
 }
 
 async fn do_webhooks(mut l: Level<Stuff>) -> Result<()> {
-    no_args!(l);
+    l.optopt("N", "", "how many web hook entries to read?", "COUNT");
+    l.optopt("D", "", "how many days worth of hooks to read?", "DAYS");
+
+    let a = no_args!(l);
+
+    let days = a.opts().opt_str("D").map(|s| s.parse::<u32>()).transpose()?;
+    let count = a.opts().opt_str("N").map(|s| s.parse::<u32>()).transpose()?;
+    let perpage = count.map(|c| c.min(100)).unwrap_or(100) as i64;
 
     let s = l.context();
     let c = s.app_client();
 
-    /*
-     * XXX We would like to be able to page back through the listing, but our
-     * GitHub client library is not structured to allow this.  We would need
-     * access to the Link header value, but that's eaten by the client (sigh).
-     * Hopefully the 100 most recent deliveries is enough for now!
-     */
-    let recentdels = c.apps().list_webhook_deliveries(100, "").await?;
+    let mut cursor = "".to_string();
+    let mut seen = 0;
+    'next: loop {
+        if let Some(count) = count {
+            if seen >= count {
+                return Ok(());
+            }
+        }
 
-    for del in recentdels {
-        let when = del.delivered_at.unwrap();
-        println!("{:<16} {} {} {}", del.id, when, del.status_code, del.status,);
+        let (recentdels, link) =
+            c.apps().list_webhook_deliveries(perpage, &cursor).await?;
+
+        for del in recentdels {
+            if let Some(count) = count {
+                if seen >= count {
+                    return Ok(());
+                }
+            }
+
+            let when = del.delivered_at.unwrap();
+            if let Some(days) = days {
+                let age = chrono::Utc::now()
+                    .signed_duration_since(when)
+                    .num_seconds();
+                if age > (days as i64) * 24 * 3600 {
+                    return Ok(());
+                }
+            }
+
+            let when = when
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+                .to_string();
+            let flags = if del.redelivery { "R" } else { "-" };
+            println!(
+                "{:<16} {}  {}  {} {}",
+                del.id, when, flags, del.status_code, del.status,
+            );
+
+            seen += 1;
+        }
+
+        if let Some(link) = link {
+            for link in link.values() {
+                let is_next = link
+                    .rel()
+                    .map(|r| r.iter().any(|r| &r.to_string() == "next"))
+                    .unwrap_or(false);
+                if !is_next {
+                    continue;
+                }
+
+                let url = url::Url::parse(&link.link())?;
+                for (k, v) in url.query_pairs() {
+                    if k == "cursor" {
+                        cursor = v.to_string();
+                        continue 'next;
+                    }
+                }
+            }
+        }
+
+        return Ok(());
     }
-
-    Ok(())
 }
 
 async fn do_installs(mut l: Level<Stuff>) -> Result<()> {

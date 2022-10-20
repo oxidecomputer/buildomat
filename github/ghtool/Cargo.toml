@@ -22,3 +22,4 @@ tokio = { version = "1.8.1", features = ["full"] }
 toml = "0.5.8"
 wollongong-common = { path = "../common" }
 hiercmd = { git = "https://github.com/jclulow/hiercmd" }
+url = "2"
