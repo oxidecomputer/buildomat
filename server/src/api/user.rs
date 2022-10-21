@@ -816,8 +816,11 @@ pub(crate) async fn job_add_input(
         ));
     }
 
+    /*
+     * XXX For now, individual upload size is capped at 1GB.
+     */
     let add = add.into_inner();
-    let addsize = if add.size < 0 {
+    let addsize = if add.size < 0 || add.size > 1024 * 1024 * 1024 {
         return Err(HttpError::for_client_error(
             Some("invalid".to_string()),
             StatusCode::BAD_REQUEST,

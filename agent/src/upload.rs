@@ -174,6 +174,19 @@ pub(crate) fn upload(
             tx.send(Activity::Uploading(u.path.clone(), u.size)).unwrap();
 
             /*
+             * XXX For now, individual upload size is capped at 1GB.
+             */
+            if u.size > 1024 * 1024 * 1024 {
+                tx.send(Activity::Error(format!(
+                    "file {:?} is {} bytes in size, which is larger than 1GiB \
+                    and cannot be uploaded at this time.",
+                    u.path, u.size,
+                )))
+                .unwrap();
+                continue;
+            }
+
+            /*
              * Determine whether we care about the file changing size during
              * upload.
              */
@@ -230,6 +243,19 @@ pub(crate) fn upload(
                     tx.send(Activity::Warning(msg)).unwrap();
                 } else {
                     tx.send(Activity::Error(msg)).unwrap();
+                    continue;
+                }
+
+                /*
+                 * XXX For now, individual upload size is capped at 1GB.
+                 */
+                if total > 1024 * 1024 * 1024 {
+                    tx.send(Activity::Error(format!(
+                        "file {:?} is {} bytes in size, which is larger \
+                        than 1GiB and cannot be uploaded at this time.",
+                        u.path, total,
+                    )))
+                    .unwrap();
                     continue;
                 }
             }
