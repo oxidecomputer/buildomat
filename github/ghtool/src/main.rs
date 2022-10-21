@@ -71,17 +71,19 @@ async fn do_webhooks(mut l: Level<Stuff>) -> Result<()> {
     let s = l.context();
     let c = s.app_client();
 
-    let mut cursor = "".to_string();
+    let mut cursor = None;
     let mut seen = 0;
-    'next: loop {
+    loop {
         if let Some(count) = count {
             if seen >= count {
                 return Ok(());
             }
         }
 
-        let (recentdels, link) =
-            c.apps().list_webhook_deliveries(perpage, &cursor).await?;
+        let (recentdels, link) = c
+            .apps()
+            .list_webhook_deliveries(perpage, cursor.as_deref().unwrap_or(""))
+            .await?;
 
         for del in recentdels {
             if let Some(count) = count {
@@ -112,27 +114,15 @@ async fn do_webhooks(mut l: Level<Stuff>) -> Result<()> {
             seen += 1;
         }
 
-        if let Some(link) = link {
-            for link in link.values() {
-                let is_next = link
-                    .rel()
-                    .map(|r| r.iter().any(|r| &r.to_string() == "next"))
-                    .unwrap_or(false);
-                if !is_next {
-                    continue;
-                }
+        cursor = link
+            .as_ref()
+            .and_then(|lm| lm.get(&Some("next".to_string())))
+            .and_then(|next| next.queries.get("cursor"))
+            .cloned();
 
-                let url = url::Url::parse(&link.link())?;
-                for (k, v) in url.query_pairs() {
-                    if k == "cursor" {
-                        cursor = v.to_string();
-                        continue 'next;
-                    }
-                }
-            }
+        if cursor.is_none() {
+            return Ok(());
         }
-
-        return Ok(());
     }
 }
 
