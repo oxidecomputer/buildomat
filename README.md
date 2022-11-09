@@ -139,10 +139,11 @@ pull requests, from all repositories (public and private) within the
 organisation.  In order to avoid accidents, buildomat requires that the service
 be explicitly configured for a repository before it will take any actions.
 
-Per-repository configuration is achieved by creating a file in the default
-branch of the repository in question, named `.github/buildomat/config.toml`.
-This file is written in [TOML](https://toml.io/), with a handful of simple
-values.  Supported properties in this file include:
+Per-repository configuration is achieved by creating a file **in the default
+branch** (e.g., `main`) of the repository in question, named
+`.github/buildomat/config.toml`.  This file is written in
+[TOML](https://toml.io/), with a handful of simple values.  Supported
+properties in this file include:
 
 - `enable` **(boolean)**
 
