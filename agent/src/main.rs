@@ -30,7 +30,7 @@ mod exec;
 mod uadmin;
 mod upload;
 
-use exec::{Activity, ExitDetails};
+use exec::ExitDetails;
 use tokio::io::AsyncWriteExt;
 
 const CONFIG_PATH: &str = "/opt/buildomat/etc/agent.json";
@@ -716,10 +716,10 @@ async fn main() -> Result<()> {
                 }
                 Stage::Child(ch, t, failed) => {
                     match ch.recv_timeout(rem) {
-                        Ok(Activity::Output(o)) => {
+                        Ok(exec::Activity::Output(o)) => {
                             cw.append_task(t, &o.to_record()).await;
                         }
-                        Ok(Activity::Exit(ex)) => {
+                        Ok(exec::Activity::Exit(ex)) => {
                             let msg = format!(
                                 "process exited: \
                                     duration {} ms, exit code {}",
@@ -742,7 +742,7 @@ async fn main() -> Result<()> {
 
                             break;
                         }
-                        Ok(Activity::Complete) => {
+                        Ok(exec::Activity::Complete) => {
                             /*
                              * Record completion of this task within the job.
                              */
