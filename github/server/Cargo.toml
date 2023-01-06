@@ -24,7 +24,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 slog = "2.7"
 thiserror = "1"
-tokio = { version = "1.8.1", features = ["full"] }
+tokio = { version = "1.23.1", features = ["full"] }
 toml = "0.5.8"
 wollongong-common = { path = "../common" }
 wollongong-database = { path = "../database" }
