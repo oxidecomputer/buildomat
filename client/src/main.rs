@@ -1292,7 +1292,7 @@ async fn main() -> Result<()> {
         cmd!(do_info),
     )?;
     l.cmd("job", "job management", cmd!(do_job))?;
-    l.cmda("admin", "a", "administrative functioons", cmd!(do_admin))?;
+    l.cmda("admin", "a", "administrative functions", cmd!(do_admin))?;
     l.hcmd("control", "server control functions", cmd!(do_control))?;
     l.hcmd("worker", "worker management", cmd!(do_worker))?;
 
