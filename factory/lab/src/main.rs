@@ -191,12 +191,25 @@ async fn main() -> Result<()> {
      * configuration file.
      */
     for i in db.active_instances()? {
-        if !hosts.contains_key(&i.nodename) {
-            warn!(log, "instance {} for unconfigured host, destroying", i.id());
-
-            db.instance_destroy(&i)?;
+        let destroy = if let Some(host) = hosts.get(&i.nodename) {
+            if host.config.debug_os_dir.is_some() {
+                warn!(
+                    log,
+                    "instance {} for host moved to debug mode, destroying",
+                    i.id(),
+                );
+                true
+            } else {
+                info!(log, "instance {} still active", i.id());
+                false
+            }
         } else {
-            info!(log, "instance {} still active", i.id());
+            warn!(log, "instance {} for unconfigured host, destroying", i.id());
+            true
+        };
+
+        if destroy {
+            db.instance_destroy(&i)?;
         }
     }
 

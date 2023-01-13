@@ -71,4 +71,6 @@ pub(crate) struct ConfigFileHost {
     pub lom_ip: String,
     pub lom_username: String,
     pub lom_password: String,
+    #[serde(default)]
+    pub debug_os_dir: Option<String>,
 }

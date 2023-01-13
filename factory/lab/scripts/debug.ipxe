@@ -1,0 +1,48 @@
+#!ipxe
+
+set node %HOST%
+set console %CONSOLE%
+set server %BASEURL%
+set osroot ${server}/os/${node}
+
+kernel \
+    --name /platform/i86pc/kernel/amd64/unix \
+    ${osroot}/platform/i86pc/kernel/amd64/unix \
+    -B console=${console} \
+    -B ${console}-mode="115200,8,n,1,-" \
+    -kd \
+    || goto fail
+
+module \
+    --name /platform/i86pc/amd64/boot_archive \
+    ${osroot}/platform/i86pc/amd64/boot_archive \
+    type=rootfs name=ramdisk \
+    || goto fail
+
+module \
+    --name /platform/i86pc/amd64/boot_archive.hash \
+    ${osroot}/platform/i86pc/amd64/boot_archive.hash \
+    type=hash name=ramdisk \
+    || goto fail
+
+module \
+    --name /postboot.sh \
+    ${server}/postboot/${node} \
+    type=file name=postboot.sh \
+    || goto fail
+
+#
+# Emit our boot marker string so that we can mark the point in the IPMI SOL
+# stream that is relevant to the task at hand.
+#
+# We emit the string many times here on the basis that BMCs often have
+# unreliable rubbish serial facilities, and the odd character here and there is
+# known to go missing; Claude E. Shannon defend us.
+#
+echo %MARKER% %MARKER% %MARKER% %MARKER% %MARKER% %MARKER% %MARKER% %MARKER%
+boot || goto fail
+
+:fail
+echo iPXE failure; retrying...
+sleep 5
+chain ${server}/ipxe/${node} || goto fail

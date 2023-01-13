@@ -391,6 +391,10 @@ pub(crate) fn thread_manager(
         for h in c.hosts.iter() {
             let mut st = h.1.state.lock().unwrap();
 
+            if h.1.config.debug_os_dir.is_some() {
+                continue;
+            }
+
             if st.need_cycle() {
                 info!(log, "need to reset host {}", h.0);
 
@@ -451,6 +455,12 @@ pub(crate) fn start_manager(
         let log = c.log.clone();
         let nodename = nodename.to_string();
         let hc = host.config.clone();
+
+        if hc.debug_os_dir.is_some() {
+            warn!(log, "host {} is in debug mode, no serial thread", nodename);
+            continue;
+        }
+
         let tx = c.tx.lock().unwrap().clone();
         thread::Builder::new()
             .name(format!("serial-{}", nodename))

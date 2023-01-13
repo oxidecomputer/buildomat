@@ -185,13 +185,14 @@ async fn os_file(
 
     info!(ctx.log, "[{}] os file request for {:?}", path.host, path.file);
 
-    let _hc = c.host_config(&path.host)?;
-    let (booting, target) =
-        if let Some(i) = c.db.instance_for_host(&path.host).or_500()? {
-            (i.is_preboot(), Some(i.target().to_string()))
-        } else {
-            (false, None)
-        };
+    let hc = c.host_config(&path.host)?;
+    let (booting, target) = if hc.debug_os_dir.is_some() {
+        (true, None)
+    } else if let Some(i) = c.db.instance_for_host(&path.host).or_500()? {
+        (i.is_preboot(), Some(i.target().to_string()))
+    } else {
+        (false, None)
+    };
 
     if !booting {
         return Err(HttpError::for_bad_request(
@@ -200,7 +201,12 @@ async fn os_file(
         ));
     }
 
-    let mut fp = c.target_os_dir(target.as_deref().unwrap())?;
+    let mut fp = if let Some(debug) = &hc.debug_os_dir {
+        info!(ctx.log, "[{}] using debug OS bits at {:?}", path.host, debug);
+        PathBuf::from(debug)
+    } else {
+        c.target_os_dir(target.as_deref().unwrap())?
+    };
     for component in path.file.iter() {
         assert!(!component.contains("/"));
         if component == "." || component == ".." {
@@ -299,16 +305,20 @@ async fn postboot_script(
     let i = c.db.instance_for_host(&path.host).or_500()?;
     let booting = i.as_ref().map(|i| i.is_preboot()).unwrap_or(false);
 
-    if !booting {
+    if !booting && hc.debug_os_dir.is_none() {
         return Err(HttpError::for_bad_request(
             None,
             "access to boot media denied except when booting".to_string(),
         ));
     }
 
-    let script = FormatScript::new(&c.config, &hc)
-        .instance(i.as_ref())
-        .format(&include_str!("../scripts/postboot.sh"));
+    let script = if hc.debug_os_dir.is_some() {
+        "".to_string()
+    } else {
+        FormatScript::new(&c.config, &hc)
+            .instance(i.as_ref())
+            .format(&include_str!("../scripts/postboot.sh"))
+    };
 
     Ok(hyper::Response::builder().body(script.into())?)
 }
@@ -336,7 +346,9 @@ async fn ipxe_script(
     let script = FormatScript::new(&c.config, &hc)
         .instance(i.as_ref())
         .marker(if booting { MARKER_BOOT } else { MARKER_HOLD })
-        .format(if booting {
+        .format(if hc.debug_os_dir.is_some() {
+            include_str!("../scripts/debug.ipxe")
+        } else if booting {
             include_str!("../scripts/regular.ipxe")
         } else {
             include_str!("../scripts/hold.ipxe")

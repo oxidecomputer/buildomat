@@ -162,7 +162,8 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
              * For a host to be considered ready, it must be sitting at the iPXE
              * hold point and emitting a regular dialtone.
              */
-            host.state.lock().unwrap().has_dialtone()
+            host.config.debug_os_dir.is_none()
+                && host.state.lock().unwrap().has_dialtone()
         })
         .map(|(nodename, _)| {
             Ok((
