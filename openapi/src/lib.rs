@@ -1,3 +1,5 @@
+#![allow(unused_mut)]
+
 mod progenitor_client;
 
 #[allow(unused_imports)]
@@ -5,6 +7,8 @@ use progenitor_client::{encode_path, RequestBuilderExt};
 pub use progenitor_client::{ByteStream, Error, ResponseValue};
 pub mod types {
     use serde::{Deserialize, Serialize};
+    #[allow(unused_imports)]
+    use std::convert::TryFrom;
     #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct DependSubmit {
         pub copy_outputs: bool,
@@ -379,7 +383,7 @@ pub mod types {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Client {
     pub(crate) baseurl: String,
     pub(crate) client: reqwest::Client,
@@ -417,7 +421,7 @@ impl Client {
     ) -> Result<ResponseValue<types::FactoryCreateResult>, Error<types::Error>>
     {
         let url = format!("{}/0/admin/factory", self.baseurl,);
-        let request = self.client.post(url).json(&body).build()?;
+        let mut request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -448,7 +452,7 @@ impl Client {
             query.push(("completed", v.to_string()));
         }
 
-        let request = self.client.get(url).query(&query).build()?;
+        let mut request = self.client.get(url).query(&query).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -473,7 +477,7 @@ impl Client {
             self.baseurl,
             encode_path(&job.to_string()),
         );
-        let request = self.client.get(url).build()?;
+        let mut request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -495,7 +499,7 @@ impl Client {
     ) -> Result<ResponseValue<types::TargetCreateResult>, Error<types::Error>>
     {
         let url = format!("{}/0/admin/target", self.baseurl,);
-        let request = self.client.post(url).json(&body).build()?;
+        let mut request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -515,7 +519,7 @@ impl Client {
         &'a self,
     ) -> Result<ResponseValue<Vec<types::Target>>, Error<types::Error>> {
         let url = format!("{}/0/admin/targets", self.baseurl,);
-        let request = self.client.get(url).build()?;
+        let mut request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -541,7 +545,7 @@ impl Client {
             self.baseurl,
             encode_path(&target.to_string()),
         );
-        let request = self.client.put(url).json(&body).build()?;
+        let mut request = self.client.put(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -568,7 +572,7 @@ impl Client {
             self.baseurl,
             encode_path(&target.to_string()),
         );
-        let request = self.client.post(url).json(&body).build()?;
+        let mut request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -593,7 +597,7 @@ impl Client {
             self.baseurl,
             encode_path(&target.to_string()),
         );
-        let request = self.client.delete(url).build()?;
+        let mut request = self.client.delete(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -620,7 +624,32 @@ impl Client {
             encode_path(&target.to_string()),
             encode_path(&privilege.to_string()),
         );
-        let request = self.client.put(url).build()?;
+        let mut request = self.client.put(url).build()?;
+        let result = self.client.execute(request).await;
+        let response = result?;
+        match response.status().as_u16() {
+            204u16 => Ok(ResponseValue::empty(response)),
+            400u16..=499u16 => Err(Error::ErrorResponse(
+                ResponseValue::from_response(response).await?,
+            )),
+            500u16..=599u16 => Err(Error::ErrorResponse(
+                ResponseValue::from_response(response).await?,
+            )),
+            _ => Err(Error::UnexpectedResponse(response)),
+        }
+    }
+
+    #[doc = "Sends a `POST` request to `/0/admin/worker/{worker}/recycle`"]
+    pub async fn worker_recycle<'a>(
+        &'a self,
+        worker: &'a str,
+    ) -> Result<ResponseValue<()>, Error<types::Error>> {
+        let url = format!(
+            "{}/0/admin/worker/{}/recycle",
+            self.baseurl,
+            encode_path(&worker.to_string()),
+        );
+        let mut request = self.client.post(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -640,7 +669,7 @@ impl Client {
         &'a self,
     ) -> Result<ResponseValue<()>, Error<types::Error>> {
         let url = format!("{}/0/control/hold", self.baseurl,);
-        let request = self.client.post(url).build()?;
+        let mut request = self.client.post(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -660,7 +689,7 @@ impl Client {
         &'a self,
     ) -> Result<ResponseValue<()>, Error<types::Error>> {
         let url = format!("{}/0/control/resume", self.baseurl,);
-        let request = self.client.post(url).build()?;
+        let mut request = self.client.post(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -682,7 +711,7 @@ impl Client {
     ) -> Result<ResponseValue<types::FactoryLeaseResult>, Error<types::Error>>
     {
         let url = format!("{}/0/factory/lease", self.baseurl,);
-        let request = self.client.post(url).json(&body).build()?;
+        let mut request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -707,7 +736,7 @@ impl Client {
             self.baseurl,
             encode_path(&job.to_string()),
         );
-        let request = self.client.post(url).build()?;
+        let mut request = self.client.post(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -728,7 +757,7 @@ impl Client {
     ) -> Result<ResponseValue<types::FactoryPingResult>, Error<types::Error>>
     {
         let url = format!("{}/0/factory/ping", self.baseurl,);
-        let request = self.client.get(url).build()?;
+        let mut request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -749,7 +778,7 @@ impl Client {
         body: &'a types::FactoryWorkerCreate,
     ) -> Result<ResponseValue<types::FactoryWorker>, Error<types::Error>> {
         let url = format!("{}/0/factory/worker", self.baseurl,);
-        let request = self.client.post(url).json(&body).build()?;
+        let mut request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -775,7 +804,7 @@ impl Client {
             self.baseurl,
             encode_path(&worker.to_string()),
         );
-        let request = self.client.get(url).build()?;
+        let mut request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -800,7 +829,7 @@ impl Client {
             self.baseurl,
             encode_path(&worker.to_string()),
         );
-        let request = self.client.delete(url).build()?;
+        let mut request = self.client.delete(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -826,7 +855,7 @@ impl Client {
             self.baseurl,
             encode_path(&worker.to_string()),
         );
-        let request = self.client.patch(url).json(&body).build()?;
+        let mut request = self.client.patch(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -855,7 +884,7 @@ impl Client {
             self.baseurl,
             encode_path(&worker.to_string()),
         );
-        let request = self.client.post(url).json(&body).build()?;
+        let mut request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -880,7 +909,7 @@ impl Client {
             self.baseurl,
             encode_path(&worker.to_string()),
         );
-        let request = self.client.post(url).build()?;
+        let mut request = self.client.post(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -901,7 +930,7 @@ impl Client {
     ) -> Result<ResponseValue<Vec<types::FactoryWorker>>, Error<types::Error>>
     {
         let url = format!("{}/0/factory/workers", self.baseurl,);
-        let request = self.client.get(url).build()?;
+        let mut request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -926,7 +955,7 @@ impl Client {
             self.baseurl,
             encode_path(&job.to_string()),
         );
-        let request = self.client.get(url).build()?;
+        let mut request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -946,7 +975,7 @@ impl Client {
         &'a self,
     ) -> Result<ResponseValue<Vec<types::Job>>, Error<types::Error>> {
         let url = format!("{}/0/jobs", self.baseurl,);
-        let request = self.client.get(url).build()?;
+        let mut request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -968,7 +997,7 @@ impl Client {
     ) -> Result<ResponseValue<types::JobSubmitResult>, Error<types::Error>>
     {
         let url = format!("{}/0/jobs", self.baseurl,);
-        let request = self.client.post(url).json(&body).build()?;
+        let mut request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -993,7 +1022,7 @@ impl Client {
             self.baseurl,
             encode_path(&job.to_string()),
         );
-        let request = self.client.post(url).build()?;
+        let mut request = self.client.post(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1019,7 +1048,7 @@ impl Client {
             self.baseurl,
             encode_path(&job.to_string()),
         );
-        let request = self
+        let mut request = self
             .client
             .post(url)
             .header(
@@ -1060,7 +1089,7 @@ impl Client {
             query.push(("minseq", v.to_string()));
         }
 
-        let request = self.client.get(url).query(&query).build()?;
+        let mut request = self.client.get(url).query(&query).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1086,7 +1115,7 @@ impl Client {
             self.baseurl,
             encode_path(&job.to_string()),
         );
-        let request = self.client.post(url).json(&body).build()?;
+        let mut request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1111,7 +1140,7 @@ impl Client {
             self.baseurl,
             encode_path(&job.to_string()),
         );
-        let request = self.client.get(url).build()?;
+        let mut request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1138,7 +1167,7 @@ impl Client {
             encode_path(&job.to_string()),
             encode_path(&output.to_string()),
         );
-        let request = self.client.get(url).build()?;
+        let mut request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1160,7 +1189,7 @@ impl Client {
             encode_path(&job.to_string()),
             encode_path(&output.to_string()),
         );
-        let request = self.client.post(url).json(&body).build()?;
+        let mut request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1191,7 +1220,7 @@ impl Client {
             encode_path(&version.to_string()),
             encode_path(&name.to_string()),
         );
-        let request = self.client.get(url).build()?;
+        let mut request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1205,7 +1234,7 @@ impl Client {
         &'a self,
     ) -> Result<ResponseValue<Vec<types::User>>, Error<types::Error>> {
         let url = format!("{}/0/users", self.baseurl,);
-        let request = self.client.get(url).build()?;
+        let mut request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1227,7 +1256,7 @@ impl Client {
     ) -> Result<ResponseValue<types::UserCreateResult>, Error<types::Error>>
     {
         let url = format!("{}/0/users", self.baseurl,);
-        let request = self.client.post(url).json(&body).build()?;
+        let mut request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1252,7 +1281,7 @@ impl Client {
             self.baseurl,
             encode_path(&user.to_string()),
         );
-        let request = self.client.get(url).build()?;
+        let mut request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1279,7 +1308,7 @@ impl Client {
             encode_path(&user.to_string()),
             encode_path(&privilege.to_string()),
         );
-        let request = self.client.put(url).build()?;
+        let mut request = self.client.put(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1306,7 +1335,7 @@ impl Client {
             encode_path(&user.to_string()),
             encode_path(&privilege.to_string()),
         );
-        let request = self.client.delete(url).build()?;
+        let mut request = self.client.delete(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1326,7 +1355,7 @@ impl Client {
         &'a self,
     ) -> Result<ResponseValue<types::WhoamiResult>, Error<types::Error>> {
         let url = format!("{}/0/whoami", self.baseurl,);
-        let request = self.client.get(url).build()?;
+        let mut request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1348,7 +1377,7 @@ impl Client {
     ) -> Result<ResponseValue<types::WorkerBootstrapResult>, Error<types::Error>>
     {
         let url = format!("{}/0/worker/bootstrap", self.baseurl,);
-        let request = self.client.post(url).json(&body).build()?;
+        let mut request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1374,7 +1403,7 @@ impl Client {
             self.baseurl,
             encode_path(&job.to_string()),
         );
-        let request = self.client.post(url).json(&body).build()?;
+        let mut request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1400,7 +1429,7 @@ impl Client {
             self.baseurl,
             encode_path(&job.to_string()),
         );
-        let request = self
+        let mut request = self
             .client
             .post(url)
             .header(
@@ -1436,7 +1465,7 @@ impl Client {
             self.baseurl,
             encode_path(&job.to_string()),
         );
-        let request = self.client.post(url).json(&body).build()?;
+        let mut request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1463,7 +1492,7 @@ impl Client {
             encode_path(&job.to_string()),
             encode_path(&input.to_string()),
         );
-        let request = self.client.get(url).build()?;
+        let mut request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1483,7 +1512,7 @@ impl Client {
             self.baseurl,
             encode_path(&job.to_string()),
         );
-        let request = self.client.post(url).json(&body).build()?;
+        let mut request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1511,7 +1540,7 @@ impl Client {
             encode_path(&job.to_string()),
             encode_path(&task.to_string()),
         );
-        let request = self.client.post(url).json(&body).build()?;
+        let mut request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1539,7 +1568,7 @@ impl Client {
             encode_path(&job.to_string()),
             encode_path(&task.to_string()),
         );
-        let request = self.client.post(url).json(&body).build()?;
+        let mut request = self.client.post(url).json(&body).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1560,7 +1589,7 @@ impl Client {
     ) -> Result<ResponseValue<types::WorkerPingResult>, Error<types::Error>>
     {
         let url = format!("{}/0/worker/ping", self.baseurl,);
-        let request = self.client.get(url).build()?;
+        let mut request = self.client.get(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1586,7 +1615,7 @@ impl Client {
             query.push(("active", v.to_string()));
         }
 
-        let request = self.client.get(url).query(&query).build()?;
+        let mut request = self.client.get(url).query(&query).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1606,7 +1635,7 @@ impl Client {
         &'a self,
     ) -> Result<ResponseValue<()>, Error<types::Error>> {
         let url = format!("{}/0/workers/recycle", self.baseurl,);
-        let request = self.client.post(url).build()?;
+        let mut request = self.client.post(url).build()?;
         let result = self.client.execute(request).await;
         let response = result?;
         match response.status().as_u16() {
@@ -1620,4 +1649,8 @@ impl Client {
             _ => Err(Error::UnexpectedResponse(response)),
         }
     }
+}
+
+pub mod prelude {
+    pub use super::Client;
 }

@@ -38,6 +38,17 @@ impl UserPath {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct WorkerPath {
+    worker: String,
+}
+
+impl WorkerPath {
+    fn worker(&self) -> DSResult<db::WorkerId> {
+        db::WorkerId::from_str(&self.worker).or_500()
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct TargetPath {
     target: String,
 }
@@ -438,6 +449,29 @@ pub(crate) async fn workers_recycle(
     c.require_admin(log, &req, "control").await?;
 
     c.db.worker_recycle_all().or_500()?;
+    info!(log, "ADMIN: recycled all workers");
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/admin/worker/{worker}/recycle",
+}]
+pub(crate) async fn worker_recycle(
+    rqctx: Arc<RequestContext<Arc<Central>>>,
+    path: TypedPath<WorkerPath>,
+) -> DSResult<HttpResponseUpdatedNoContent> {
+    let c = rqctx.context();
+    let req = rqctx.request.lock().await;
+    let log = &rqctx.log;
+
+    c.require_admin(log, &req, "control").await?;
+
+    let wid = path.into_inner().worker()?;
+
+    c.db.worker_recycle(wid).or_500()?;
+    info!(log, "ADMIN: recycled worker {}", wid);
 
     Ok(HttpResponseUpdatedNoContent())
 }

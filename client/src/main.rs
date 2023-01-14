@@ -796,8 +796,26 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_worker_recycle(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("WORKER..."));
+
+    let a = args!(l);
+    if a.args().is_empty() {
+        bad_args!(l, "specify a worker to recycle");
+    }
+
+    for arg in a.args() {
+        if let Err(e) = l.context().admin().worker_recycle(&arg).await {
+            bail!("ERROR: recycling {}: {:?}", arg, e);
+        }
+    }
+
+    Ok(())
+}
+
 async fn do_worker(mut l: Level<Stuff>) -> Result<()> {
     l.cmda("list", "ls", "list workers", cmd!(do_worker_list))?;
+    l.cmd("recycle", "recycle a worker", cmd!(do_worker_recycle))?;
 
     sel!(l).run().await
 }
