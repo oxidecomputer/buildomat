@@ -7,7 +7,7 @@ use std::str::FromStr;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use chrono::prelude::*;
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
@@ -235,5 +235,27 @@ impl ClientIdExt for buildomat_openapi::types::Worker {
 impl ClientIdExt for buildomat_openapi::types::Job {
     fn id(&self) -> Result<Ulid> {
         to_ulid(&self.id)
+    }
+}
+
+/**
+ * Extension trait for the errors we get back from Dropshot endpoint
+ * registration.
+ */
+pub trait ApiResultEx {
+    fn api_check(&self) -> Result<()>;
+    fn note(&self, n: &str) -> Result<()>;
+}
+
+impl ApiResultEx for std::result::Result<(), String> {
+    fn api_check(&self) -> Result<()> {
+        self.as_ref()
+            .map_err(|e| anyhow!("API registration failure: {}", e))?;
+        Ok(())
+    }
+
+    fn note(&self, n: &str) -> Result<()> {
+        self.as_ref().map_err(|e| anyhow!("{}: {}", n, e))?;
+        Ok(())
     }
 }

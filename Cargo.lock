@@ -314,7 +314,29 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "callaghan-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "buildomat-common",
+ "callaghan-gerrit-client",
+ "dropshot",
+ "futures",
+ "getopts",
+ "html-escape",
+ "hyper",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "thiserror",
+ "tokio",
+ "toml",
 ]
 
 [[package]]

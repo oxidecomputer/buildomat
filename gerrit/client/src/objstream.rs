@@ -18,7 +18,7 @@ pub(crate) struct ObjectStreamConfig {
     pub(crate) query_base: Vec<(String, String)>,
 }
 
-pub struct ObjectStream<O: Unpin>
+pub struct ObjectStream<O: Unpin + Send + 'static>
 where
     for<'de> O: Deserialize<'de>,
 {
@@ -27,10 +27,11 @@ where
     pub(crate) fin: bool,
     pub(crate) start_at: usize,
     pub(crate) q: VecDeque<O>,
-    pub(crate) fetch: Option<Pin<Box<(dyn Future<Output = Result<Vec<O>>>)>>>,
+    pub(crate) fetch:
+        Option<Pin<Box<(dyn Future<Output = Result<Vec<O>>> + Send)>>>,
 }
 
-impl<O: Unpin> ObjectStream<O>
+impl<O: Unpin + Send + 'static> ObjectStream<O>
 where
     for<'de> O: Deserialize<'de>,
 {
@@ -49,7 +50,7 @@ where
     }
 }
 
-impl<O: Unpin + 'static> Stream for ObjectStream<O>
+impl<O: Unpin + Send + 'static> Stream for ObjectStream<O>
 where
     for<'de> O: Deserialize<'de>,
 {
@@ -132,7 +133,7 @@ where
     }
 }
 
-async fn fetch_page<O: Unpin>(
+async fn fetch_page<O: Unpin + Send + 'static>(
     name: &'static str,
     req: reqwest::RequestBuilder,
 ) -> Result<Vec<O>>
@@ -149,7 +150,7 @@ where
     Ok(super::parseres(name, res).await?)
 }
 
-pub struct NamedObjectStream<O: Unpin>
+pub struct NamedObjectStream<O: Unpin + Send + 'static>
 where
     for<'de> O: Deserialize<'de>,
 {
@@ -158,11 +159,12 @@ where
     pub(crate) fin: bool,
     pub(crate) start_at: usize,
     pub(crate) q: VecDeque<(String, O)>,
-    pub(crate) fetch:
-        Option<Pin<Box<(dyn Future<Output = Result<Vec<(String, O)>>>)>>>,
+    pub(crate) fetch: Option<
+        Pin<Box<(dyn Future<Output = Result<Vec<(String, O)>>> + Send)>>,
+    >,
 }
 
-impl<O: Unpin> NamedObjectStream<O>
+impl<O: Unpin + Send + 'static> NamedObjectStream<O>
 where
     for<'de> O: Deserialize<'de>,
 {
@@ -181,7 +183,7 @@ where
     }
 }
 
-impl<O: Unpin + 'static> Stream for NamedObjectStream<O>
+impl<O: Unpin + Send + 'static> Stream for NamedObjectStream<O>
 where
     for<'de> O: Deserialize<'de>,
 {
@@ -265,7 +267,7 @@ where
     }
 }
 
-async fn fetch_named_page<O: Unpin>(
+async fn fetch_named_page<O: Unpin + Send + 'static>(
     name: &'static str,
     req: reqwest::RequestBuilder,
 ) -> Result<Vec<(String, O)>>

@@ -95,6 +95,30 @@ impl Client {
         format!("{}/{}", self.url, x)
     }
 
+    async fn get<O>(&self, name: &'static str, x: &str) -> Result<O>
+    where
+        for<'de> O: Deserialize<'de>,
+    {
+        let res = self
+            .client
+            .get(self.url(x))
+            .send()
+            .await
+            .map_err(|e| e.for_req(name))?
+            .error_for_status()
+            .map_err(|e| e.for_req(name))?;
+
+        Ok(parseres(name, res).await?)
+    }
+
+    pub async fn change_by_id(&self, id: &str) -> Result<types::Change> {
+        self.get(
+            "change_by_id",
+            &format!("changes/{}/detail?o=ALL_REVISIONS&o=ALL_COMMITS", id),
+        )
+        .await
+    }
+
     pub fn changes(&self) -> ObjectStream<types::Change> {
         ObjectStream::new(
             &self.client,
