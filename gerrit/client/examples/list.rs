@@ -11,7 +11,7 @@ async fn main() -> Result<()> {
     )
     .build()?;
 
-    let mut changes = client.change_list();
+    let mut changes = client.changes();
 
     while let Some(c) = changes.try_next().await? {
         println!("{:?}", c);

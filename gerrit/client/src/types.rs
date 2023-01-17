@@ -36,3 +36,9 @@ impl Change {
         None
     }
 }
+
+#[derive(Debug, Deserialize)]
+pub struct Project {
+    pub id: String,
+    pub description: String,
+}

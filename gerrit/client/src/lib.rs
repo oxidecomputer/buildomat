@@ -2,13 +2,41 @@
 
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Result};
 use serde::Deserialize;
 use slog::Logger;
+use thiserror::Error;
 
 mod objstream;
 pub mod types;
-pub use objstream::ObjectStream;
+pub use objstream::{NamedObjectStream, ObjectStream};
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("gerrit client: {0}")]
+    General(String),
+    #[error("gerrit client: {0}: request error: {1}")]
+    Request(&'static str, reqwest::Error),
+    #[error("gerrit client: {0}: invalid response: {1}")]
+    InvalidResponse(&'static str, String),
+    #[error("gerrit client: {0}: requested failed with status {1}")]
+    BadStatus(&'static str, reqwest::StatusCode),
+}
+
+trait ErrorExt {
+    fn for_req(self, name: &'static str) -> Error;
+}
+
+impl ErrorExt for reqwest::Error {
+    fn for_req(self, name: &'static str) -> Error {
+        if let Some(status) = self.status() {
+            Error::BadStatus(name, status)
+        } else {
+            Error::Request(name, self)
+        }
+    }
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone)]
 struct Creds {
@@ -55,7 +83,8 @@ impl ClientBuilder {
             .connect_timeout(Duration::from_secs(15))
             .tcp_keepalive(Duration::from_secs(15))
             .timeout(Duration::from_secs(60))
-            .build()?;
+            .build()
+            .map_err(|e| Error::General(format!("building client: {}", e)))?;
 
         Ok(Client { log: self.log, client, creds: self.creds, url: self.url })
     }
@@ -66,7 +95,7 @@ impl Client {
         format!("{}/{}", self.url, x)
     }
 
-    pub fn change_list(&self) -> ObjectStream<types::Change> {
+    pub fn changes(&self) -> ObjectStream<types::Change> {
         ObjectStream::new(
             &self.client,
             objstream::ObjectStreamConfig {
@@ -82,16 +111,36 @@ impl Client {
             },
         )
     }
+
+    pub fn projects(&self) -> NamedObjectStream<types::Project> {
+        NamedObjectStream::new(
+            &self.client,
+            objstream::ObjectStreamConfig {
+                name: "projects",
+                url: self.url("projects/"),
+                creds: self.creds.clone(),
+                query_base: vec![("n".into(), "100".into()) /* XXX */],
+            },
+        )
+    }
 }
 
-async fn parseres<O>(res: reqwest::Response) -> Result<O>
+async fn parseres<O>(name: &'static str, res: reqwest::Response) -> Result<O>
 where
     for<'de> O: Deserialize<'de>,
 {
-    let t = res.text().await?;
+    let t = res
+        .text()
+        .await
+        .map_err(|e| Error::InvalidResponse(name, e.to_string()))?;
+
     if let Some(body) = t.strip_prefix(")]}'\n") {
-        Ok(serde_json::from_str(body)?)
+        Ok(serde_json::from_str(body)
+            .map_err(|e| Error::InvalidResponse(name, e.to_string()))?)
     } else {
-        bail!("invalid Gerrit JSON (missing leader)");
+        Err(Error::InvalidResponse(
+            name,
+            "invalid Gerrit JSON (missing leader)".to_string(),
+        ))
     }
 }
