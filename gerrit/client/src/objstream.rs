@@ -25,6 +25,7 @@ where
     pub(crate) client: reqwest::Client,
     pub(crate) config: ObjectStreamConfig,
     pub(crate) fin: bool,
+    pub(crate) one_shot: bool,
     pub(crate) start_at: usize,
     pub(crate) q: VecDeque<O>,
     pub(crate) fetch:
@@ -43,6 +44,22 @@ where
             client: client.clone(),
             config,
             fin: false,
+            one_shot: false,
+            start_at: 0,
+            q: Default::default(),
+            fetch: None,
+        }
+    }
+
+    pub(crate) fn new_one_shot(
+        client: &reqwest::Client,
+        config: ObjectStreamConfig,
+    ) -> ObjectStream<O> {
+        ObjectStream {
+            client: client.clone(),
+            config,
+            fin: false,
+            one_shot: true,
             start_at: 0,
             q: Default::default(),
             fetch: None,
@@ -101,6 +118,13 @@ where
                             for o in olist {
                                 self.q.push_back(o);
                             }
+                        }
+
+                        if self.one_shot {
+                            /*
+                             * This request only returns one page.
+                             */
+                            self.fin = true;
                         }
                     }
                     Poll::Ready(Err(e)) => {

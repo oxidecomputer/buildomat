@@ -74,3 +74,25 @@ pub struct Project {
     pub id: String,
     pub description: Option<String>,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ChangeMessageInfo {
+    pub id: String,
+    pub author: Option<AccountInfo>,
+    pub real_author: Option<AccountInfo>,
+    pub date: String,
+    pub message: String,
+    #[serde(default, rename = "accountsInMessage")]
+    pub accounts_in_message: Vec<AccountInfo>,
+    pub tag: Option<String>,
+    pub _revision_number: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AccountInfo {
+    pub _account_id: u32,
+    pub name: Option<String>,
+    #[serde(default)]
+    pub inactive: bool,
+    pub username: Option<String>,
+}

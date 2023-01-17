@@ -119,6 +119,21 @@ impl Client {
         .await
     }
 
+    pub fn change_messages(
+        &self,
+        id: &str,
+    ) -> ObjectStream<types::ChangeMessageInfo> {
+        ObjectStream::new_one_shot(
+            &self.client,
+            objstream::ObjectStreamConfig {
+                name: "change_messages",
+                url: self.url(&format!("changes/{}/messages", id)),
+                creds: self.creds.clone(),
+                query_base: vec![("n".into(), "100".into()) /* XXX */],
+            },
+        )
+    }
+
     pub fn changes(&self) -> ObjectStream<types::Change> {
         ObjectStream::new(
             &self.client,

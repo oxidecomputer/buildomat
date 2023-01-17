@@ -1,8 +1,7 @@
 use super::prelude::*;
 
 #[derive(Serialize, JsonSchema)]
-pub struct Project {
-}
+pub struct Project {}
 
 #[endpoint {
     method = GET,
