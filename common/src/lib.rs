@@ -11,8 +11,6 @@ use anyhow::Result;
 use chrono::prelude::*;
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
-use reqwest::ClientBuilder;
 use rusty_ulid::Ulid;
 use serde::Deserialize;
 use slog::{o, Drain, Logger};
@@ -47,36 +45,6 @@ pub fn to_ulid(id: &str) -> Result<Ulid> {
 
 pub async fn sleep_ms(ms: u64) {
     tokio::time::sleep(Duration::from_millis(ms)).await;
-}
-
-fn headers_client(dh: HeaderMap) -> Result<reqwest::Client> {
-    Ok(ClientBuilder::new()
-        .timeout(Duration::from_secs(3600))
-        .tcp_keepalive(Duration::from_secs(60))
-        .connect_timeout(Duration::from_secs(15))
-        .default_headers(dh)
-        .build()?)
-}
-
-pub fn bearer_client(token: &str) -> Result<reqwest::Client> {
-    let mut dh = HeaderMap::new();
-    dh.insert(
-        AUTHORIZATION,
-        HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
-    );
-
-    headers_client(dh)
-}
-
-pub fn delegated_client(token: &str, user: &str) -> Result<reqwest::Client> {
-    let mut dh = HeaderMap::new();
-    dh.insert(
-        AUTHORIZATION,
-        HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
-    );
-    dh.insert("X-Buildomat-Delegate", HeaderValue::from_str(user).unwrap());
-
-    headers_client(dh)
 }
 
 pub fn genkey(len: usize) -> String {
@@ -197,7 +165,7 @@ pub trait ClientJobExt {
     fn duration(&self, from: &str, until: &str) -> Option<Duration>;
 }
 
-impl ClientJobExt for buildomat_openapi::types::Job {
+impl ClientJobExt for buildomat_client::types::Job {
     fn duration(&self, from: &str, until: &str) -> Option<Duration> {
         let from = if let Some(from) = self.times.get(from) {
             from
@@ -226,13 +194,13 @@ pub trait ClientIdExt {
     fn id(&self) -> Result<Ulid>;
 }
 
-impl ClientIdExt for buildomat_openapi::types::Worker {
+impl ClientIdExt for buildomat_client::types::Worker {
     fn id(&self) -> Result<Ulid> {
         to_ulid(&self.id)
     }
 }
 
-impl ClientIdExt for buildomat_openapi::types::Job {
+impl ClientIdExt for buildomat_client::types::Job {
     fn id(&self) -> Result<Ulid> {
         to_ulid(&self.id)
     }

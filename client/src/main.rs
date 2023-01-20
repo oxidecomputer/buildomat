@@ -17,8 +17,8 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
+use buildomat_client::{types::*, Client, ClientBuilder};
 use buildomat_common::*;
-use buildomat_openapi::{types::*, Client};
 use chrono::prelude::*;
 use futures::StreamExt;
 use hiercmd::prelude::*;
@@ -36,11 +36,11 @@ struct Stuff {
 }
 
 impl Stuff {
-    fn user(&self) -> &buildomat_openapi::Client {
+    fn user(&self) -> &buildomat_client::Client {
         self.client_user.as_ref().unwrap()
     }
 
-    fn admin(&self) -> &buildomat_openapi::Client {
+    fn admin(&self) -> &buildomat_client::Client {
         /*
          * If the profile has an admin token configured, use it for all admin
          * tasks.  Otherwise, we will try our luck with our regular user
@@ -1319,20 +1319,21 @@ async fn main() -> Result<()> {
     let profile = config::load(a.opts().opt_str("p").as_deref())?;
 
     if let Some(admin_token) = profile.admin_token.as_deref() {
-        l.context_mut().client_admin = Some(Client::new_with_client(
-            &profile.url,
-            bearer_client(admin_token)?,
-        ));
+        l.context_mut().client_admin = Some(
+            ClientBuilder::new(&profile.url)
+                .bearer_token(&admin_token)
+                .build()?,
+        );
     };
 
-    l.context_mut().client_user = Some(Client::new_with_client(
-        &profile.url,
+    l.context_mut().client_user = {
+        let mut cb = ClientBuilder::new(&profile.url);
+        cb.bearer_token(profile.secret.as_str());
         if let Some(delegate) = a.opts().opt_str("D") {
-            delegated_client(profile.secret.as_str(), &delegate)?
-        } else {
-            bearer_client(profile.secret.as_str())?
-        },
-    ));
+            cb.delegated_user(&delegate);
+        }
+        Some(cb.build()?)
+    };
 
     l.context_mut().profile = Some(profile);
 

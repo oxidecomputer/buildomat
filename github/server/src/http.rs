@@ -65,7 +65,7 @@ impl<T> ToHttpError<T> for SResult<T, rusty_ulid::DecodingError> {
     }
 }
 
-impl<T, E> ToHttpError<T> for SResult<T, buildomat_openapi::Error<E>> {
+impl<T, E> ToHttpError<T> for SResult<T, buildomat_client::Error<E>> {
     fn to_500(self) -> SResult<T, HttpError> {
         self.map_err(|e| {
             let msg = format!("internal error: {}", e.into_untyped());
@@ -366,7 +366,7 @@ async fn status(
         Some(out)
     }
 
-    fn dump_info(job: &buildomat_openapi::types::Job) -> String {
+    fn dump_info(job: &buildomat_client::types::Job) -> String {
         let tags = &job.tags;
 
         let mut out = String::new();

@@ -21,8 +21,8 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use ErrorKind::NotFound;
 
+use buildomat_client::types::*;
 use buildomat_common::*;
-use buildomat_openapi::types::*;
 
 mod download;
 mod exec;
@@ -73,7 +73,7 @@ impl OutputRecord {
 
 #[derive(Clone)]
 pub(crate) struct ClientWrap {
-    client: buildomat_openapi::Client,
+    client: buildomat_client::Client,
     job: Option<WorkerPingJob>,
 }
 
@@ -358,10 +358,11 @@ fn argn(n: usize, name: &str) -> Result<String> {
 }
 
 fn make_client(cf: &ConfigFile) -> ClientWrap {
-    let client = bearer_client(&cf.token).expect("new client");
-
     ClientWrap {
-        client: buildomat_openapi::Client::new_with_client(&cf.baseurl, client),
+        client: buildomat_client::ClientBuilder::new(&cf.baseurl)
+            .bearer_token(&cf.token)
+            .build()
+            .expect("new client"),
         job: None,
     }
 }

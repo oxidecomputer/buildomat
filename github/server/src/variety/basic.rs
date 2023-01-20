@@ -78,7 +78,7 @@ impl BasicOutput {
         app: &Arc<App>,
         cs: &CheckSuite,
         cr: &CheckRun,
-        o: &buildomat_openapi::types::JobOutput,
+        o: &buildomat_client::types::JobOutput,
     ) -> BasicOutput {
         let name = o
             .path
@@ -431,7 +431,7 @@ pub(crate) async fn run(
                     b.job_output_publish(
                         jid,
                         &o.id,
-                        &buildomat_openapi::types::JobOutputPublish {
+                        &buildomat_client::types::JobOutputPublish {
                             series: p.series.to_string(),
                             version: cs.head_sha.to_string(),
                             name: p.name.to_string(),
@@ -480,7 +480,7 @@ pub(crate) async fn run(
                      */
                     depends.insert(
                         name.to_string(),
-                        buildomat_openapi::types::DependSubmit {
+                        buildomat_client::types::DependSubmit {
                             copy_outputs: true,
                             on_completed: true,
                             on_failed: false,
@@ -610,7 +610,7 @@ pub(crate) async fn run(
          * area at "/work".  The user will have the right to escalate to root
          * privileges via pfexec(1).
          */
-        tasks.push(buildomat_openapi::types::TaskSubmit {
+        tasks.push(buildomat_client::types::TaskSubmit {
             name: "setup".into(),
             env: Default::default(),
             env_clear: false,
@@ -654,7 +654,7 @@ pub(crate) async fn run(
             let mut buildenv = buildenv.clone();
             buildenv.insert("TOOLCHAIN".into(), toolchain.into());
 
-            tasks.push(buildomat_openapi::types::TaskSubmit {
+            tasks.push(buildomat_client::types::TaskSubmit {
                 name: "rust-toolchain".into(),
                 env: buildenv,
                 env_clear: false,
@@ -690,7 +690,7 @@ pub(crate) async fn run(
          * We also provide an entry for "api.github.com" in case the job needs
          * to use curl to access the GitHub API.
          */
-        tasks.push(buildomat_openapi::types::TaskSubmit {
+        tasks.push(buildomat_client::types::TaskSubmit {
             name: "authentication".into(),
             env: buildenv.clone(),
             env_clear: false,
@@ -726,7 +726,7 @@ pub(crate) async fn run(
          * set, we will not clone the repository.
          */
         if !c.skip_clone {
-            tasks.push(buildomat_openapi::types::TaskSubmit {
+            tasks.push(buildomat_client::types::TaskSubmit {
                 name: "clone repository".into(),
                 env: buildenv.clone(),
                 env_clear: false,
@@ -767,7 +767,7 @@ pub(crate) async fn run(
             "/work".into()
         };
 
-        tasks.push(buildomat_openapi::types::TaskSubmit {
+        tasks.push(buildomat_client::types::TaskSubmit {
             name: "build".into(),
             env: buildenv,
             env_clear: false,
@@ -805,7 +805,7 @@ pub(crate) async fn run(
             tags.insert("gong.plan.sha".to_string(), sha.to_string());
         }
 
-        let body = &buildomat_openapi::types::JobSubmit {
+        let body = &buildomat_client::types::JobSubmit {
             name: format!("gong/{}", cr.id),
             output_rules: c.output_rules.clone(),
             target: c.target.as_deref().unwrap_or("default").into(),
@@ -816,7 +816,7 @@ pub(crate) async fn run(
         };
         let jsr = match b.job_submit(body).await {
             Ok(rv) => rv.into_inner(),
-            Err(buildomat_openapi::Error::ErrorResponse(rv))
+            Err(buildomat_client::Error::ErrorResponse(rv))
                 if rv.status().is_client_error() =>
             {
                 /*

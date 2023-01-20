@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
-use buildomat_openapi::types::*;
+use buildomat_client::types::*;
 use rusty_ulid::Ulid;
 use slog::{debug, error, info, o, trace, warn, Logger};
 

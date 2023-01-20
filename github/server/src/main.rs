@@ -483,28 +483,24 @@ impl App {
         format!("gong-{}", repo.id)
     }
 
-    fn buildomat(&self, repo: &Repository) -> buildomat_openapi::Client {
-        buildomat_openapi::Client::new_with_client(
-            &self.config.buildomat.url,
-            buildomat_common::delegated_client(
-                &self.config.buildomat.token,
-                &self.buildomat_username(repo),
-            )
-            .unwrap(),
-        )
+    fn buildomat(&self, repo: &Repository) -> buildomat_client::Client {
+        buildomat_client::ClientBuilder::new(&self.config.buildomat.url)
+            .bearer_token(&self.config.buildomat.token)
+            .delegated_user(&self.buildomat_username(repo))
+            .build()
+            .unwrap()
     }
 
-    fn buildomat_admin(&self) -> buildomat_openapi::Client {
+    fn buildomat_admin(&self) -> buildomat_client::Client {
         /*
          * The buildomat admin client is used for the overall status page.  It
          * uses the configured service user without switching to a
          * per-repository user.
          */
-        buildomat_openapi::Client::new_with_client(
-            &self.config.buildomat.url,
-            buildomat_common::bearer_client(&self.config.buildomat.token)
-                .unwrap(),
-        )
+        buildomat_client::ClientBuilder::new(&self.config.buildomat.url)
+            .bearer_token(&self.config.buildomat.token)
+            .build()
+            .unwrap()
     }
 }
 

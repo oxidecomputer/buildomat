@@ -127,7 +127,7 @@ struct Central {
     log: Logger,
     db: db::Database,
     config: config::ConfigFile,
-    client: buildomat_openapi::Client,
+    client: buildomat_client::Client,
     hosts: HashMap<String, Host>,
     tx: Mutex<std::sync::mpsc::Sender<Activity>>,
 }
@@ -227,10 +227,9 @@ async fn main() -> Result<()> {
         h.1.state.lock().unwrap().reset();
     }
 
-    let client = buildomat_openapi::Client::new_with_client(
-        &config.general.baseurl,
-        bearer_client(&config.factory.token)?,
-    );
+    let client = buildomat_client::ClientBuilder::new(&config.general.baseurl)
+        .bearer_token(&config.factory.token)
+        .build()?;
 
     let (tx, rx) = std::sync::mpsc::channel();
     let c0 = Arc::new(Central {

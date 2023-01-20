@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Result};
-use buildomat_openapi::types::*;
+use buildomat_client::types::*;
 use rusoto_core::{HttpClient, Region};
 use rusoto_credential::StaticProvider;
 use rusoto_ec2::{

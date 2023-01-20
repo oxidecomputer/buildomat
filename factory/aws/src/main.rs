@@ -16,7 +16,7 @@ use config::ConfigFile;
 struct Central {
     log: Logger,
     config: config::ConfigFile,
-    client: buildomat_openapi::Client,
+    client: buildomat_client::Client,
     targets: Vec<String>,
 }
 
@@ -42,10 +42,9 @@ async fn main() -> Result<()> {
         bail!("must specify configuration file (-f)");
     };
     let targets = config.target.keys().map(String::to_string).collect();
-    let client = buildomat_openapi::Client::new_with_client(
-        &config.general.baseurl,
-        bearer_client(&config.factory.token)?,
-    );
+    let client = buildomat_client::ClientBuilder::new(&config.general.baseurl)
+        .bearer_token(&config.factory.token)
+        .build()?;
 
     let c = Arc::new(Central { log, config, client, targets });
 
