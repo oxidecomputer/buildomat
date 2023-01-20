@@ -89,13 +89,12 @@ pub(crate) struct WorkerPingResult {
     path = "/0/worker/ping",
 }]
 pub(crate) async fn worker_ping(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
 ) -> DSResult<HttpResponseOk<WorkerPingResult>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    let w = c.require_worker(log, &req).await?;
+    let w = c.require_worker(log, &rqctx.request).await?;
 
     info!(log, "worker ping!"; "id" => w.id.to_string());
 
@@ -174,14 +173,13 @@ pub(crate) async fn worker_ping(
     path = "/0/worker/job/{job}/inputs/{input}",
 }]
 pub(crate) async fn worker_job_input_download(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobInputPath>,
 ) -> DSResult<Response<Body>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    let w = c.require_worker(log, &req).await?;
+    let w = c.require_worker(log, &rqctx.request).await?;
 
     let p = path.into_inner();
     let j = c.db.job_by_str(&p.job).or_500()?;
@@ -222,15 +220,14 @@ pub(crate) struct WorkerAppendJob {
     path = "/0/worker/job/{job}/append",
 }]
 pub(crate) async fn worker_job_append(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobPath>,
     append: TypedBody<WorkerAppendJob>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    let w = c.require_worker(log, &req).await?;
+    let w = c.require_worker(log, &rqctx.request).await?;
 
     let a = append.into_inner();
     let j = c.db.job_by_str(&path.into_inner().job).or_500()?; /* XXX */
@@ -256,15 +253,14 @@ pub(crate) async fn worker_job_append(
     path = "/0/worker/job/{job}/task/{task}/append",
 }]
 pub(crate) async fn worker_task_append(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobTaskPath>,
     append: TypedBody<WorkerAppendJob>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    let w = c.require_worker(log, &req).await?;
+    let w = c.require_worker(log, &rqctx.request).await?;
 
     let a = append.into_inner();
     let p = path.into_inner();
@@ -303,15 +299,14 @@ pub(crate) struct WorkerCompleteTask {
     path = "/0/worker/job/{job}/task/{task}/complete",
 }]
 pub(crate) async fn worker_task_complete(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobTaskPath>,
     body: TypedBody<WorkerCompleteTask>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    let w = c.require_worker(log, &req).await?;
+    let w = c.require_worker(log, &rqctx.request).await?;
 
     let b = body.into_inner();
     let p = path.into_inner();
@@ -334,15 +329,14 @@ pub(crate) struct WorkerCompleteJob {
     path = "/0/worker/job/{job}/complete",
 }]
 pub(crate) async fn worker_job_complete(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobPath>,
     body: TypedBody<WorkerCompleteJob>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    let w = c.require_worker(log, &req).await?;
+    let w = c.require_worker(log, &rqctx.request).await?;
 
     let b = body.into_inner();
     let p = path.into_inner();
@@ -365,15 +359,14 @@ pub(crate) struct UploadedChunk {
     path = "/0/worker/job/{job}/chunk",
 }]
 pub(crate) async fn worker_job_upload_chunk(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobPath>,
     chunk: UntypedBody,
 ) -> DSResult<HttpResponseCreated<UploadedChunk>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    let w = c.require_worker(log, &req).await?;
+    let w = c.require_worker(log, &rqctx.request).await?;
     let j = c.db.job_by_str(&path.into_inner().job).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
@@ -402,12 +395,11 @@ pub(crate) struct WorkerAddOutput {
     path = "/0/worker/job/{job}/output",
 }]
 pub(crate) async fn worker_job_add_output(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobPath>,
     add: TypedBody<WorkerAddOutput>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
     /*
@@ -423,7 +415,7 @@ pub(crate) async fn worker_job_add_output(
     } else {
         add.size as u64
     };
-    let w = c.require_worker(log, &req).await?;
+    let w = c.require_worker(log, &rqctx.request).await?;
     let j = c.db.job_by_str(&path.into_inner().job).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
@@ -479,7 +471,7 @@ pub(crate) struct WorkerBootstrapResult {
     path = "/0/worker/bootstrap",
 }]
 pub(crate) async fn worker_bootstrap(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     strap: TypedBody<WorkerBootstrap>,
 ) -> DSResult<HttpResponseCreated<WorkerBootstrapResult>> {
     let c = rqctx.context();

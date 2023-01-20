@@ -100,14 +100,13 @@ pub struct UserCreateResult {
     path = "/0/users",
 }]
 pub(crate) async fn user_create(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     new_user: TypedBody<UserCreate>,
 ) -> DSResult<HttpResponseCreated<UserCreateResult>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req, "user.create").await?;
+    c.require_admin(log, &rqctx.request, "user.create").await?;
 
     let new_user = new_user.into_inner();
     let u = c.db.user_create(&new_user.name).or_500()?;
@@ -124,13 +123,12 @@ pub(crate) async fn user_create(
     path = "/0/users",
 }]
 pub(crate) async fn users_list(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
 ) -> DSResult<HttpResponseOk<Vec<User>>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req, "user.read").await?;
+    c.require_admin(log, &rqctx.request, "user.read").await?;
 
     let out =
         c.db.users()
@@ -152,14 +150,13 @@ pub(crate) async fn users_list(
     path = "/0/users/{user}",
 }]
 pub(crate) async fn user_get(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<UserPath>,
 ) -> DSResult<HttpResponseOk<User>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req, "user.read").await?;
+    c.require_admin(log, &rqctx.request, "user.read").await?;
 
     if let Some(u) = c.db.user_get_by_id(path.into_inner().user()?).or_500()? {
         Ok(HttpResponseOk(User {
@@ -178,14 +175,13 @@ pub(crate) async fn user_get(
     path = "/0/users/{user}/privilege/{privilege}"
 }]
 pub(crate) async fn user_privilege_grant(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<UserPrivilegePath>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req, "privilege.grant").await?;
+    c.require_admin(log, &rqctx.request, "privilege.grant").await?;
 
     let path = path.into_inner();
     let u = path.user()?;
@@ -202,14 +198,13 @@ pub(crate) async fn user_privilege_grant(
     path = "/0/users/{user}/privilege/{privilege}"
 }]
 pub(crate) async fn user_privilege_revoke(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<UserPrivilegePath>,
 ) -> DSResult<HttpResponseDeleted> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req, "privilege.revoke").await?;
+    c.require_admin(log, &rqctx.request, "privilege.revoke").await?;
 
     let path = path.into_inner();
     let u = path.user()?;
@@ -234,14 +229,13 @@ pub struct AdminJobsGetQuery {
     path = "/0/admin/jobs",
 }]
 pub(crate) async fn admin_jobs_get(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     query: TypedQuery<AdminJobsGetQuery>,
 ) -> DSResult<HttpResponseOk<Vec<super::user::Job>>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req, "job.read").await?;
+    c.require_admin(log, &rqctx.request, "job.read").await?;
 
     let q = query.into_inner();
     let jobs = if q.active {
@@ -285,14 +279,13 @@ pub(crate) async fn admin_jobs_get(
     path = "/0/admin/jobs/{job}",
 }]
 pub(crate) async fn admin_job_get(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobPath>,
 ) -> DSResult<HttpResponseOk<super::user::Job>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req, "job.read").await?;
+    c.require_admin(log, &rqctx.request, "job.read").await?;
 
     let id = path.into_inner().job.parse::<db::JobId>().or_500()?;
     let job = c.db.job_by_id(id).or_500()?;
@@ -311,13 +304,12 @@ pub(crate) async fn admin_job_get(
     path = "/0/control/hold",
 }]
 pub(crate) async fn control_hold(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req, "control").await?;
+    c.require_admin(log, &rqctx.request, "control").await?;
 
     info!(log, "ADMIN: HOLD NEW VM CREATION");
     c.inner.lock().unwrap().hold = true;
@@ -330,13 +322,12 @@ pub(crate) async fn control_hold(
     path = "/0/control/resume",
 }]
 pub(crate) async fn control_resume(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req, "control").await?;
+    c.require_admin(log, &rqctx.request, "control").await?;
 
     info!(log, "ADMIN: RESUME NEW VM CREATION");
     c.inner.lock().unwrap().hold = false;
@@ -382,14 +373,13 @@ pub struct WorkersListQuery {
     path = "/0/workers",
 }]
 pub(crate) async fn workers_list(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     query: TypedQuery<WorkersListQuery>,
 ) -> DSResult<HttpResponseOk<WorkersResult>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req, "worker.read").await?;
+    c.require_admin(log, &rqctx.request, "worker.read").await?;
 
     let w = if query.into_inner().active {
         /*
@@ -440,13 +430,12 @@ pub(crate) async fn workers_list(
     path = "/0/workers/recycle",
 }]
 pub(crate) async fn workers_recycle(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req, "control").await?;
+    c.require_admin(log, &rqctx.request, "control").await?;
 
     c.db.worker_recycle_all().or_500()?;
     info!(log, "ADMIN: recycled all workers");
@@ -459,14 +448,13 @@ pub(crate) async fn workers_recycle(
     path = "/0/admin/worker/{worker}/recycle",
 }]
 pub(crate) async fn worker_recycle(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<WorkerPath>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req, "control").await?;
+    c.require_admin(log, &rqctx.request, "control").await?;
 
     let wid = path.into_inner().worker()?;
 
@@ -493,14 +481,13 @@ pub struct FactoryCreateResult {
     path = "/0/admin/factory",
 }]
 pub(crate) async fn factory_create(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     new_fac: TypedBody<FactoryCreate>,
 ) -> DSResult<HttpResponseCreated<FactoryCreateResult>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req, "factory.create").await?;
+    c.require_admin(log, &rqctx.request, "factory.create").await?;
 
     let new_fac = new_fac.into_inner();
     let f = c.db.factory_create(&new_fac.name).or_500()?;
@@ -535,14 +522,13 @@ impl TargetCreateResult {
     path = "/0/admin/target",
 }]
 pub(crate) async fn target_create(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     new_targ: TypedBody<TargetCreate>,
 ) -> DSResult<HttpResponseCreated<TargetCreateResult>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req, "target.create").await?;
+    c.require_admin(log, &rqctx.request, "target.create").await?;
 
     let new_targ = new_targ.into_inner();
     let t = c.db.target_create(&new_targ.name, &new_targ.desc).or_500()?;
@@ -555,13 +541,12 @@ pub(crate) async fn target_create(
     path = "/0/admin/targets",
 }]
 pub(crate) async fn targets_list(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
 ) -> DSResult<HttpResponseOk<Vec<Target>>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req, "target.read").await?;
+    c.require_admin(log, &rqctx.request, "target.read").await?;
 
     let out =
         c.db.targets()
@@ -584,14 +569,13 @@ pub(crate) async fn targets_list(
     path = "/0/admin/targets/{target}/require/{privilege}",
 }]
 pub(crate) async fn target_require_privilege(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<TargetPrivilegePath>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req, "target.write").await?;
+    c.require_admin(log, &rqctx.request, "target.write").await?;
 
     let path = path.into_inner();
     let t = c.db.target_get(path.target()?).or_500()?;
@@ -606,14 +590,13 @@ pub(crate) async fn target_require_privilege(
     path = "/0/admin/targets/{target}/require",
 }]
 pub(crate) async fn target_require_no_privilege(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<TargetPath>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req, "target.write").await?;
+    c.require_admin(log, &rqctx.request, "target.write").await?;
 
     let path = path.into_inner();
     let t = c.db.target_get(path.target()?).or_500()?;
@@ -642,15 +625,14 @@ impl TargetRedirect {
     path = "/0/admin/targets/{target}/redirect",
 }]
 pub(crate) async fn target_redirect(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<TargetPath>,
     body: TypedBody<TargetRedirect>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req, "target.write").await?;
+    c.require_admin(log, &rqctx.request, "target.write").await?;
 
     let path = path.into_inner();
     let t = c.db.target_get(path.target()?).or_500()?;
@@ -681,15 +663,14 @@ pub struct TargetRename {
     path = "/0/admin/targets/{target}/rename",
 }]
 pub(crate) async fn target_rename(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<TargetPath>,
     body: TypedBody<TargetRename>,
 ) -> DSResult<HttpResponseCreated<TargetCreateResult>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    c.require_admin(log, &req, "target.write").await?;
+    c.require_admin(log, &rqctx.request, "target.write").await?;
 
     let path = path.into_inner();
     let t = c.db.target_get(path.target()?).or_500()?;

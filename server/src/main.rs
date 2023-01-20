@@ -15,13 +15,12 @@ use std::sync::{Arc, Mutex};
 use anyhow::{anyhow, bail, Context, Result};
 use dropshot::{
     endpoint, ApiDescription, ConfigDropshot, HttpError, HttpServerStarter,
-    Query as TypedQuery, RequestContext,
+    Query as TypedQuery, RequestContext, RequestInfo,
 };
 use getopts::Options;
 #[allow(unused_imports)]
 use hyper::{
-    header::AUTHORIZATION, header::CONTENT_LENGTH, Body, Request, Response,
-    StatusCode,
+    header::AUTHORIZATION, header::CONTENT_LENGTH, Body, Response, StatusCode,
 };
 use hyper_staticfile::FileBytesStream;
 use rusoto_s3::S3;
@@ -204,7 +203,7 @@ impl Central {
     fn _int_delegate_username(
         &self,
         _log: &Logger,
-        req: &Request<Body>,
+        req: &RequestInfo,
     ) -> SResult<Option<String>, HttpError> {
         Ok(if let Some(h) = req.headers().get("x-buildomat-delegate") {
             if let Ok(v) = h.to_str() {
@@ -220,7 +219,7 @@ impl Central {
     fn _int_auth_token(
         &self,
         log: &Logger,
-        req: &Request<Body>,
+        req: &RequestInfo,
     ) -> SResult<String, HttpError> {
         let v = if let Some(h) = req.headers().get(AUTHORIZATION) {
             if let Ok(v) = h.to_str() {
@@ -256,7 +255,7 @@ impl Central {
     async fn require_admin(
         &self,
         log: &Logger,
-        req: &Request<Body>,
+        req: &RequestInfo,
         privname: &str,
     ) -> SResult<(), HttpError> {
         let t = self._int_auth_token(log, req)?;
@@ -296,7 +295,7 @@ impl Central {
     async fn require_user(
         &self,
         log: &Logger,
-        req: &Request<Body>,
+        req: &RequestInfo,
     ) -> SResult<db::AuthUser, HttpError> {
         /*
          * First, use the bearer token to authenticate the user making the
@@ -346,7 +345,7 @@ impl Central {
     async fn require_worker(
         &self,
         log: &Logger,
-        req: &Request<Body>,
+        req: &RequestInfo,
     ) -> SResult<db::Worker, HttpError> {
         let t = self._int_auth_token(log, req)?;
         match self.db.worker_auth(&t) {
@@ -361,7 +360,7 @@ impl Central {
     async fn require_factory(
         &self,
         log: &Logger,
-        req: &Request<Body>,
+        req: &RequestInfo,
     ) -> SResult<db::Factory, HttpError> {
         let t = self._int_auth_token(log, req)?;
         match self.db.factory_auth(&t) {
@@ -574,7 +573,7 @@ impl FileAgentQuery {
     path = "/file/agent",
 }]
 async fn file_agent(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     query: TypedQuery<FileAgentQuery>,
 ) -> SResult<Response<Body>, HttpError> {
     let log = &rqctx.log;

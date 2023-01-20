@@ -40,13 +40,12 @@ pub(crate) struct FactoryPingResult {
     path = "/0/factory/ping",
 }]
 pub(crate) async fn factory_ping(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
 ) -> DSResult<HttpResponseOk<FactoryPingResult>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    let f = c.require_factory(log, &req).await?;
+    let f = c.require_factory(log, &rqctx.request).await?;
 
     info!(log, "factory ping!"; "id" => f.id.to_string());
 
@@ -94,13 +93,12 @@ impl From<&db::Worker> for FactoryWorker {
     path = "/0/factory/workers",
 }]
 pub(crate) async fn factory_workers(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
 ) -> DSResult<HttpResponseOk<Vec<FactoryWorker>>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    let f = c.require_factory(log, &req).await?;
+    let f = c.require_factory(log, &rqctx.request).await?;
     let workers =
         c.db.workers_for_factory(&f)
             .or_500()?
@@ -129,16 +127,15 @@ pub(crate) struct FactoryWorkerResult {
     path = "/0/factory/worker/{worker}",
 }]
 pub(crate) async fn factory_worker_get(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<WorkerPath>,
 ) -> DSResult<HttpResponseOk<FactoryWorkerResult>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
     let p = path.into_inner();
 
-    let f = c.require_factory(log, &req).await?;
+    let f = c.require_factory(log, &rqctx.request).await?;
     let w = if let Some(w) = c.db.worker_get_opt(p.worker()?).or_500()? {
         w
     } else {
@@ -175,18 +172,17 @@ pub(crate) struct FactoryWorkerAppendResult {
     path = "/0/factory/worker/{worker}/append",
 }]
 pub(crate) async fn factory_worker_append(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<WorkerPath>,
     body: TypedBody<FactoryWorkerAppend>,
 ) -> DSResult<HttpResponseOk<FactoryWorkerAppendResult>> {
     let c = rqctx.context();
     let log = &rqctx.log;
-    let req = rqctx.request.lock().await;
 
     let p = path.into_inner();
     let b = body.into_inner();
 
-    let f = c.require_factory(log, &req).await?;
+    let f = c.require_factory(log, &rqctx.request).await?;
 
     let w = c.db.worker_get(p.worker()?).or_500()?;
     f.owns(log, &w)?;
@@ -243,16 +239,15 @@ pub(crate) async fn factory_worker_append(
     path = "/0/factory/worker/{worker}/flush",
 }]
 pub(crate) async fn factory_worker_flush(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<WorkerPath>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let log = &rqctx.log;
-    let req = rqctx.request.lock().await;
 
     let p = path.into_inner();
 
-    let f = c.require_factory(log, &req).await?;
+    let f = c.require_factory(log, &rqctx.request).await?;
 
     let w = c.db.worker_get(p.worker()?).or_500()?;
     f.owns(log, &w)?;
@@ -275,18 +270,17 @@ pub(crate) struct FactoryWorkerAssociate {
     path = "/0/factory/worker/{worker}",
 }]
 pub(crate) async fn factory_worker_associate(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<WorkerPath>,
     body: TypedBody<FactoryWorkerAssociate>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let log = &rqctx.log;
-    let req = rqctx.request.lock().await;
 
     let p = path.into_inner();
     let b = body.into_inner();
 
-    let f = c.require_factory(log, &req).await?;
+    let f = c.require_factory(log, &rqctx.request).await?;
 
     let w = c.db.worker_get(p.worker()?).or_500()?;
     f.owns(log, &w)?;
@@ -312,16 +306,15 @@ pub(crate) async fn factory_worker_associate(
     path = "/0/factory/worker/{worker}",
 }]
 pub(crate) async fn factory_worker_destroy(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<WorkerPath>,
 ) -> DSResult<HttpResponseOk<bool>> {
     let c = rqctx.context();
     let log = &rqctx.log;
-    let req = rqctx.request.lock().await;
 
     let p = path.into_inner();
 
-    let f = c.require_factory(log, &req).await?;
+    let f = c.require_factory(log, &rqctx.request).await?;
 
     let w = c.db.worker_get(p.worker()?).or_500()?;
     f.owns(log, &w)?;
@@ -365,16 +358,15 @@ impl FactoryWorkerCreate {
     path = "/0/factory/worker",
 }]
 pub(crate) async fn factory_worker_create(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     body: TypedBody<FactoryWorkerCreate>,
 ) -> DSResult<HttpResponseCreated<FactoryWorker>> {
     let c = rqctx.context();
     let log = &rqctx.log;
-    let req = rqctx.request.lock().await;
 
     let b = body.into_inner();
 
-    let f = c.require_factory(log, &req).await?;
+    let f = c.require_factory(log, &rqctx.request).await?;
     let t = c.db.target_get(b.target()?).or_500()?;
     let j = b.job()?;
 
@@ -421,16 +413,15 @@ pub(crate) struct FactoryLeaseResult {
     path = "/0/factory/lease",
 }]
 pub(crate) async fn factory_lease(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     body: TypedBody<FactoryWhatsNext>,
 ) -> DSResult<HttpResponseOk<FactoryLeaseResult>> {
     let c = rqctx.context();
     let log = &rqctx.log;
-    let req = rqctx.request.lock().await;
 
     let supported_targets = body.into_inner().supported_targets()?;
 
-    let f = c.require_factory(log, &req).await?;
+    let f = c.require_factory(log, &rqctx.request).await?;
 
     if c.inner.lock().unwrap().hold {
         /*
@@ -480,16 +471,15 @@ impl FactoryJobPath {
     path = "/0/factory/lease/{job}",
 }]
 pub(crate) async fn factory_lease_renew(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<FactoryJobPath>,
 ) -> DSResult<HttpResponseOk<bool>> {
     let c = rqctx.context();
     let log = &rqctx.log;
-    let req = rqctx.request.lock().await;
 
     let p = path.into_inner();
 
-    let f = c.require_factory(log, &req).await?;
+    let f = c.require_factory(log, &rqctx.request).await?;
     let job = p.job()?;
 
     if c.inner.lock().unwrap().leases.renew_lease(job, f.id) {

@@ -94,7 +94,7 @@ pub trait UlidDateExt {
 
 impl UlidDateExt for Ulid {
     fn creation(&self) -> DateTime<Utc> {
-        Utc.timestamp_millis(self.timestamp() as i64)
+        Utc.timestamp_millis_opt(self.timestamp().try_into().unwrap()).unwrap()
     }
 
     fn age(&self) -> Duration {

@@ -177,7 +177,7 @@ struct HostFilePath {
     unpublished = true,
 }]
 async fn os_file(
-    ctx: Arc<dropshot::RequestContext<Arc<Central>>>,
+    ctx: dropshot::RequestContext<Arc<Central>>,
     path: TypedPath<HostFilePath>,
 ) -> HResult<hyper::Response<hyper::Body>> {
     let c = ctx.context();
@@ -242,7 +242,7 @@ async fn os_file(
     unpublished = true,
 }]
 async fn signal(
-    ctx: Arc<dropshot::RequestContext<Arc<Central>>>,
+    ctx: dropshot::RequestContext<Arc<Central>>,
     query: TypedQuery<KeyQuery>,
     path: TypedPath<IpxePath>,
 ) -> HResult<hyper::Response<hyper::Body>> {
@@ -295,7 +295,7 @@ async fn signal(
     unpublished = true,
 }]
 async fn postboot_script(
-    ctx: Arc<dropshot::RequestContext<Arc<Central>>>,
+    ctx: dropshot::RequestContext<Arc<Central>>,
     path: TypedPath<IpxePath>,
 ) -> HResult<hyper::Response<hyper::Body>> {
     let c = ctx.context();
@@ -329,7 +329,7 @@ async fn postboot_script(
     unpublished = true,
 }]
 async fn ipxe_script(
-    ctx: Arc<dropshot::RequestContext<Arc<Central>>>,
+    ctx: dropshot::RequestContext<Arc<Central>>,
     path: TypedPath<IpxePath>,
 ) -> HResult<hyper::Response<hyper::Body>> {
     let c = ctx.context();

@@ -103,7 +103,7 @@ struct ArtefactQuery {
     path = "/artefact/{check_suite}/{url_key}/{check_run}/{output}/{name}"
 }]
 async fn artefact(
-    rc: Arc<RequestContext<Arc<App>>>,
+    rc: RequestContext<Arc<App>>,
     path: dropshot::Path<ArtefactPath>,
     query: dropshot::Query<ArtefactQuery>,
 ) -> SResult<hyper::Response<hyper::Body>, HttpError> {
@@ -167,7 +167,7 @@ impl DetailsPath {
     path = "/details/{check_suite}/{url_key}/{check_run}",
 }]
 async fn details(
-    rc: Arc<RequestContext<Arc<App>>>,
+    rc: RequestContext<Arc<App>>,
     path: dropshot::Path<DetailsPath>,
 ) -> SResult<hyper::Response<hyper::Body>, HttpError> {
     let app = rc.context();
@@ -218,18 +218,17 @@ async fn details(
     path = "/webhook",
 }]
 async fn webhook(
-    rc: Arc<RequestContext<Arc<App>>>,
+    rc: RequestContext<Arc<App>>,
     body: dropshot::UntypedBody,
 ) -> SResult<HttpResponseOk<()>, HttpError> {
     let app = rc.context();
     let log = &rc.log;
-    let req = rc.request.lock().await;
 
     /*
      * Locate the HMAC-256 signature of the body from Github.
      */
     let sig = {
-        if let Some(h) = req.headers().get("x-hub-signature-256") {
+        if let Some(h) = rc.request.headers().get("x-hub-signature-256") {
             if let Ok(s) = h.to_str() {
                 s.to_string()
             } else {
@@ -262,7 +261,7 @@ async fn webhook(
      * Save the headers as well.
      */
     let mut headers = HashMap::new();
-    for (k, v) in req.headers().iter() {
+    for (k, v) in rc.request.headers().iter() {
         trace!(log, "header: {} -> {:?}", k, v);
         headers.insert(k.to_string(), v.to_str().unwrap().to_string());
     }
@@ -295,7 +294,7 @@ async fn webhook(
     path = "/status",
 }]
 async fn status(
-    rc: Arc<RequestContext<Arc<App>>>,
+    rc: RequestContext<Arc<App>>,
 ) -> SResult<hyper::Response<hyper::Body>, HttpError> {
     let app = rc.context();
     let b = app.buildomat_admin();
@@ -598,7 +597,7 @@ struct PublishedFilePath {
     path = "/public/file/{owner}/{repo}/{series}/{version}/{name}",
 }]
 async fn published_file(
-    rc: Arc<RequestContext<Arc<App>>>,
+    rc: RequestContext<Arc<App>>,
     path: dropshot::Path<PublishedFilePath>,
 ) -> SResult<hyper::Response<hyper::Body>, HttpError> {
     let app = rc.context();

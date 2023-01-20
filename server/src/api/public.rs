@@ -17,7 +17,7 @@ pub(crate) struct PublicFilePath {
     path = "/0/public/file/{username}/{series}/{version}/{name}",
 }]
 pub(crate) async fn public_file_download(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<PublicFilePath>,
 ) -> DSResult<Response<Body>> {
     let c = rqctx.context();

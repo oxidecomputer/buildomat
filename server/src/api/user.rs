@@ -44,18 +44,17 @@ pub(crate) struct JobsEventsQuery {
     path = "/0/jobs/{job}/events",
 }]
 pub(crate) async fn job_events_get(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobsPath>,
     query: TypedQuery<JobsEventsQuery>,
 ) -> DSResult<HttpResponseOk<Vec<JobEvent>>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
     let p = path.into_inner();
     let q = query.into_inner();
 
-    let owner = c.require_user(log, &req).await?;
+    let owner = c.require_user(log, &rqctx.request).await?;
 
     let j = c.db.job_by_str(&p.job).or_500()?;
     if j.owner != owner.id {
@@ -87,16 +86,15 @@ pub(crate) async fn job_events_get(
     path = "/0/jobs/{job}/outputs",
 }]
 pub(crate) async fn job_outputs_get(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobsPath>,
 ) -> DSResult<HttpResponseOk<Vec<JobOutput>>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
     let p = path.into_inner();
 
-    let owner = c.require_user(log, &req).await?;
+    let owner = c.require_user(log, &rqctx.request).await?;
 
     let j = c.db.job_by_str(&p.job).or_500()?;
     if j.owner != owner.id {
@@ -125,16 +123,15 @@ pub(crate) async fn job_outputs_get(
     path = "/0/jobs/{job}/outputs/{output}",
 }]
 pub(crate) async fn job_output_download(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobsOutputsPath>,
 ) -> DSResult<Response<Body>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
     let p = path.into_inner();
 
-    let owner = c.require_user(log, &req).await?;
+    let owner = c.require_user(log, &rqctx.request).await?;
 
     let t = c.db.job_by_str(&p.job).or_500()?;
     if t.owner != owner.id {
@@ -202,12 +199,11 @@ impl JobOutputPublish {
     path = "/0/jobs/{job}/outputs/{output}/publish",
 }]
 pub(crate) async fn job_output_publish(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobsOutputsPath>,
     body: TypedBody<JobOutputPublish>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
     let p = path.into_inner();
@@ -215,7 +211,7 @@ pub(crate) async fn job_output_publish(
     let b = body.into_inner();
     b.safe()?;
 
-    let owner = c.require_user(log, &req).await?;
+    let owner = c.require_user(log, &rqctx.request).await?;
 
     let t = c.db.job_by_str(&p.job).or_500()?;
     if t.owner != owner.id {
@@ -338,14 +334,13 @@ pub(crate) struct JobGetPath {
     path = "/0/job/{job}",
 }]
 pub(crate) async fn job_get(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobGetPath>,
 ) -> DSResult<HttpResponseOk<Job>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    let owner = c.require_user(log, &req).await?;
+    let owner = c.require_user(log, &rqctx.request).await?;
 
     let p = path.into_inner();
 
@@ -375,13 +370,12 @@ pub(crate) async fn job_get(
     path = "/0/jobs",
 }]
 pub(crate) async fn jobs_get(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
 ) -> DSResult<HttpResponseOk<Vec<Job>>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    let owner = c.require_user(log, &req).await?;
+    let owner = c.require_user(log, &rqctx.request).await?;
 
     let jobs =
         c.db.user_jobs(owner.id)
@@ -580,14 +574,13 @@ fn parse_output_rule(input: &str) -> DSResult<db::CreateOutputRule> {
     path = "/0/jobs",
 }]
 pub(crate) async fn job_submit(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     new_job: TypedBody<JobSubmit>,
 ) -> DSResult<HttpResponseCreated<JobSubmitResult>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    let owner = c.require_user(log, &req).await?;
+    let owner = c.require_user(log, &rqctx.request).await?;
     let new_job = new_job.into_inner();
 
     if new_job.tasks.len() > 100 {
@@ -733,15 +726,14 @@ pub(crate) async fn job_submit(
     path = "/0/jobs/{job}/chunk",
 }]
 pub(crate) async fn job_upload_chunk(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobsPath>,
     chunk: UntypedBody,
 ) -> DSResult<HttpResponseCreated<UploadedChunk>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    let owner = c.require_user(log, &req).await?;
+    let owner = c.require_user(log, &rqctx.request).await?;
 
     let p = path.into_inner();
 
@@ -787,15 +779,14 @@ pub(crate) struct JobAddInput {
     path = "/0/jobs/{job}/input",
 }]
 pub(crate) async fn job_add_input(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobsPath>,
     add: TypedBody<JobAddInput>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    let owner = c.require_user(log, &req).await?;
+    let owner = c.require_user(log, &rqctx.request).await?;
 
     let p = path.into_inner();
 
@@ -877,14 +868,13 @@ pub(crate) async fn job_add_input(
     path = "/0/jobs/{job}/cancel",
 }]
 pub(crate) async fn job_cancel(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobsPath>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    let owner = c.require_user(log, &req).await?;
+    let owner = c.require_user(log, &rqctx.request).await?;
 
     let p = path.into_inner();
 
@@ -922,13 +912,12 @@ pub(crate) struct WhoamiResult {
     path = "/0/whoami",
 }]
 pub(crate) async fn whoami(
-    rqctx: Arc<RequestContext<Arc<Central>>>,
+    rqctx: RequestContext<Arc<Central>>,
 ) -> DSResult<HttpResponseOk<WhoamiResult>> {
     let c = rqctx.context();
-    let req = rqctx.request.lock().await;
     let log = &rqctx.log;
 
-    let u = c.require_user(log, &req).await?;
+    let u = c.require_user(log, &rqctx.request).await?;
 
     Ok(HttpResponseOk(WhoamiResult { id: u.id.to_string(), name: u.user.name }))
 }
