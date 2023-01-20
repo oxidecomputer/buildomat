@@ -5,20 +5,20 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-anyhow = "1.0.41"
-base64 = "0.13"
-chrono = { version = "0.4.19", features = ["serde"] }
-hmac-sha256 = "1"
-hyper = "0.14"
-jsonwebtoken = "7.2.0"
-nom_pem = "4.0.0"
-octorust = { git = "https://github.com/oxidecomputer/third-party-api-clients", branch = "jclulow" }
-reqwest = "0.11.4"
-rusty_ulid = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-slog = "2.7"
-tokio = { version = "1.8.1", features = ["full"] }
-toml = "0.5.8"
+anyhow = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true }
+hiercmd = { workspace = true }
+hmac-sha256 = { workspace = true }
+hyper = { workspace = true }
+jsonwebtoken = { workspace = true }
+nom_pem = { workspace = true }
+octorust = { workspace = true }
+reqwest = { workspace = true }
+rusty_ulid = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+slog = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }
 wollongong-common = { path = "../common" }
-hiercmd = { git = "https://github.com/jclulow/hiercmd" }

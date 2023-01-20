@@ -5,24 +5,24 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-anyhow = "1"
-base64 = "0.13"
-chrono = "0.4"
-diesel = { git = "https://github.com/diesel-rs/diesel", branch = "2.0.x", features = ["sqlite", "extras"] }
-dropshot = { git = "https://github.com/oxidecomputer/dropshot" }
-getopts = "0.2"
-hyper = "0.14"
-hyper-staticfile = { version = "0.8.0", git = "https://github.com/jclulow/hyper-staticfile", branch = "jclulow" }
-rusoto_core = "0.48.0"
-rusoto_credential = "0.48.0"
-rusoto_s3 = "0.48.0"
-rusty_ulid = "1"
-schemars = { version = "0.8", features = [ "chrono" ] }
-serde = { version = "1", features = [ "derive" ] }
-serde_json = "1.0.66"
-slog = "2.7"
-thiserror = "1"
-tokio = { version = "1", features = [ "full" ] }
+anyhow = { workspace = true }
+base64 = { workspace = true }
 buildomat-common = { path = "../common" }
-tokio-util = { version = "0.6.9", features = ["io"] }
-walkdir = "2.3.2"
+chrono = { workspace = true }
+diesel = { workspace = true }
+dropshot = { workspace = true }
+getopts = { workspace = true }
+hyper = { workspace = true }
+hyper-staticfile = { workspace = true }
+rusoto_core = { workspace = true }
+rusoto_credential = { workspace = true }
+rusoto_s3 = { workspace = true }
+rusty_ulid = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+slog = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+walkdir = { workspace = true }

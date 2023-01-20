@@ -5,17 +5,17 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-anyhow = "1"
-rusoto_core = "0.48.0"
-rusoto_credential = "0.48.0"
-rusoto_ec2 = "0.48.0"
-rusty_ulid = "1"
-slog = "2.7"
-slog-term = "2.7"
-base64 = "0.13"
-tokio = { version = "1", features = [ "full" ] }
-serde = { version = "1", features = [ "derive" ] }
-toml = "0.5"
-buildomat-openapi = { path = "../../openapi" }
+anyhow = { workspace = true }
+base64 = { workspace = true }
 buildomat-common = { path = "../../common" }
-getopts = "0.2"
+buildomat-openapi = { path = "../../openapi" }
+getopts = { workspace = true }
+rusoto_core = { workspace = true }
+rusoto_credential = { workspace = true }
+rusoto_ec2 = { workspace = true }
+rusty_ulid = { workspace = true }
+serde = { workspace = true }
+slog = { workspace = true }
+slog-term = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }

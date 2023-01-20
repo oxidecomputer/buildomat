@@ -2,21 +2,22 @@
 name = "buildomat-common"
 version = "0.0.0"
 edition = "2021"
+license = "MPL-2.0"
 
 [dependencies]
-anyhow = "1"
-base64 = "0.13"
+anyhow = { workspace = true }
+base64 = { workspace = true }
 buildomat-openapi = { path = "../openapi" }
-chrono = { version = "0.4", features = ["serde"] }
-diesel = { git = "https://github.com/diesel-rs/diesel", branch = "2.0.x", features = ["sqlite", "extras"] }
-getopts = "0.2"
-rand = "0.8"
-reqwest = { version = "0.11", features = ["json", "stream"] }
-rusty_ulid = "1"
-serde = { version = "1", features = [ "derive" ] }
-serde_json = "1.0.66"
-slog = "2.7"
-slog-term = "2.7"
-tokio = { version = "1", features = [ "full" ] }
-toml = "0.5"
-new_mime_guess = "4"
+chrono = { workspace = true }
+diesel = { workspace = true }
+getopts = { workspace = true }
+new_mime_guess = { workspace = true }
+rand = { workspace = true }
+reqwest = { workspace = true }
+rusty_ulid = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+slog = { workspace = true }
+slog-term = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }

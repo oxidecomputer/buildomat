@@ -5,15 +5,15 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-anyhow = "1.0.41"
+anyhow = { workspace = true }
 buildomat-common = { path = "../../common" }
 wollongong-common = { path = "../common" }
-chrono = { version = "0.4.19", features = ["serde"] }
-diesel = { git = "https://github.com/diesel-rs/diesel", branch = "2.0.x", features = ["sqlite", "extras", "serde_json"] }
-rand = "0.8.4"
-rusty_ulid = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-serde_with = "1.10.0"
-slog = "2.7"
-thiserror = "1"
+chrono = { workspace = true }
+diesel = { workspace = true }
+rand = { workspace = true }
+rusty_ulid = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_with = { workspace = true }
+slog = { workspace = true }
+thiserror = { workspace = true }

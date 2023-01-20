@@ -5,30 +5,30 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-anyhow = "1.0.41"
-base64 = "0.13"
-buildomat-openapi = { path = "../../openapi" }
-buildomat-common = { path = "../../common" }
+anyhow = { workspace = true }
+base64 = { workspace = true }
 buildomat-bunyan = { path = "../../bunyan" }
-chrono = { version = "0.4.19", features = ["serde"] }
-dropshot = { git = "https://github.com/oxidecomputer/dropshot" }
-hmac-sha256 = "1"
-hyper = "0.14"
-jsonwebtoken = "7.2.0"
-nom_pem = "4.0.0"
-octorust = { git = "https://github.com/oxidecomputer/third-party-api-clients", branch = "jclulow" }
-reqwest = "0.11.4"
-rusty_ulid = "1"
-schemars = "0.8.3"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-slog = "2.7"
-thiserror = "1"
-tokio = { version = "1.8.1", features = ["full"] }
-toml = "0.5.8"
+buildomat-common = { path = "../../common" }
+buildomat-openapi = { path = "../../openapi" }
+chrono = { workspace = true }
+dropshot = { workspace = true }
+futures = { workspace = true }
+hmac-sha256 = { workspace = true }
+html-escape = { workspace = true }
+hyper = { workspace = true }
+jsonwebtoken = { workspace = true }
+nom_pem = { workspace = true }
+octorust = { workspace = true }
+reqwest = { workspace = true }
+rusty_ulid = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+slog = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+toml = { workspace = true }
 wollongong-common = { path = "../common" }
 wollongong-database = { path = "../database" }
-tempfile = "3.3.0"
-futures = "0.3.21"
-tokio-util = { version = "0.6.9", features = ["io"] }
-html-escape = "0.2.11"
