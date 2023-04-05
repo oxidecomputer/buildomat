@@ -73,4 +73,6 @@ pub(crate) struct ConfigFileHost {
     pub lom_password: String,
     #[serde(default)]
     pub debug_os_dir: Option<String>,
+    #[serde(default)]
+    pub debug_os_postboot_sh: Option<String>,
 }

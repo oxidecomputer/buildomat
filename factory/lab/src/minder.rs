@@ -312,7 +312,20 @@ async fn postboot_script(
         ));
     }
 
-    let script = if hc.debug_os_dir.is_some() {
+    let script = if let Some(path) = hc.debug_os_postboot_sh.as_deref() {
+        /*
+         * If we have been given a local file path for a debug postboot script,
+         * load it from the file system now.  We still need to expand tokens
+         * like %HOST% that appear in the script.
+         */
+        FormatScript::new(&c.config, &hc)
+            .instance(i.as_ref())
+            .format(&std::fs::read_to_string(&path).or_500()?)
+    } else if hc.debug_os_dir.is_some() {
+        /*
+         * Otherwise, if we are booting debug media, provide a blank postboot
+         * script:
+         */
         "".to_string()
     } else {
         FormatScript::new(&c.config, &hc)
