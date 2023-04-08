@@ -1507,7 +1507,18 @@ async fn flush_check_runs(
                 ..Default::default()
             };
 
-            gh.checks().update(&repo.owner, &repo.name, *ghid, &body).await?;
+            gh.checks()
+                .update(&repo.owner, &repo.name, *ghid, &body)
+                .await
+                .map_err(|e| {
+                    anyhow!(
+                        "updating check suite {} run {} ({}/{}): {e}",
+                        cs.id,
+                        cr.id,
+                        repo.owner,
+                        repo.name,
+                    )
+                })?;
 
             info!(log, "check suite {} run {} updated", cs.id, cr.id);
         } else {
@@ -1530,8 +1541,19 @@ async fn flush_check_runs(
                 ..Default::default()
             };
 
-            let res =
-                gh.checks().create(&repo.owner, &repo.name, &body).await?;
+            let res = gh
+                .checks()
+                .create(&repo.owner, &repo.name, &body)
+                .await
+                .map_err(|e| {
+                    anyhow!(
+                        "creating check suite {} run {} ({}/{}): {e}",
+                        cs.id,
+                        cr.id,
+                        repo.owner,
+                        repo.name,
+                    )
+                })?;
 
             info!(
                 log,
@@ -2075,9 +2097,20 @@ async fn bgtask(app: Arc<App>) {
             Ok(suites) => {
                 for suite in suites {
                     if let Err(e) = process_check_suite(&app, &suite.id).await {
+                        /*
+                         * Attempt to include the check suite state in the log
+                         * message.
+                         */
+                        let st = match app.db.load_check_suite(&suite.id) {
+                            Ok(cs) => cs.state.to_string(),
+                            Err(_) => "?".into(),
+                        };
+
                         error!(
                             log,
-                            "background task: suite {}: {:?}", suite.id, e
+                            "background task: suite {} (state {st}): {:?}",
+                            suite.id,
+                            e,
                         );
                     }
                 }
