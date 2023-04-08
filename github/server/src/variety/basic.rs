@@ -20,6 +20,8 @@ const MEGABYTE: f64 = 1024.0 * KILOBYTE;
 const GIGABYTE: f64 = 1024.0 * MEGABYTE;
 
 const MAX_OUTPUTS: usize = 25;
+const MAX_TAIL_LINES: usize = 22;
+const MAX_LINE_LENGTH: usize = 90;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct BasicConfig {
@@ -354,14 +356,14 @@ pub(crate) async fn run(
                      * small number of long lines means our status update will
                      * not be accepted.
                      *
-                     * If a line is longer than 100 characters, truncate it.
+                     * If a line is longer than 90 characters, truncate it.
                      * Users will still be able to see the full output in our
                      * detailed view where we get to render the whole page.
                      */
                     let mut line =
                         if console { "|C| " } else { "| " }.to_string();
                     let mut chars = ev.payload.chars();
-                    for _ in 0..100 {
+                    for _ in 0..MAX_LINE_LENGTH {
                         if let Some(c) = chars.next() {
                             line.push(c);
                         } else {
@@ -384,7 +386,7 @@ pub(crate) async fn run(
                 }
             }
 
-            while p.events_tail.len() > 25 {
+            while p.events_tail.len() > MAX_TAIL_LINES {
                 change = true;
                 let first = p.events_tail.pop_front().unwrap();
                 if let (Some(tag), msg) = first {
