@@ -84,3 +84,6 @@ CREATE INDEX repository_owner_name ON repository (owner, name);
 -- v 12
 ALTER TABLE check_run ADD COLUMN
     dependencies    TEXT;
+
+-- v 13
+CREATE INDEX check_run_check_suite ON check_run (check_suite);
