@@ -337,6 +337,31 @@ impl Database {
             .get_results(c)?)
     }
 
+    pub fn repo_to_install(&self, repo: &Repository) -> DBResult<Install> {
+        let c = &mut self.1.lock().unwrap().conn;
+
+        /*
+         * First, locate the user that owns the repository.
+         */
+        let user = {
+            use schema::user;
+
+            let user: User = user::dsl::user
+                .filter(user::login.eq(&repo.owner))
+                .get_result(c)?;
+            user.id
+        };
+
+        /*
+         * Check for an installation that belongs to this user.
+         */
+        use schema::install;
+
+        Ok(install::dsl::install
+            .filter(install::owner.eq(user))
+            .get_result(c)?)
+    }
+
     pub fn load_install(&self, id: i64) -> DBResult<Install> {
         use schema::install;
 

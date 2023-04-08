@@ -638,6 +638,65 @@ async fn published_file(
         .body(hyper::Body::wrap_stream(backend.into_inner_stream()))?)
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct BranchToCommitPath {
+    pub owner: String,
+    pub repo: String,
+    pub branch: String,
+}
+
+#[endpoint {
+    method = GET,
+    path = "/public/branch/{owner}/{repo}/{branch}",
+}]
+async fn branch_to_commit(
+    rc: RequestContext<Arc<App>>,
+    path: dropshot::Path<BranchToCommitPath>,
+) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+    let app = rc.context();
+    let path = path.into_inner();
+
+    /*
+     * Make sure we know about this repository before we even bother to look it
+     * up.
+     */
+    let Some(repo) =
+        app.db.lookup_repository(&path.owner, &path.repo).to_500()? else
+    {
+        let out = "<html><head><title>404 Not Found</title>\
+            <body>Not found!</body></html>";
+
+        return Ok(hyper::Response::builder()
+            .status(hyper::StatusCode::NOT_FOUND)
+            .header(hyper::header::CONTENT_TYPE, "text/html")
+            .header(hyper::header::CONTENT_LENGTH, out.as_bytes().len())
+            .body(hyper::Body::from(out))?);
+    };
+
+    /*
+     * We need to use the credentials for the installation owned by the user
+     * that owns this repo:
+     */
+    let install = app.db.repo_to_install(&repo).map_err(|e| {
+        HttpError::for_internal_error(format!("repo {repo:?} to install: {e}"))
+    })?;
+
+    let branch = app
+        .install_client(install.id)
+        .repos()
+        .get_branch(&repo.owner, &repo.name, &path.branch)
+        .await
+        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+    let body = format!("{}\n", branch.commit.sha);
+
+    Ok(hyper::Response::builder()
+        .status(hyper::StatusCode::OK)
+        .header(hyper::header::CONTENT_TYPE, "text/plain")
+        .header(hyper::header::CONTENT_LENGTH, body.as_bytes().len())
+        .body(body.into())?)
+}
+
 pub(crate) async fn server(
     app: Arc<App>,
     bind_address: std::net::SocketAddr,
@@ -654,6 +713,7 @@ pub(crate) async fn server(
     api.register(artefact).unwrap();
     api.register(status).unwrap();
     api.register(published_file).unwrap();
+    api.register(branch_to_commit).unwrap();
 
     let log = app.log.clone();
     let s = dropshot::HttpServerStarter::new(&cd, api, app, &log)
