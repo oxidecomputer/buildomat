@@ -412,8 +412,10 @@ async fn do_job_outputs(mut l: Level<Stuff>) -> Result<()> {
 
 async fn do_job_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("id", 26, true);
+    l.add_column("age", 8, true);
+    l.add_column("s", 1, true);
     l.add_column("name", 32, true);
-    l.add_column("state", 15, true);
+    l.add_column("state", 15, false);
 
     l.optmulti("T", "", "job tag filter", "TAG=VALUE");
     l.optopt("F", "", "job state filter", "STATE");
@@ -450,9 +452,29 @@ async fn do_job_list(mut l: Level<Stuff>) -> Result<()> {
         let mut r = Row::default();
         r.add_str("id", &job.id);
         r.add_str("name", &job.name);
+        r.add_age("age", job.id()?.age());
         if job.state == "failed" && job.cancelled {
+            r.add_str("s", "X");
             r.add_str("state", "cancelled");
         } else {
+            r.add_str(
+                "s",
+                match job.state.as_str() {
+                    /*
+                     * Terminal states in upper case:
+                     */
+                    "failed" => "F",
+                    "completed" => "C",
+                    /*
+                     * Non-terminal states in lower case:
+                     */
+                    "running" => "r",
+                    "waiting" => "w",
+                    "queued" => "q",
+
+                    _ => "?",
+                },
+            );
             r.add_str("state", &job.state);
         }
         t.add_row(r);
