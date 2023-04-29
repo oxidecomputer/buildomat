@@ -320,6 +320,33 @@ impl Central {
         }
     }
 
+    fn archive_dir(&self) -> Result<PathBuf> {
+        let mut p = self.datadir.clone();
+        p.push("archive");
+        std::fs::create_dir_all(&p)?;
+        Ok(p)
+    }
+
+    fn archive_path(&self, job: JobId) -> Result<PathBuf> {
+        let mut p = self.archive_dir()?;
+        p.push(format!("{job}.json"));
+        Ok(p)
+    }
+
+    async fn archive_load(
+        &self,
+        job: JobId,
+    ) -> Result<archive::jobs::ArchivedJob> {
+        let apath = self.archive_path(job)?;
+        let f = std::fs::File::open(&apath)?;
+        let br = std::io::BufReader::new(f);
+        let aj: archive::jobs::ArchivedJob = serde_json::from_reader(br)?;
+        if !aj.is_valid() {
+            bail!("archived job at {apath:?} is not valid");
+        }
+        Ok(aj)
+    }
+
     fn chunk_dir(&self) -> Result<PathBuf> {
         let mut p = self.datadir.clone();
         p.push("chunk");
@@ -743,8 +770,18 @@ async fn main() -> Result<()> {
 
     let c0 = Arc::clone(&c);
     let log0 = log.new(o!("component" => "archive_files"));
-    let t_archive = tokio::task::spawn(async move {
-        archive::archive_files(log0, c0).await.context("archive task failure")
+    let t_archive_files = tokio::task::spawn(async move {
+        archive::files::archive_files(log0, c0)
+            .await
+            .context("archive files task failure")
+    });
+
+    let c0 = Arc::clone(&c);
+    let log0 = log.new(o!("component" => "archive_jobs"));
+    let t_archive_jobs = tokio::task::spawn(async move {
+        archive::jobs::archive_jobs(log0, c0)
+            .await
+            .context("archive jobs task failure")
     });
 
     let c0 = Arc::clone(&c);
@@ -774,7 +811,8 @@ async fn main() -> Result<()> {
         tokio::select! {
             _ = t_assign => bail!("task assignment task stopped early"),
             _ = t_chunks => bail!("chunk cleanup task stopped early"),
-            _ = t_archive => bail!("archive task stopped early"),
+            _ = t_archive_files => bail!("archive files task stopped early"),
+            _ = t_archive_jobs => bail!("archive jobs task stopped early"),
             _ = t_workers => bail!("worker cleanup task stopped early"),
             _ = server_task => bail!("server stopped early"),
         }

@@ -76,6 +76,7 @@ async fn job_assignment_one(log: &Logger, c: &Central) -> Result<()> {
     for j in c.db.jobs_active()?.iter() {
         assert!(!j.complete);
         assert!(!j.waiting);
+        assert!(!j.is_archived());
 
         if j.cancelled {
             /*
@@ -152,6 +153,7 @@ async fn job_waiters_one(log: &Logger, c: &Central) -> Result<()> {
      */
     'job: for j in c.db.jobs_waiting()?.iter() {
         assert!(j.waiting);
+        assert!(!j.is_archived());
 
         if j.cancelled {
             /*

@@ -285,6 +285,10 @@ pub struct Job {
     pub waiting: bool,
     pub target_id: Option<TargetId>,
     pub cancelled: bool,
+    /**
+     * When was this job successfully uploaded to the object store?
+     */
+    pub time_archived: Option<IsoDate>,
 }
 
 impl Job {
@@ -302,6 +306,10 @@ impl Job {
              */
             TargetId::from_str("00E82MSW0000000000000TT000").unwrap()
         })
+    }
+
+    pub fn is_archived(&self) -> bool {
+        self.time_archived.is_some()
     }
 }
 

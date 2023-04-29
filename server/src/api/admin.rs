@@ -274,6 +274,9 @@ pub(crate) async fn admin_jobs_get(
         c.db.jobs_all().or_500()?
     };
 
+    /*
+     * XXX FIX THIS ONE
+     */
     Ok(HttpResponseOk(
         jobs.iter()
             .map(|job| {
@@ -307,6 +310,9 @@ pub(crate) async fn admin_job_get(
     let id = path.into_inner().job.parse::<db::JobId>().or_500()?;
     let job = c.db.job_by_id(id).or_500()?;
 
+    /*
+     * XXX FIX THIS ONE
+     */
     Ok(HttpResponseOk(super::user::format_job(
         &job,
         &c.db.job_tasks(job.id).or_500()?,

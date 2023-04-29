@@ -23,6 +23,7 @@ table! {
         waiting -> Bool,
         target_id -> Nullable<Text>,
         cancelled -> Bool,
+        time_archived -> Nullable<Text>,
     }
 }
 

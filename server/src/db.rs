@@ -810,7 +810,6 @@ impl Database {
         Ok(dsl::job.filter(dsl::id.eq(id)).get_result(c)?)
     }
 
-    #[allow(dead_code)]
     pub fn job_by_id(&self, job: JobId) -> Result<Job> {
         let c = &mut self.1.lock().unwrap().conn;
         use schema::job::dsl;
@@ -888,6 +887,7 @@ impl Database {
             failed: false,
             worker: None,
             cancelled: false,
+            time_archived: None,
         };
 
         /*
@@ -989,15 +989,8 @@ impl Database {
             .get_result(c)?)
     }
 
-    pub fn job_output_by_str(
-        &self,
-        job: &str,
-        file: &str,
-    ) -> Result<JobOutput> {
+    pub fn job_output(&self, job: JobId, file: JobFileId) -> Result<JobOutput> {
         use schema::job_output;
-
-        let job = JobId(Ulid::from_str(job)?);
-        let file = JobFileId(Ulid::from_str(file)?);
 
         let c = &mut self.1.lock().unwrap().conn;
 
@@ -1005,6 +998,20 @@ impl Database {
             .filter(job_output::dsl::job.eq(job))
             .filter(job_output::dsl::id.eq(file))
             .get_result(c)?)
+    }
+
+    pub fn job_published_files(
+        &self,
+        job: JobId,
+    ) -> OResult<Vec<PublishedFile>> {
+        use schema::published_file;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        Ok(published_file::dsl::published_file
+            .filter(published_file::dsl::job.eq(job))
+            .order_by(published_file::dsl::file.asc())
+            .get_results(c)?)
     }
 
     pub fn published_file_by_name(
@@ -1164,6 +1171,45 @@ impl Database {
 
             Ok(())
         })
+    }
+
+    pub fn job_next_unarchived(&self) -> OResult<Option<Job>> {
+        use schema::job;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        /*
+         * Find the oldest completed job that has not yet been archived to long
+         * term storage.
+         */
+        let res: Option<Job> = job::dsl::job
+            .filter(job::dsl::complete.eq(true))
+            .filter(job::dsl::time_archived.is_null())
+            .order_by(job::dsl::id.asc())
+            .limit(1)
+            .get_result(c)
+            .optional()?;
+
+        Ok(res)
+    }
+
+    pub fn job_mark_archived(
+        &self,
+        job: JobId,
+        time: DateTime<Utc>,
+    ) -> OResult<()> {
+        use schema::job;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let uc = diesel::update(job::dsl::job)
+            .filter(job::dsl::id.eq(job))
+            .filter(job::dsl::time_archived.is_null())
+            .set((job::dsl::time_archived.eq(IsoDate(time)),))
+            .execute(c)?;
+        assert_eq!(uc, 1);
+
+        Ok(())
     }
 
     pub fn job_file_next_unarchived(&self) -> OResult<Option<JobFile>> {

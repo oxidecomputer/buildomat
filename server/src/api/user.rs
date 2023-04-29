@@ -40,6 +40,16 @@ pub(crate) struct JobsOutputsPath {
     output: String,
 }
 
+impl JobsOutputsPath {
+    fn job(&self) -> DSResult<db::JobId> {
+        self.job.parse::<db::JobId>().or_500()
+    }
+
+    fn output(&self) -> DSResult<db::JobFileId> {
+        self.output.parse::<db::JobFileId>().or_500()
+    }
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct JobsEventsQuery {
     minseq: Option<usize>,
@@ -71,7 +81,15 @@ pub(crate) async fn job_events_get(
         ));
     }
 
-    let jevs = c.db.job_events(j.id, q.minseq.unwrap_or(0)).or_500()?;
+    let jevs = if j.is_archived() {
+        c.archive_load(j.id)
+            .await
+            .or_500()?
+            .job_events(q.minseq.unwrap_or(0))
+            .or_500()?
+    } else {
+        c.db.job_events(j.id, q.minseq.unwrap_or(0)).or_500()?
+    };
 
     Ok(HttpResponseOk(
         jevs.iter()
@@ -111,7 +129,11 @@ pub(crate) async fn job_outputs_get(
         ));
     }
 
-    let jops = c.db.job_outputs(j.id).or_500()?;
+    let jops = if j.is_archived() {
+        c.archive_load(j.id).await.or_500()?.job_outputs().or_500()?
+    } else {
+        c.db.job_outputs(j.id).or_500()?
+    };
 
     Ok(HttpResponseOk(
         jops.iter()
@@ -139,7 +161,7 @@ pub(crate) async fn job_output_download(
 
     let owner = c.require_user(log, &rqctx.request).await?;
 
-    let t = c.db.job_by_str(&p.job).or_500()?;
+    let t = c.db.job_by_id(p.job()?).or_500()?;
     if t.owner != owner.id {
         return Err(HttpError::for_client_error(
             None,
@@ -148,7 +170,12 @@ pub(crate) async fn job_output_download(
         ));
     }
 
-    let o = c.db.job_output_by_str(&p.job, &p.output).or_500()?;
+    let oid = p.output()?;
+    let o = if t.is_archived() {
+        c.archive_load(t.id).await.or_500()?.job_output(oid).or_500()?
+    } else {
+        c.db.job_output(t.id, oid).or_500()?
+    };
 
     let mut res = Response::builder();
     res = res.header(CONTENT_TYPE, "application/octet-stream");
@@ -286,7 +313,7 @@ pub(crate) async fn job_output_publish(
 
     let owner = c.require_user(log, &rqctx.request).await?;
 
-    let t = c.db.job_by_str(&p.job).or_500()?;
+    let t = c.db.job_by_id(p.job()?).or_500()?;
     if t.owner != owner.id {
         return Err(HttpError::for_client_error(
             None,
@@ -295,7 +322,15 @@ pub(crate) async fn job_output_publish(
         ));
     }
 
-    let o = c.db.job_output_by_str(&p.job, &p.output).or_500()?;
+    if t.is_archived() {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::CONFLICT,
+            "job is already archived".into(),
+        ));
+    }
+
+    let o = c.db.job_output(t.id, p.output()?).or_500()?;
 
     info!(
         log,
@@ -426,15 +461,31 @@ pub(crate) async fn job_get(
         ));
     }
 
-    let tasks = c.db.job_tasks(job.id).or_500()?;
+    let (tasks, output_rules, tags, times) = if job.is_archived() {
+        let aj = c.archive_load(job.id).await.or_500()?;
+
+        (
+            aj.tasks().or_500()?,
+            aj.output_rules().or_500()?,
+            aj.tags().or_500()?,
+            aj.times().or_500()?,
+        )
+    } else {
+        (
+            c.db.job_tasks(job.id).or_500()?,
+            c.db.job_output_rules(job.id).or_500()?,
+            c.db.job_tags(job.id).or_500()?,
+            c.db.job_times(job.id).or_500()?,
+        )
+    };
 
     Ok(HttpResponseOk(format_job(
         &job,
         &tasks,
-        c.db.job_output_rules(job.id).or_500()?,
-        c.db.job_tags(job.id).or_500()?,
+        output_rules,
+        tags,
         &c.db.target_get(job.target()).or_500()?,
-        c.db.job_times(job.id).or_500()?,
+        times,
     )))
 }
 
@@ -450,22 +501,32 @@ pub(crate) async fn jobs_get(
 
     let owner = c.require_user(log, &rqctx.request).await?;
 
-    let jobs =
-        c.db.user_jobs(owner.id)
-            .or_500()?
-            .iter()
-            .map(|j| {
-                let output_rules = c.db.job_output_rules(j.id)?;
-                let tasks = c.db.job_tasks(j.id)?;
-                let tags = c.db.job_tags(j.id)?;
-                let target = c.db.target_get(j.target())?;
-                let times = c.db.job_times(j.id)?;
-                Ok(format_job(j, &tasks, output_rules, tags, &target, times))
-            })
-            .collect::<Result<Vec<_>>>()
-            .or_500()?;
+    let jobs = c.db.user_jobs(owner.id).or_500()?;
+    let mut out = Vec::new();
+    for j in jobs {
+        let (tasks, output_rules, tags, times) = if j.is_archived() {
+            let aj = c.archive_load(j.id).await.or_500()?;
 
-    Ok(HttpResponseOk(jobs))
+            (
+                aj.tasks().or_500()?,
+                aj.output_rules().or_500()?,
+                aj.tags().or_500()?,
+                aj.times().or_500()?,
+            )
+        } else {
+            (
+                c.db.job_tasks(j.id).or_500()?,
+                c.db.job_output_rules(j.id).or_500()?,
+                c.db.job_tags(j.id).or_500()?,
+                c.db.job_times(j.id).or_500()?,
+            )
+        };
+        let target = c.db.target_get(j.target()).or_500()?;
+
+        out.push(format_job(&j, &tasks, output_rules, tags, &target, times));
+    }
+
+    Ok(HttpResponseOk(out))
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -859,6 +920,14 @@ pub(crate) async fn job_upload_chunk(
         ));
     }
 
+    if job.is_archived() {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::CONFLICT,
+            "job is already archived".into(),
+        ));
+    }
+
     let cid = c.write_chunk(job.id, chunk.as_bytes()).or_500()?;
     info!(
         log,
@@ -1049,6 +1118,14 @@ pub(crate) async fn job_add_input_sync(
         ));
     }
 
+    if job.is_archived() {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::CONFLICT,
+            "job is already archived".into(),
+        ));
+    }
+
     /*
      * Individual inputs using the old blocking entrypoint are capped at 1GB to
      * avoid request timeouts.  Larger inputs are possible using the new
@@ -1136,6 +1213,14 @@ pub(crate) async fn job_cancel(
             None,
             StatusCode::CONFLICT,
             "cannot cancel a job that is already complete".into(),
+        ));
+    }
+
+    if job.is_archived() {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::CONFLICT,
+            "job is already archived".into(),
         ));
     }
 
