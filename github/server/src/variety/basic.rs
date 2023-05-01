@@ -1129,6 +1129,7 @@ pub(crate) async fn details(
     app: &Arc<App>,
     cs: &CheckSuite,
     cr: &CheckRun,
+    local_time: bool,
 ) -> Result<String> {
     let mut out = String::new();
 
@@ -1196,9 +1197,35 @@ pub(crate) async fn details(
 
         let mut last = None;
 
+        out += "<tr>\n";
+        out += "<td style=\"vertical-align: top; text-align: right; \">\
+            <span style=\"white-space: pre; \
+            font-family: monospace; \
+            font-weight: bold; \
+            \">SEQ</td>\n";
+        out += "<td style=\"vertical-align: top; text-align: left; \">\
+            <span style=\"white-space: pre; \
+            font-family: monospace; \
+            font-weight: bold; \
+            \">GLOBAL TIME</td>\n";
+        if local_time {
+            out += "<td style=\"vertical-align: top; text-align: left; \">\
+                <span style=\"white-space: pre; \
+                font-family: monospace; \
+                font-weight: bold; \
+                \">LOCAL TIME</td>\n";
+        }
+        out += "<td style=\"vertical-align: top; text-align: left; \">\
+            <span style=\"white-space: pre; \
+            font-family: monospace; \
+            font-weight: bold; \
+            \">DETAILS</td>\n";
+        out += "</tr>\n";
+
         for ev in bm.job_events_get(jid, None).await?.into_inner() {
             if ev.task != last {
-                out += "<tr><td colspan=\"3\">&nbsp;</td></tr>";
+                let cols = if local_time { 4 } else { 3 };
+                out += &format!("<tr><td colspan=\"{cols}\">&nbsp;</td></tr>");
             }
             last = ev.task;
 
@@ -1244,8 +1271,32 @@ pub(crate) async fn details(
                 ev.time.to_rfc3339_opts(SecondsFormat::Millis, true),
             );
 
+            if local_time {
+                /*
+                 * We may be asked to render the job-local time as well as the
+                 * global (NTP) time.
+                 */
+                let t = if let Some(t) = ev.time_remote {
+                    t.to_rfc3339_opts(SecondsFormat::Millis, true)
+                } else {
+                    /*
+                     * Not every record has a remote time.  In that case, we
+                     * render an empty column rather than make up something
+                     * potentially misleading.
+                     */
+                    "&nbsp;".into()
+                };
+                out += &format!(
+                    "<td style=\"vertical-align: top;\">\
+                        <span style=\"white-space: pre; \
+                        font-family: monospace; \
+                        \">{t}</span>\
+                    </td>",
+                );
+            }
+
             /*
-             * The third and final column is the message payload for the event.
+             * The final column is the message payload for the event.
              */
             out += &format!(
                 "<td style=\"vertical-align: top;\">\

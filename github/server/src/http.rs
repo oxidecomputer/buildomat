@@ -162,6 +162,11 @@ impl DetailsPath {
     }
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct DetailsQuery {
+    pub ts: Option<String>,
+}
+
 #[endpoint {
     method = GET,
     path = "/details/{check_suite}/{url_key}/{check_run}",
@@ -169,9 +174,13 @@ impl DetailsPath {
 async fn details(
     rc: RequestContext<Arc<App>>,
     path: dropshot::Path<DetailsPath>,
+    query: dropshot::Query<DetailsQuery>,
 ) -> SResult<hyper::Response<hyper::Body>, HttpError> {
     let app = rc.context();
     let path = path.into_inner();
+
+    let query = query.into_inner();
+    let local_time = query.ts.as_deref() == Some("all");
 
     let cs = app.db.load_check_suite(&path.check_suite()?).to_500()?;
     let cr = app.db.load_check_run(&path.check_run()?).to_500()?;
@@ -199,7 +208,9 @@ async fn details(
             out += &format!("<pre>{:#?}</pre>\n", p);
         }
         CheckRunVariety::Basic => {
-            out += &variety::basic::details(app, &cs, &cr).await.to_500()?;
+            out += &variety::basic::details(app, &cs, &cr, local_time)
+                .await
+                .to_500()?;
         }
     }
 
