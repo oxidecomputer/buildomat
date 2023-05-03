@@ -11,14 +11,13 @@ use serde::{Deserialize, Serialize};
 use slog::{debug, error, info, o, trace, warn, Logger};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use variety::control::{ControlPrivate, CONTROL_RUN_NAME};
 use wollongong_common::hooktypes;
 use wollongong_database::types::*;
 
 mod config;
 mod http;
 mod variety;
-
-const CONTROL_RUN_NAME: &str = "*control";
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct RepoConfig {
@@ -1584,17 +1583,6 @@ struct FailFirstPrivate {
     failed: bool,
     #[serde(default)]
     count: usize,
-}
-
-#[derive(Debug, Serialize, Deserialize, Default)]
-struct ControlPrivate {
-    error: Option<String>,
-    #[serde(default)]
-    complete: bool,
-    #[serde(default)]
-    no_plans: bool,
-    #[serde(default)]
-    need_auth: bool,
 }
 
 /**

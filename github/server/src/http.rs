@@ -196,8 +196,9 @@ async fn details(
 
     match cr.variety {
         CheckRunVariety::Control => {
-            let p: super::ControlPrivate = cr.get_private().to_500()?;
-            out += &format!("<pre>{:#?}</pre>\n", p);
+            out += &variety::control::details(app, &cs, &cr, local_time)
+                .await
+                .to_500()?;
         }
         CheckRunVariety::FailFirst => {
             let p: super::FailFirstPrivate = cr.get_private().to_500()?;
