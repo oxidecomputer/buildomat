@@ -77,7 +77,7 @@ impl FromStr for InstanceState {
             "booted" => InstanceState::Booted,
             "destroying" => InstanceState::Destroying,
             "destroyed" => InstanceState::Destroyed,
-            x => bail!("unknown user type: {:?}", x),
+            x => bail!("unknown instance state: {:?}", x),
         })
     }
 }
