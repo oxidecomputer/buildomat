@@ -7,7 +7,8 @@ use std::path::Path;
 use anyhow::{bail, Result};
 use jmclib::sqlite::rusqlite;
 use rusqlite::{
-    params, Connection, OptionalExtension, Row, TransactionBehavior,
+    params, Connection, OptionalExtension, Row, Transaction,
+    TransactionBehavior,
 };
 use slog::Logger;
 use tokio::sync::{Mutex, MutexGuard};
@@ -43,8 +44,11 @@ pub struct Handle<'a> {
 }
 
 impl Handle<'_> {
-    pub fn instance_get(&self, id: InstanceId) -> Result<Option<Instance>> {
-        let value = self.guard.query_row(
+    fn i_instance_get(
+        tx: &Transaction,
+        id: InstanceId,
+    ) -> Result<Option<Instance>> {
+        let value = tx.query_row(
             &format!(
                 "SELECT {cols} FROM instance WHERE instance = ?",
                 cols = Instance::ALL,
@@ -59,6 +63,44 @@ impl Handle<'_> {
         }
     }
 
+    pub fn instance_get(&mut self, id: InstanceId) -> Result<Option<Instance>> {
+        let tx = self.guard.transaction()?;
+
+        Self::i_instance_get(&tx, id)
+    }
+
+    pub fn instance_new_state(
+        &mut self,
+        id: InstanceId,
+        state: InstanceState,
+    ) -> Result<()> {
+        let tx = self
+            .guard
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+        /*
+         * Get the existing state of this instance:
+         */
+        let i = match Self::i_instance_get(&tx, id) {
+            Ok(Some(i)) => i,
+            Ok(None) => {
+                bail!("instance {id} not found");
+            }
+            Err(e) => {
+                bail!("fetching instance {id}: {e}");
+            }
+        };
+
+        if i.state == state {
+            return Ok(());
+        }
+
+        tx.prepare("UPDATE instance SET state = ? WHERE id = ?")?
+            .execute(params![state, id])?;
+
+        Ok(())
+    }
+
     pub fn instances_active(&self) -> Result<Vec<Instance>> {
         let mut q = self.guard.prepare(&format!(
             "SELECT {cols} FROM instance WHERE state <> ? ORDER BY id ASC",
@@ -70,6 +112,32 @@ impl Handle<'_> {
             .mapped(Instance::from_row)
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
+    }
+
+    pub fn instance_create(
+        &self,
+        worker: &str,
+        target: &str,
+        bootstrap: &str,
+    ) -> Result<InstanceId> {
+        let instance_id = InstanceId::from(Uuid::new_v4());
+
+        let mut q = self.guard.prepare(
+            "INSERT INTO instance
+            (id, worker, target, state, bootstrap, flushed)
+            VALUES (?, ?, ?, ?, ?, ?)",
+        )?;
+
+        q.execute(params![
+            instance_id,
+            worker,
+            target,
+            InstanceState::Unconfigured,
+            bootstrap,
+            true,
+        ])?;
+
+        Ok(instance_id)
     }
 }
 
@@ -90,6 +158,12 @@ pub mod types {
     impl Display for InstanceId {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(f, "{}", self.0)
+        }
+    }
+
+    impl Into<Uuid> for InstanceId {
+        fn into(self) -> Uuid {
+            self.0
         }
     }
 
@@ -121,14 +195,12 @@ pub mod types {
         pub worker: String,
         pub target: String,
         pub state: InstanceState,
-        pub key: String,
         pub bootstrap: String,
         pub flushed: bool,
     }
 
     impl Instance {
-        pub const ALL: &str =
-            "id, worker, target, state, key, bootstrap, flushed";
+        pub const ALL: &str = "id, worker, target, state, bootstrap, flushed";
 
         pub fn from_row(row: &Row) -> rusqlite::Result<Self> {
             Ok(Instance {
@@ -136,7 +208,6 @@ pub mod types {
                 worker: row.get("worker")?,
                 target: row.get("target")?,
                 state: row.get("state")?,
-                key: row.get("key")?,
                 bootstrap: row.get("bootstrap")?,
                 flushed: row.get("flushed")?,
             })
@@ -147,6 +218,7 @@ pub mod types {
         }
     }
 
+    #[derive(Clone, Copy, PartialEq, Eq)]
     pub enum InstanceState {
         Unconfigured,
         Configured,

@@ -4,7 +4,6 @@ CREATE TABLE instance (
     worker          TEXT    NOT NULL,
     target          TEXT    NOT NULL,
     state           TEXT    NOT NULL,
-    key             TEXT    NOT NULL,
     bootstrap       TEXT    NOT NULL,
     flushed         INTEGER NOT NULL
 )

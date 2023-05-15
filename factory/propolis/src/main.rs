@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Result, Context};
 use buildomat_common::*;
 use getopts::Options;
 use slog::{info, o, warn, Drain, Logger};
@@ -76,9 +76,15 @@ async fn main() -> Result<()> {
         });
     }));
 
-    let c0 = Arc::new(Central { log, config, client, db });
+    let c = Arc::new(Central { log, config, client, db });
+
+    let t_vm = tokio::task::spawn(async move {
+        vm::vm_worker(c).await.context("VM worker task failure")
+    });
 
     loop {
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        tokio::select! {
+            _ = t_vm => bail!("VM worker task stopped early"),
+        }
     }
 }
