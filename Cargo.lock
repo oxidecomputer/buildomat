@@ -4,17 +4,6 @@ version = 3
 
 [[package]]
 name = "ahash"
-version = "0.7.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcb51a0695d8f838b1ee009b3fbf66bda078cd64590202a864a8f3e8c4315c47"
-dependencies = [
- "getrandom",
- "once_cell",
- "version_check 0.9.4",
-]
-
-[[package]]
-name = "ahash"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c99f64d1e06488f620f932677e24bc6e2897582980441ae90a671415bd7ec2f"
@@ -272,7 +261,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "futures",
- "progenitor",
+ "progenitor 0.3.0 (git+https://github.com/oxidecomputer/progenitor)",
  "reqwest",
  "serde",
 ]
@@ -369,7 +358,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.5.11",
- "uuid 1.3.2",
+ "uuid 1.3.3",
  "zone",
 ]
 
@@ -590,7 +579,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "uuid 1.3.2",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -666,7 +655,7 @@ dependencies = [
  "r2d2",
  "serde_json",
  "time 0.3.21",
- "uuid 1.3.2",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -730,7 +719,7 @@ checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot#3c45d4d37ae73b30cf2e9b3aed871e4a56963b61"
+source = "git+https://github.com/oxidecomputer/dropshot#7bec9808af8eb0770e7b0244546c1235768652b4"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -765,14 +754,14 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.24.0",
  "toml 0.7.3",
- "uuid 1.3.2",
+ "uuid 1.3.3",
  "version_check 0.9.4",
 ]
 
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot#3c45d4d37ae73b30cf2e9b3aed871e4a56963b61"
+source = "git+https://github.com/oxidecomputer/dropshot#7bec9808af8eb0770e7b0244546c1235768652b4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1036,9 +1025,6 @@ name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
-dependencies = [
- "ahash 0.7.6",
-]
 
 [[package]]
 name = "hashbrown"
@@ -1046,16 +1032,16 @@ version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
 dependencies = [
- "ahash 0.8.3",
+ "ahash",
 ]
 
 [[package]]
 name = "hashlink"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69fe1fcf8b4278d860ad0548329f892a3631fb63f82574df68275f34cdbe0ffa"
+checksum = "0761a1b9491c4f2e3d66aa0f62d0fba0af9a0e2852e4d48ea506632a4b56e6aa"
 dependencies = [
- "hashbrown 0.12.3",
+ "hashbrown 0.13.2",
 ]
 
 [[package]]
@@ -1854,9 +1840,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.56"
+version = "1.0.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b63bdb0cd06f1f4dedf69b254734f9b45af66e4a031e42a7480257d9898b435"
+checksum = "c4ec6d5fe0b140acb27c9a0444118cf55bfbb4e0b259739429abb4521dd67c16"
 dependencies = [
  "unicode-ident",
 ]
@@ -1864,15 +1850,34 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=jclulow-async-pre_hook#d50b645217d5c2426911cab4e53163f1044dad65"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#cbc5cd76daca5c311b07dda3ac601fe58d958322"
 dependencies = [
  "anyhow",
  "built",
  "clap",
  "openapiv3",
- "progenitor-client",
- "progenitor-impl",
- "progenitor-macro",
+ "progenitor-client 0.3.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor-impl 0.3.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor-macro 0.3.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "project-root",
+ "rustfmt-wrapper",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+]
+
+[[package]]
+name = "progenitor"
+version = "0.3.0"
+source = "git+https://github.com/oxidecomputer/progenitor#cbc5cd76daca5c311b07dda3ac601fe58d958322"
+dependencies = [
+ "anyhow",
+ "built",
+ "clap",
+ "openapiv3",
+ "progenitor-client 0.3.0 (git+https://github.com/oxidecomputer/progenitor)",
+ "progenitor-impl 0.3.0 (git+https://github.com/oxidecomputer/progenitor)",
+ "progenitor-macro 0.3.0 (git+https://github.com/oxidecomputer/progenitor)",
  "project-root",
  "rustfmt-wrapper",
  "serde",
@@ -1883,7 +1888,21 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=jclulow-async-pre_hook#d50b645217d5c2426911cab4e53163f1044dad65"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#cbc5cd76daca5c311b07dda3ac601fe58d958322"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "percent-encoding",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+]
+
+[[package]]
+name = "progenitor-client"
+version = "0.3.0"
+source = "git+https://github.com/oxidecomputer/progenitor#cbc5cd76daca5c311b07dda3ac601fe58d958322"
 dependencies = [
  "bytes",
  "futures-core",
@@ -1897,7 +1916,29 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=jclulow-async-pre_hook#d50b645217d5c2426911cab4e53163f1044dad65"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#cbc5cd76daca5c311b07dda3ac601fe58d958322"
+dependencies = [
+ "getopts",
+ "heck",
+ "http",
+ "indexmap",
+ "openapiv3",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "schemars",
+ "serde",
+ "serde_json",
+ "syn 2.0.16",
+ "thiserror",
+ "typify",
+ "unicode-ident",
+]
+
+[[package]]
+name = "progenitor-impl"
+version = "0.3.0"
+source = "git+https://github.com/oxidecomputer/progenitor#cbc5cd76daca5c311b07dda3ac601fe58d958322"
 dependencies = [
  "getopts",
  "heck",
@@ -1919,11 +1960,28 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=jclulow-async-pre_hook#d50b645217d5c2426911cab4e53163f1044dad65"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#cbc5cd76daca5c311b07dda3ac601fe58d958322"
 dependencies = [
  "openapiv3",
  "proc-macro2",
- "progenitor-impl",
+ "progenitor-impl 0.3.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "quote",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_tokenstream",
+ "serde_yaml",
+ "syn 2.0.16",
+]
+
+[[package]]
+name = "progenitor-macro"
+version = "0.3.0"
+source = "git+https://github.com/oxidecomputer/progenitor#cbc5cd76daca5c311b07dda3ac601fe58d958322"
+dependencies = [
+ "openapiv3",
+ "proc-macro2",
+ "progenitor-impl 0.3.0 (git+https://github.com/oxidecomputer/progenitor)",
  "quote",
  "schemars",
  "serde",
@@ -1942,11 +2000,12 @@ checksum = "8bccbff07d5ed689c4087d20d7307a52ab6141edeedf487c3876a55b86cf63df"
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis.git#5f5153600c4b11b5f38f4c460b547a14baf0b0b7"
 dependencies = [
  "base64 0.21.0",
  "crucible-client-types",
  "futures",
- "progenitor",
+ "progenitor 0.3.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "propolis_types",
  "rand",
  "reqwest",
@@ -1958,12 +2017,13 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-tungstenite",
- "uuid 1.3.2",
+ "uuid 1.3.3",
 ]
 
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/propolis.git#5f5153600c4b11b5f38f4c460b547a14baf0b0b7"
 dependencies = [
  "schemars",
  "serde",
@@ -2389,7 +2449,7 @@ dependencies = [
  "serde_json",
  "url",
  "uuid 0.8.2",
- "uuid 1.3.2",
+ "uuid 1.3.3",
 ]
 
 [[package]]
@@ -3113,7 +3173,7 @@ checksum = "497961ef93d974e23eb6f433eb5fe1b7930b659f06d12dec6fc44a8f554c0bba"
 [[package]]
 name = "typify"
 version = "0.0.13"
-source = "git+https://github.com/oxidecomputer/typify#5e966779d4132f3baa128d9df2f83e4a7ff68378"
+source = "git+https://github.com/oxidecomputer/typify#471e215421b3629d2dc73ba67dd831583ad3a7f5"
 dependencies = [
  "typify-impl",
  "typify-macro",
@@ -3122,7 +3182,7 @@ dependencies = [
 [[package]]
 name = "typify-impl"
 version = "0.0.13"
-source = "git+https://github.com/oxidecomputer/typify#5e966779d4132f3baa128d9df2f83e4a7ff68378"
+source = "git+https://github.com/oxidecomputer/typify#471e215421b3629d2dc73ba67dd831583ad3a7f5"
 dependencies = [
  "heck",
  "log",
@@ -3139,7 +3199,7 @@ dependencies = [
 [[package]]
 name = "typify-macro"
 version = "0.0.13"
-source = "git+https://github.com/oxidecomputer/typify#5e966779d4132f3baa128d9df2f83e4a7ff68378"
+source = "git+https://github.com/oxidecomputer/typify#471e215421b3629d2dc73ba67dd831583ad3a7f5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3243,9 +3303,9 @@ checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
 
 [[package]]
 name = "uuid"
-version = "1.3.2"
+version = "1.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4dad5567ad0cf5b760e5665964bec1b47dfd077ba8a2544b513f3556d3d239a2"
+checksum = "345444e32442451b267fc254ae85a209c64be56d2890e601a0c37ff0c3c5ecd2"
 dependencies = [
  "getrandom",
  "serde",
@@ -3711,9 +3771,9 @@ dependencies = [
 
 [[package]]
 name = "xml-rs"
-version = "0.8.10"
+version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc95a04ea24f543cd9be5aab44f963fa35589c99e18415c38fb2b17e133bf8d2"
+checksum = "1690519550bfa95525229b9ca2350c63043a4857b3b0013811b2ccf4a2420b01"
 
 [[package]]
 name = "xtask"
