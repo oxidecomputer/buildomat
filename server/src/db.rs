@@ -1683,6 +1683,14 @@ impl Database {
     pub fn user_create(&self, name: &str) -> Result<User> {
         let c = &mut self.1.lock().unwrap().conn;
 
+        /*
+         * Make sure the requested username is not one we might mistake as a
+         * ULID later.
+         */
+        if looks_like_a_ulid(name) {
+            bail!("usernames must not look like ULIDs");
+        }
+
         self.i_user_create(name, c)
     }
 

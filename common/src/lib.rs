@@ -205,3 +205,12 @@ impl ClientIdExt for buildomat_client::types::Job {
         to_ulid(&self.id)
     }
 }
+
+/**
+ * Make sure this string is not one we might mistake as a ULID.  We are somewhat
+ * expansive in exclusion here: any 26 character ID composed only of letters and
+ * numbers is considered ULID-like.
+ */
+pub fn looks_like_a_ulid(s: &str) -> bool {
+    s.len() == 26 && s.chars().all(|c| c.is_ascii_alphanumeric())
+}
