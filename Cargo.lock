@@ -228,6 +228,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "slog-bunyan",
  "slog-term",
  "tokio",
  "toml 0.5.11",

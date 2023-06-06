@@ -5,7 +5,7 @@
 #![allow(clippy::vec_init_then_push)]
 
 use anyhow::{anyhow, bail, Context, Result};
-use dropshot::ConfigLogging;
+use buildomat_common::*;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use slog::{debug, error, info, o, trace, warn, Logger};
@@ -2113,11 +2113,7 @@ async fn bgtask(app: Arc<App>) {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cl = ConfigLogging::StderrTerminal {
-        level: dropshot::ConfigLoggingLevel::Debug,
-    };
-
-    let log = cl.to_logger("wollongong")?;
+    let log = make_log("wollongong");
 
     info!(log, "ok");
 

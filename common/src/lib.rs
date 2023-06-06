@@ -2,7 +2,7 @@
  * Copyright 2022 Oxide Computer Company
  */
 
-use std::io::Read;
+use std::io::{IsTerminal, Read};
 use std::str::FromStr;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -29,14 +29,32 @@ where
     Ok(toml::from_slice(buf.as_slice())?)
 }
 
-pub fn make_log(name: &str) -> Logger {
-    let dec = slog_term::TermDecorator::new().stdout().build();
-    let dr = Mutex::new(
-        slog_term::FullFormat::new(dec).use_original_order().build(),
-    )
-    .filter_level(slog::Level::Debug)
-    .fuse();
-    Logger::root(dr, o!("name" => name.to_string()))
+pub fn make_log(name: &'static str) -> Logger {
+    if std::io::stdout().is_terminal() {
+        /*
+         * Use a terminal-formatted logger for interactive processes.
+         */
+        let dec = slog_term::TermDecorator::new().stdout().build();
+        let dr = Mutex::new(
+            slog_term::FullFormat::new(dec).use_original_order().build(),
+        )
+        .filter_level(slog::Level::Debug)
+        .fuse();
+        Logger::root(dr, o!("name" => name))
+    } else {
+        /*
+         * Otherwise, emit bunyan-formatted records:
+         */
+        slog::Logger::root(
+            Mutex::new(
+                slog_bunyan::with_name(name, std::io::stdout())
+                    .set_flush(true)
+                    .build(),
+            )
+            .fuse(),
+            o!(),
+        )
+    }
 }
 
 pub fn to_ulid(id: &str) -> Result<Ulid> {
