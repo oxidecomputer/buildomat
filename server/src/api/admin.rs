@@ -118,27 +118,44 @@ pub(crate) async fn user_create(
     }))
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct UsersListQuery {
+    #[serde(default)]
+    name: Option<String>,
+}
+
 #[endpoint {
     method = GET,
     path = "/0/users",
 }]
 pub(crate) async fn users_list(
     rqctx: RequestContext<Arc<Central>>,
+    query: TypedQuery<UsersListQuery>,
 ) -> DSResult<HttpResponseOk<Vec<User>>> {
     let c = rqctx.context();
     let log = &rqctx.log;
 
     c.require_admin(log, &rqctx.request, "user.read").await?;
 
+    let q = query.into_inner();
+
     let out =
         c.db.users()
             .or_500()?
-            .drain(..)
-            .map(|u| User {
-                id: u.user.id.to_string(),
-                name: u.user.name,
-                time_create: u.user.time_create.into(),
-                privileges: u.privileges,
+            .into_iter()
+            .filter_map(|u| {
+                if let Some(name) = q.name.as_deref() {
+                    if u.name != name {
+                        return None;
+                    }
+                }
+
+                Some(User {
+                    id: u.user.id.to_string(),
+                    name: u.user.name,
+                    time_create: u.user.time_create.into(),
+                    privileges: u.privileges,
+                })
             })
             .collect::<Vec<_>>();
 

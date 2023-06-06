@@ -1102,6 +1102,16 @@
     "/0/users": {
       "get": {
         "operationId": "users_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "successful operation",

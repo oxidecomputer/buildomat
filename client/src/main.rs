@@ -49,6 +49,47 @@ impl Stuff {
          */
         self.client_admin.as_ref().unwrap_or_else(|| self.user())
     }
+
+    /**
+     * Perform a fuzzy mapping of an argument string to a user ID.  If the
+     * string is correctly formatted, we'll just pass it back.  If not, we'll
+     * try and look it up as a username on the server.  Critically, just because
+     * this function returns an ID does NOT mean a user with that ID exists:
+     * merely that it _might_.
+     */
+    async fn user_to_id(&self, arg: &str) -> Result<String> {
+        if looks_like_a_ulid(arg) {
+            /*
+             * If this _looks_ like a ULID, make sure it actually _is_ one.
+             */
+            match Ulid::from_str(&arg) {
+                Ok(ulid) => Ok(ulid.to_string()),
+                Err(e) => bail!(
+                    "argument {arg:?} looks like, but is not, a ULID: {e}"
+                ),
+            }
+        } else {
+            let name = arg.trim();
+            if name.is_empty() {
+                bail!("invalid username {arg:?}");
+            }
+
+            /*
+             * If this is _not_ a ULID, attempt to locate the user ID by the
+             * provided username.  Note that the user list did not always
+             * support filtering by username in the query string, so we must
+             * check the results match what we expected.
+             */
+            let users = self.admin().users_list(Some(name)).await?.into_inner();
+            for user in users {
+                if user.name == name {
+                    return Ok(user.id);
+                }
+            }
+
+            bail!("could not locate user with name {name:?}");
+        }
+    }
 }
 
 async fn do_job_tail(mut l: Level<Stuff>) -> Result<()> {
@@ -684,14 +725,14 @@ async fn do_user_create(mut l: Level<Stuff>) -> Result<()> {
 }
 
 async fn do_user_grant(mut l: Level<Stuff>) -> Result<()> {
-    l.usage_args(Some("USER_ID PRIVILEGE"));
+    l.usage_args(Some("USER_ID|USERNAME PRIVILEGE"));
 
     let a = args!(l);
 
     if a.args().len() != 2 {
-        bad_args!(l, "specify ID of user and name of privilege");
+        bad_args!(l, "specify name or ID of user and name of privilege");
     }
-    let id = a.args()[0].to_string();
+    let id = l.context().user_to_id(&a.args()[0]).await?;
     let privilege = a.args()[1].to_string();
 
     l.context().admin().user_privilege_grant(&id, &privilege).await?;
@@ -699,14 +740,14 @@ async fn do_user_grant(mut l: Level<Stuff>) -> Result<()> {
 }
 
 async fn do_user_revoke(mut l: Level<Stuff>) -> Result<()> {
-    l.usage_args(Some("USER_ID PRIVILEGE"));
+    l.usage_args(Some("USER_ID|USERNAME PRIVILEGE"));
 
     let a = args!(l);
 
     if a.args().len() != 2 {
-        bad_args!(l, "specify ID of user and name of privilege");
+        bad_args!(l, "specify name or ID of user and name of privilege");
     }
-    let id = a.args()[0].to_string();
+    let id = l.context().user_to_id(&a.args()[0]).await?;
     let privilege = a.args()[1].to_string();
 
     l.context().admin().user_privilege_revoke(&id, &privilege).await?;
@@ -722,7 +763,7 @@ async fn do_user_list(mut l: Level<Stuff>) -> Result<()> {
 
     let mut t = a.table();
 
-    for u in l.context().admin().users_list().await?.into_inner() {
+    for u in l.context().admin().users_list(None).await?.into_inner() {
         let mut r = Row::default();
         r.add_str("id", &u.id);
         r.add_str("name", &u.name);
@@ -738,14 +779,14 @@ async fn do_user_list(mut l: Level<Stuff>) -> Result<()> {
 }
 
 async fn do_user_show(mut l: Level<Stuff>) -> Result<()> {
-    l.usage_args(Some("USER_ID"));
+    l.usage_args(Some("USER_ID|USERNAME"));
 
     let a = args!(l);
 
     if a.args().len() != 1 {
-        bad_args!(l, "specify ID of user");
+        bad_args!(l, "specify name or ID of user");
     }
-    let id = a.args()[0].to_string();
+    let id = l.context().user_to_id(&a.args()[0]).await?;
 
     let res = l.context().admin().user_get(&id).await?;
 
@@ -1104,7 +1145,7 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
 
     let users = s
         .admin()
-        .users_list()
+        .users_list(None)
         .await?
         .iter()
         .map(|u| (u.id.to_string(), u.name.to_string()))
