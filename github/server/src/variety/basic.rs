@@ -20,7 +20,7 @@ const MEGABYTE: f64 = 1024.0 * KILOBYTE;
 const GIGABYTE: f64 = 1024.0 * MEGABYTE;
 
 const MAX_OUTPUTS: usize = 25;
-const MAX_TAIL_LINES: usize = 22;
+const MAX_TAIL_LINES: usize = 20;
 const MAX_LINE_LENGTH: usize = 90;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -344,6 +344,7 @@ pub(crate) async fn run(
 
                 let stdio = ev.stream == "stdout" || ev.stream == "stderr";
                 let console = ev.stream == "console";
+                let worker = ev.stream == "worker";
 
                 if stdio || console {
                     /*
@@ -377,6 +378,15 @@ pub(crate) async fn run(
                         line.push_str(" [...]");
                     }
 
+                    p.events_tail.push_back((None, line));
+                } else if worker {
+                    /*
+                     * A job may produce a large number of files.  We must not
+                     * treat worker output (which is mostly about file uploads
+                     * and so on) as headers.  They must be regular records that
+                     * are discarded as they scroll off the top.
+                     */
+                    let line = format!("|W| {}", ev.payload);
                     p.events_tail.push_back((None, line));
                 } else {
                     p.events_tail.push_back((
