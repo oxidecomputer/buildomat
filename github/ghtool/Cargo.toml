@@ -12,8 +12,8 @@ hiercmd = { workspace = true }
 hmac-sha256 = { workspace = true }
 hyper = { workspace = true }
 jsonwebtoken = { workspace = true }
-nom_pem = { workspace = true }
 octorust = { workspace = true }
+pem = { workspace = true }
 reqwest = { workspace = true }
 rusty_ulid = { workspace = true }
 serde = { workspace = true }

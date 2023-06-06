@@ -269,12 +269,14 @@ async fn main() -> Result<()> {
      * Load our files from disk...
      */
     let key = config::load_bytes("etc/privkey.pem")?;
-    let key = nom_pem::decode_block(&key)
-        .map_err(|e| anyhow!("decode_block: {:?}", e))?;
+    let key =
+        pem::parse(&key).map_err(|e| anyhow!("parse privkey: {:?}", e))?;
     let config = config::load_config("etc/app.toml")?;
 
-    s.context_mut().jwt =
-        Some(octorust::auth::JWTCredentials::new(config.id, key.data)?);
+    s.context_mut().jwt = Some(octorust::auth::JWTCredentials::new(
+        config.id,
+        key.contents().to_vec(),
+    )?);
 
     s.run().await
 }

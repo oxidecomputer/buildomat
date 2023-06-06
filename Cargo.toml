@@ -37,8 +37,8 @@ hyper-staticfile = { version = "0.8.0", git = "https://github.com/jclulow/hyper-
 jsonwebtoken = "7.2"
 libc = "0.2.113"
 new_mime_guess = "4"
-nom_pem = "4"
 octorust = { git = "https://github.com/oxidecomputer/third-party-api-clients", branch = "jclulow" }
+pem = "2"
 percent-encoding = "2.1"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 rand = "0.8"
