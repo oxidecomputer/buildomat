@@ -95,13 +95,15 @@ impl Stuff {
 async fn do_job_tail(mut l: Level<Stuff>) -> Result<()> {
     l.usage_args(Some("JOB"));
 
+    l.optflag("j", "", "format output records as line-separated JSON");
+
     let a = args!(l);
 
     if a.args().len() != 1 {
         bad_args!(l, "specify a job");
     }
 
-    poll_job(&l, &a.args()[0]).await
+    poll_job(&l, &a.args()[0], a.opts().opt_present("j")).await
 }
 
 async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
@@ -310,11 +312,13 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
     }
 
     println!("job {} submitted", x.id);
-    poll_job(&l, &x.id).await
+    poll_job(&l, &x.id, false).await
 }
 
-async fn poll_job(l: &Level<Stuff>, id: &str) -> Result<()> {
-    println!("polling for job output...");
+async fn poll_job(l: &Level<Stuff>, id: &str, json: bool) -> Result<()> {
+    if !json {
+        println!("polling for job output...");
+    }
 
     let mut nextseq = 0;
     let mut exit_status = 0;
@@ -333,7 +337,9 @@ async fn poll_job(l: &Level<Stuff>, id: &str) -> Result<()> {
         }
 
         if t.state != last_state {
-            println!("STATE CHANGE: {} -> {}", last_state, t.state);
+            if !json {
+                println!("STATE CHANGE: {} -> {}", last_state, t.state);
+            }
             last_state = t.state.to_string();
         }
 
@@ -349,7 +355,9 @@ async fn poll_job(l: &Level<Stuff>, id: &str) -> Result<()> {
                 }
             } else {
                 for e in events.iter() {
-                    if e.stream == "stdout" || e.stream == "stderr" {
+                    if json {
+                        println!("{}", serde_json::to_string(&e)?);
+                    } else if e.stream == "stdout" || e.stream == "stderr" {
                         println!("{}", e.payload);
                     } else if e.stream == "control" {
                         println!("|=| {}", e.payload);
