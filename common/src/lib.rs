@@ -14,10 +14,6 @@ use rand::{thread_rng, Rng};
 use rusty_ulid::Ulid;
 use serde::Deserialize;
 use slog::{o, Drain, Logger};
-#[macro_use]
-extern crate diesel;
-
-pub mod db;
 
 pub fn read_toml<T>(n: &str) -> Result<T>
 where

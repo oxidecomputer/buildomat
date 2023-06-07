@@ -9,7 +9,6 @@ anyhow = { workspace = true }
 base64 = { workspace = true }
 buildomat-client = { path = "../openapi" }
 chrono = { workspace = true }
-diesel = { workspace = true }
 getopts = { workspace = true }
 new_mime_guess = { workspace = true }
 rand = { workspace = true }

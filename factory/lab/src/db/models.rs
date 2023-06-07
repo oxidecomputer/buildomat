@@ -7,8 +7,8 @@ use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::str::FromStr;
 use std::time::Duration;
 
-use buildomat_common::db::*;
-pub use buildomat_common::db::{Dictionary, IsoDate};
+use buildomat_database::*;
+pub use buildomat_database::{Dictionary, IsoDate};
 
 integer_new_type!(InstanceSeq, u64, i64, BigInt, diesel::sql_types::BigInt);
 integer_new_type!(EventSeq, u64, i64, BigInt, diesel::sql_types::BigInt);

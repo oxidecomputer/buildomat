@@ -4,6 +4,7 @@ members = [
 	"bunyan",
 	"client",
 	"common",
+	"database",
 	"factory/aws",
 	"factory/lab",
 	"github/common",

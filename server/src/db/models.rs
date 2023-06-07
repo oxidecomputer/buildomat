@@ -9,8 +9,8 @@ use diesel::serialize::ToSql;
 use std::str::FromStr;
 use std::time::Duration;
 
-use buildomat_common::db::*;
-pub use buildomat_common::db::{Dictionary, IsoDate};
+use buildomat_database::*;
+pub use buildomat_database::{Dictionary, IsoDate};
 
 integer_new_type!(UnixUid, u32, i32, Integer, diesel::sql_types::Integer);
 integer_new_type!(UnixGid, u32, i32, Integer, diesel::sql_types::Integer);

@@ -1,5 +1,5 @@
 use anyhow::{bail, Result};
-use buildomat_common::db::*;
+use buildomat_database::*;
 use chrono::prelude::*;
 use diesel::deserialize::FromSql;
 use diesel::prelude::*;

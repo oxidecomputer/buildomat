@@ -219,7 +219,6 @@ dependencies = [
  "base64 0.13.1",
  "buildomat-client",
  "chrono",
- "diesel",
  "getopts",
  "new_mime_guess",
  "rand",
@@ -232,6 +231,18 @@ dependencies = [
  "slog-term",
  "tokio",
  "toml 0.5.11",
+]
+
+[[package]]
+name = "buildomat-database"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "diesel",
+ "serde",
+ "serde_json",
+ "slog",
 ]
 
 [[package]]
@@ -262,6 +273,7 @@ dependencies = [
  "base64 0.13.1",
  "buildomat-client",
  "buildomat-common",
+ "buildomat-database",
  "chrono",
  "diesel",
  "dropshot",
@@ -288,6 +300,7 @@ dependencies = [
  "anyhow",
  "base64 0.13.1",
  "buildomat-common",
+ "buildomat-database",
  "chrono",
  "diesel",
  "dropshot",
@@ -3288,6 +3301,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "buildomat-common",
+ "buildomat-database",
  "chrono",
  "diesel",
  "rand",

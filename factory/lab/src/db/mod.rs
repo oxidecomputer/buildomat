@@ -55,7 +55,7 @@ impl Database {
         path: P,
         cache_kb: Option<u32>,
     ) -> Result<Database> {
-        let conn = buildomat_common::db::sqlite_setup(
+        let conn = buildomat_database::sqlite_setup(
             &log,
             path,
             include_str!("../../schema.sql"),
