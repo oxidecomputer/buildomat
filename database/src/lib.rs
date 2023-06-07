@@ -326,6 +326,10 @@ impl IsoDate {
             .to_std()
             .unwrap_or_else(|_| std::time::Duration::from_secs(0))
     }
+
+    pub fn now() -> IsoDate {
+        IsoDate(Utc::now())
+    }
 }
 
 json_new_type!(Dictionary, HashMap<String, String>);

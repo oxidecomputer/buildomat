@@ -633,6 +633,8 @@ async fn main() -> Result<()> {
     ad.register(api::user::job_output_download).api_check()?;
     ad.register(api::user::job_output_publish).api_check()?;
     ad.register(api::user::job_get).api_check()?;
+    ad.register(api::user::job_store_get_all).api_check()?;
+    ad.register(api::user::job_store_put).api_check()?;
     ad.register(api::user::job_submit).api_check()?;
     ad.register(api::user::job_upload_chunk).api_check()?;
     ad.register(api::user::job_add_input).api_check()?;
@@ -646,6 +648,8 @@ async fn main() -> Result<()> {
     ad.register(api::worker::worker_job_upload_chunk).api_check()?;
     ad.register(api::worker::worker_job_add_output).api_check()?;
     ad.register(api::worker::worker_job_input_download).api_check()?;
+    ad.register(api::worker::worker_job_store_get).api_check()?;
+    ad.register(api::worker::worker_job_store_put).api_check()?;
     ad.register(api::worker::worker_task_append).api_check()?;
     ad.register(api::worker::worker_task_complete).api_check()?;
     ad.register(api::factory::factory_workers).api_check()?;

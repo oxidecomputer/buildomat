@@ -29,6 +29,12 @@ pub(crate) struct JobsPath {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub(crate) struct JobStorePath {
+    job: String,
+    name: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub(crate) struct JobsOutputsPath {
     job: String,
     output: String,
@@ -899,6 +905,101 @@ pub(crate) async fn job_cancel(
     info!(log, "user {} cancelled job {}", owner.id, job.id);
 
     Ok(HttpResponseUpdatedNoContent())
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JobStoreValue {
+    value: String,
+    secret: bool,
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/0/jobs/{job}/store/{name}",
+}]
+pub(crate) async fn job_store_put(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<JobStorePath>,
+    body: TypedPath<JobStoreValue>,
+) -> DSResult<HttpResponseUpdatedNoContent> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let owner = c.require_user(log, &rqctx.request).await?;
+
+    let p = path.into_inner();
+    let b = body.into_inner();
+
+    let job = c.db.job_by_str(&p.job).or_500()?;
+    if job.owner != owner.id {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::FORBIDDEN,
+            "not your job".into(),
+        ));
+    }
+
+    if job.complete {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::CONFLICT,
+            "cannot update the store for a job that is already complete".into(),
+        ));
+    }
+
+    c.db.job_store_put(job.id, &p.name, &b.value, b.secret, "user").or_500()?;
+    info!(
+        log,
+        "user {} updated job {} store value {}", owner.id, job.id, p.name,
+    );
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct JobStoreValueInfo {
+    value: String,
+    secret: bool,
+    time_update: DateTime<Utc>,
+    source: String,
+}
+
+#[endpoint {
+    method = GET,
+    path = "/0/jobs/{job}/store",
+}]
+pub(crate) async fn job_store_get_all(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<JobsPath>,
+) -> DSResult<HttpResponseOk<HashMap<String, JobStoreValueInfo>>> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let owner = c.require_user(log, &rqctx.request).await?;
+
+    let p = path.into_inner();
+
+    let job = c.db.job_by_str(&p.job).or_500()?;
+    if job.owner != owner.id {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::FORBIDDEN,
+            "not your job".into(),
+        ));
+    }
+
+    info!(log, "user {} fetch job {} store, all values", owner.id, job.id);
+
+    Ok(HttpResponseOk(
+        c.db.job_store(job.id).or_500()?.into_iter().map(|(k, v)| {
+            (k, JobStoreValueInfo {
+                value: v.value,
+                secret: v.secret,
+                time_update: v.time_update.0,
+                source: v.source,
+            })
+        }).collect(),
+    ))
 }
 
 #[derive(Serialize, JsonSchema)]
