@@ -1050,6 +1050,87 @@
         }
       }
     },
+    "/0/jobs/{job}/store": {
+      "get": {
+        "operationId": "job_store_get_all",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Map_of_JobStoreValueInfo",
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/JobStoreValueInfo"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/0/jobs/{job}/store/{name}": {
+      "put": {
+        "operationId": "job_store_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobStoreValue"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/0/public/file/{username}/{series}/{version}/{name}": {
       "get": {
         "operationId": "public_file_download",
@@ -1489,6 +1570,89 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/WorkerAddOutput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/0/worker/job/{job}/store/{name}": {
+      "get": {
+        "operationId": "worker_job_store_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerJobStoreGet"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "worker_job_store_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerJobStoreValue"
               }
             }
           },
@@ -2075,6 +2239,45 @@
           "version"
         ]
       },
+      "JobStoreValue": {
+        "type": "object",
+        "properties": {
+          "secret": {
+            "type": "boolean"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "secret",
+          "value"
+        ]
+      },
+      "JobStoreValueInfo": {
+        "type": "object",
+        "properties": {
+          "secret": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string"
+          },
+          "time_update": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "secret",
+          "source",
+          "time_update",
+          "value"
+        ]
+      },
       "JobSubmit": {
         "type": "object",
         "properties": {
@@ -2549,6 +2752,34 @@
           "owner",
           "state",
           "tags"
+        ]
+      },
+      "WorkerJobStoreGet": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkerJobStoreValue"
+              }
+            ]
+          }
+        }
+      },
+      "WorkerJobStoreValue": {
+        "type": "object",
+        "properties": {
+          "secret": {
+            "type": "boolean"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "secret",
+          "value"
         ]
       },
       "WorkerPingInput": {

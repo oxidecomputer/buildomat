@@ -920,7 +920,7 @@ pub(crate) struct JobStoreValue {
 pub(crate) async fn job_store_put(
     rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobStorePath>,
-    body: TypedPath<JobStoreValue>,
+    body: TypedBody<JobStoreValue>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let log = &rqctx.log;
