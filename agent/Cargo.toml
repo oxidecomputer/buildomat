@@ -4,6 +4,10 @@ version = "0.0.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[features]
+default = []
+vendored-openssl = ['openssl/vendored']
+
 [dependencies]
 anyhow = { workspace = true }
 buildomat-common = { path = "../common" }
@@ -15,3 +19,9 @@ glob = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
+#
+# I believe it is necessary to pull this in here, so that we can demand the
+# static linking of the vendored OpenSSL.  We don't use it directly, but the
+# same version will then be used by reqwest.
+#
+openssl = { version = "0.10", optional = true }
