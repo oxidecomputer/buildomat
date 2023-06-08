@@ -3,8 +3,10 @@
  */
 
 use std::path::PathBuf;
-use std::sync::mpsc;
 
+use tokio::sync::mpsc;
+
+#[derive(Debug)]
 pub enum Activity {
     Downloading(PathBuf),
     Downloaded(PathBuf),
@@ -16,7 +18,7 @@ pub(crate) fn download(
     inputs: Vec<super::WorkerPingInput>,
     inputdir: PathBuf,
 ) -> mpsc::Receiver<Activity> {
-    let (tx, rx) = mpsc::channel::<Activity>();
+    let (tx, rx) = mpsc::channel::<Activity>(64);
 
     tokio::spawn(async move {
         for i in inputs.iter() {
@@ -29,14 +31,14 @@ pub(crate) fn download(
              */
             super::make_dirs_for(&path).ok();
 
-            tx.send(Activity::Downloading(path.clone())).unwrap();
+            tx.send(Activity::Downloading(path.clone())).await.unwrap();
 
             cw.input(&i.id, &path).await;
 
-            tx.send(Activity::Downloaded(path.clone())).unwrap();
+            tx.send(Activity::Downloaded(path.clone())).await.unwrap();
         }
 
-        tx.send(Activity::Complete).unwrap();
+        tx.send(Activity::Complete).await.unwrap();
     });
 
     rx
