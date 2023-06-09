@@ -14,9 +14,6 @@ pub enum Payload {
     Ack,
     Error(String),
 
-    StoreList,
-    StoreListResult(Vec<StoreEntry>),
-
     StoreGet(String),
     StoreGetResult(Option<StoreEntry>),
 
