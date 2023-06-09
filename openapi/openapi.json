@@ -2268,14 +2268,14 @@
             "format": "date-time"
           },
           "value": {
+            "nullable": true,
             "type": "string"
           }
         },
         "required": [
           "secret",
           "source",
-          "time_update",
-          "value"
+          "time_update"
         ]
       },
       "JobSubmit": {

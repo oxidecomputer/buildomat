@@ -958,7 +958,7 @@ pub(crate) async fn job_store_put(
 
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct JobStoreValueInfo {
-    value: String,
+    value: Option<String>,
     secret: bool,
     time_update: DateTime<Utc>,
     source: String,
@@ -998,7 +998,10 @@ pub(crate) async fn job_store_get_all(
                 (
                     k,
                     JobStoreValueInfo {
-                        value: v.value,
+                        /*
+                         * Do not pass secret values back to the user:
+                         */
+                        value: if v.secret { None } else { Some(v.value) },
                         secret: v.secret,
                         time_update: v.time_update.0,
                         source: v.source,

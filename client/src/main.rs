@@ -764,14 +764,22 @@ async fn do_job_store_get(mut l: Level<Stuff>) -> Result<()> {
             );
         }
 
+        let Some(value) = &ent.value else {
+            /*
+             * This should currently only happen for secret properties, which we
+             * have handled above.
+             */
+            bail!("server would not give us the value of {name:?}");
+        };
+
         /*
          * Output formatting here should be kept consistent with what "bmat
          * store get" does inside a job; see the "buildomat-agent" crate.
          */
-        if ent.value.ends_with("\n") {
-            print!("{}", ent.value);
+        if value.ends_with("\n") {
+            print!("{}", value);
         } else {
-            println!("{}", ent.value);
+            println!("{}", value);
         }
 
         Ok(())
@@ -816,11 +824,7 @@ async fn do_job_store_list(mut l: Level<Stuff>) -> Result<()> {
 
         r.add_str("name", &name);
         r.add_str("flags", &flags);
-        if ent.secret {
-            r.add_str("value", "-");
-        } else {
-            r.add_str("value", &ent.value);
-        }
+        r.add_str("value", ent.value.as_deref().unwrap_or("-"));
         r.add_str("source", &ent.source);
         r.add_age(
             "age",
