@@ -87,7 +87,7 @@ async fn cmd_store(mut l: Level<Stuff>) -> Result<()> {
 
 async fn cmd_store_get(mut l: Level<Stuff>) -> Result<()> {
     l.usage_args(Some("NAME"));
-    l.optflag("W", "", "do not wait for the value to emerge");
+    l.optflag("W", "", "do not wait for the value to exist in the store");
 
     let a = args!(l);
 
@@ -122,6 +122,11 @@ async fn cmd_store_get(mut l: Level<Stuff>) -> Result<()> {
                         continue;
                     }
                     Payload::StoreGetResult(Some(ent)) => {
+                        /*
+                         * Output formatting here should be kept consistent with
+                         * what "buildomat job store get" does outside a job;
+                         * see the "buildomat" crate.
+                         */
                         if ent.value.ends_with("\n") {
                             print!("{}", ent.value);
                         } else {

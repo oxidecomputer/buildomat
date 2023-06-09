@@ -693,11 +693,159 @@ async fn do_job_publish(mut l: Level<Stuff>) -> Result<()> {
     bail!("job {} does not have a file that matches {}", job, src);
 }
 
+async fn do_job_store_put(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("JOB NAME [VALUE]"));
+    l.optflag("s", "", "mark value as secret data");
+
+    let a = args!(l);
+
+    /*
+     * Processing of the format of the input should be kept in sync with what
+     * "bmat store put" does inside the job; see the "buildomat-agent" crate.
+     */
+    let value = match a.args().len() {
+        2 => {
+            let mut s = String::new();
+            std::io::stdin().lock().read_to_string(&mut s)?;
+            if let Some(suf) = s.strip_suffix('\n') {
+                if suf.contains('\n') {
+                    /*
+                     * This is a multiline value, so leave it as-is.
+                     */
+                    s
+                } else {
+                    suf.to_string()
+                }
+            } else {
+                s
+            }
+        }
+        3 => a.args()[2].to_string(),
+        _ => {
+            bad_args!(l, "specify name of value, and value, to put in store");
+        }
+    };
+    let job = a.args()[0].to_string();
+    let name = a.args()[1].to_string();
+
+    let secret = a.opts().opt_present("s");
+
+    l.context()
+        .user()
+        .job_store_put(
+            &job,
+            &name,
+            &buildomat_client::types::JobStoreValue { secret, value },
+        )
+        .await?;
+
+    Ok(())
+}
+
+async fn do_job_store_get(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("JOB NAME"));
+
+    let a = args!(l);
+
+    if a.args().len() != 2 {
+        bad_args!(l, "specify job ID and name of value to fetch from store");
+    }
+
+    let job = a.args()[0].to_string();
+    let name = a.args()[1].to_string();
+
+    let store = l.context().user().job_store_get_all(&job).await?.into_inner();
+
+    if let Some(ent) = store.get(&name) {
+        if ent.secret {
+            bail!(
+                "{name:?} is a secret property; \
+                cannot get value outside of job",
+            );
+        }
+
+        /*
+         * Output formatting here should be kept consistent with what "bmat
+         * store get" does inside a job; see the "buildomat-agent" crate.
+         */
+        if ent.value.ends_with("\n") {
+            print!("{}", ent.value);
+        } else {
+            println!("{}", ent.value);
+        }
+
+        Ok(())
+    } else {
+        bail!("{name:?} was not found in the store for job {job}");
+    }
+}
+
+async fn do_job_store_list(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("JOB"));
+
+    l.add_column("name", 23, true);
+    l.add_column("flags", 5, true);
+    l.add_column("value", 43, true);
+    l.add_column("age", 6, true);
+    l.add_column("source", 10, false);
+    l.add_column("updated", WIDTH_ISODATE, false);
+
+    let a = args!(l);
+
+    if a.args().len() != 1 {
+        bad_args!(l, "specify job ID");
+    }
+
+    let job = a.args()[0].to_string();
+
+    let mut t = a.table();
+
+    let store = l.context().user().job_store_get_all(&job).await?.into_inner();
+
+    for (name, ent) in store {
+        let mut r = Row::default();
+
+        let flags = if ent.secret { "S" } else { "-" };
+
+        r.add_str("name", &name);
+        r.add_str("flags", &flags);
+        if ent.secret {
+            r.add_str("value", "-");
+        } else {
+            r.add_str("value", &ent.value);
+        }
+        r.add_str("source", &ent.source);
+        r.add_age(
+            "age",
+            Utc::now().signed_duration_since(ent.time_update).to_std().unwrap(),
+        );
+        r.add_str(
+            "updated",
+            &ent.time_update.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        );
+
+        t.add_row(r);
+    }
+
+    print!("{}", t.output()?);
+
+    Ok(())
+}
+
+async fn do_job_store(mut l: Level<Stuff>) -> Result<()> {
+    l.cmda("list", "ls", "list store contents", cmd!(do_job_store_list))?;
+    l.cmd("get", "get a value from the job store", cmd!(do_job_store_get))?;
+    l.cmd("put", "put a value into the job store", cmd!(do_job_store_put))?;
+
+    sel!(l).run().await
+}
+
 async fn do_job(mut l: Level<Stuff>) -> Result<()> {
     l.cmda("list", "ls", "list jobs", cmd!(do_job_list))?;
     l.cmd("run", "run a job", cmd!(do_job_run))?;
     l.cmd("cancel", "cancel a job", cmd!(do_job_cancel))?;
     l.cmd("tail", "listen for events from a job", cmd!(do_job_tail))?;
+    l.cmd("store", "manage the job store", cmd!(do_job_store))?;
     l.cmd("outputs", "list job outputs", cmd!(do_job_outputs))?;
     l.cmd("dump", "dump information about jobs", cmd!(do_job_dump))?;
     l.cmd("timings", "timing information about a job", cmd!(do_job_timings))?;
