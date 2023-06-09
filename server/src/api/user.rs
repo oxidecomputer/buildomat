@@ -991,14 +991,21 @@ pub(crate) async fn job_store_get_all(
     info!(log, "user {} fetch job {} store, all values", owner.id, job.id);
 
     Ok(HttpResponseOk(
-        c.db.job_store(job.id).or_500()?.into_iter().map(|(k, v)| {
-            (k, JobStoreValueInfo {
-                value: v.value,
-                secret: v.secret,
-                time_update: v.time_update.0,
-                source: v.source,
+        c.db.job_store(job.id)
+            .or_500()?
+            .into_iter()
+            .map(|(k, v)| {
+                (
+                    k,
+                    JobStoreValueInfo {
+                        value: v.value,
+                        secret: v.secret,
+                        time_update: v.time_update.0,
+                        source: v.source,
+                    },
+                )
             })
-        }).collect(),
+            .collect(),
     ))
 }
 

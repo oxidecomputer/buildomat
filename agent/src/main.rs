@@ -9,6 +9,7 @@ use std::env;
 use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind::NotFound, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
@@ -18,6 +19,7 @@ use chrono::prelude::*;
 use futures::StreamExt;
 use hiercmd::prelude::*;
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use tokio::time::MissedTickBehavior;
 
@@ -31,12 +33,13 @@ mod exec;
 mod uadmin;
 mod upload;
 
+use control::protocol::Payload;
 use exec::ExitDetails;
-use tokio::io::AsyncWriteExt;
 
 const CONFIG_PATH: &str = "/opt/buildomat/etc/agent.json";
 const AGENT: &str = "/opt/buildomat/lib/agent";
 const INPUT_PATH: &str = "/input";
+const CONTROL_PROGRAM: &str = "bmat";
 #[cfg(target_os = "illumos")]
 mod os_constants {
     pub const METHOD: &str = "/opt/buildomat/lib/start.sh";
@@ -48,6 +51,8 @@ mod os_constants {
     pub const UNIT: &str = "/etc/systemd/system/buildomat-agent.service";
 }
 use os_constants::*;
+
+use crate::control::protocol::StoreEntry;
 
 #[derive(Serialize, Deserialize)]
 struct ConfigFile {
@@ -368,10 +373,10 @@ fn hard_reset() -> Result<()> {
 
 enum Stage {
     Ready,
-    Download, /*(mpsc::Receiver<download::Activity>)*/
+    Download(mpsc::Receiver<download::Activity>),
     NextTask,
-    Child, /*(mpsc::Receiver<exec::Activity>, WorkerPingTask, Option<bool>)*/
-    Upload, /*(mpsc::Receiver<upload::Activity>)*/
+    Child(mpsc::Receiver<exec::Activity>, WorkerPingTask, Option<bool>),
+    Upload(mpsc::Receiver<upload::Activity>),
     Complete,
 }
 
@@ -407,6 +412,15 @@ async fn cmd_install(mut l: Level<()>) -> Result<()> {
     rmfile(AGENT)?;
     std::fs::copy(&exe, AGENT)?;
     make_executable(AGENT)?;
+
+    /*
+     * Install the agent binary with the control program name in a location in
+     * the default PATH so that job programs can find it.
+     */
+    let cprog = format!("/usr/bin/{CONTROL_PROGRAM}");
+    rmfile(&cprog)?;
+    std::fs::copy(&exe, &cprog)?;
+    make_executable(&cprog)?;
 
     #[cfg(target_os = "illumos")]
     {
@@ -499,6 +513,17 @@ async fn cmd_install(mut l: Level<()>) -> Result<()> {
             Ok(o) => bail!("systemd start failure: {:?}", o),
             Err(e) => bail!("could not execute systemctl: {:?}", e),
         }
+
+        /*
+         * Ubuntu 18.04 had a genuine pre-war separate /bin directory!
+         */
+        let binmd = std::fs::symlink_metadata("/bin")?;
+        if binmd.is_dir() {
+            std::fs::soft_link(
+                &format!("../usr/bin/{CONTROL_PROGRAM}")
+                    & format!("/bin/{CONTROL_PROGRAM}"),
+            )?;
+        }
     }
 
     Ok(())
@@ -540,49 +565,17 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
     let mut pingfreq = tokio::time::interval(Duration::from_secs(5));
     pingfreq.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-    let mut urx: Option<mpsc::Receiver<upload::Activity>> = None;
-    let mut drx: Option<mpsc::Receiver<download::Activity>> = None;
+    let mut control = control::server::listen()?;
+    let mut creq: Option<control::server::Request> = None;
 
-    enum What {
-        Ping,
-        Upload(upload::Activity),
-        Download(download::Activity),
-    }
-
-    //let x = urx.as_mut().unwrap().recv().await;
-
+    let mut do_ping = true;
     loop {
-        let what = tokio::select! {
-            _ = pingfreq.tick() => What::Ping,
-            ua = urx.as_mut().unwrap().recv(), if urx.is_some() => {
-                if let Some(ua) = ua {
-                    What::Upload(ua)
-                } else {
-                    /*
-                     * XXX
-                     */
-                    continue;
+        if do_ping {
+            match cw.client.worker_ping().await {
+                Err(e) => {
+                    println!("PING ERROR: {e}");
+                    sleep_ms(1000).await;
                 }
-            },
-            da = drx.as_mut().unwrap().recv(), if drx.is_some() => {
-                if let Some(da) = da {
-                    What::Download(da)
-                } else {
-                    /*
-                     * XXX
-                     */
-                    continue;
-                }
-            },
-        };
-
-        match what {
-            /*
-             * First, take care of submitting our current status to the server.
-             * The ping will contain instructions if we need to start executing
-             * a job, etc.
-             */
-            What::Ping => match cw.client.worker_ping().await {
                 Ok(p) => {
                     if p.poweroff {
                         println!("powering off at server request");
@@ -612,29 +605,288 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                             tasks.clear();
                             tasks.extend(j.tasks.iter().cloned());
                             cw.job = Some(j.clone());
-                            stage = Stage::Download/*(download::download(
+                            pingfreq.reset();
+                            stage = Stage::Download(download::download(
                                 cw.clone(),
                                 j.inputs.clone(),
                                 PathBuf::from(INPUT_PATH),
-                            ))*/;
+                            ));
                         }
                     }
+
+                    do_ping = false;
                 }
-                Err(e) => {
-                    println!("ERROR: ping: {:?}", e);
+            }
+            continue;
+        }
+
+        if let Some(req) = creq.take() {
+            /*
+             * Handle requests from the control program.
+             */
+            let reply = match req.payload() {
+                Payload::StoreGet(name) => {
+                    let job = cw.job.as_ref().unwrap();
+
+                    match cw.client.worker_job_store_get(&job.id, name).await {
+                        Ok(res) => Payload::StoreGetResult(
+                            res.into_inner().value.map(|v| StoreEntry {
+                                name: name.to_string(),
+                                value: v.value,
+                                secret: v.secret,
+                            }),
+                        ),
+                        Err(e) => Payload::Error(e.to_string()),
+                    }
+                }
+                Payload::StorePut(name, value, secret) => {
+                    let job = cw.job.as_ref().unwrap();
+
+                    match cw
+                        .client
+                        .worker_job_store_put(
+                            &job.id,
+                            name,
+                            &buildomat_client::types::WorkerJobStoreValue {
+                                secret: *secret,
+                                value: value.to_string(),
+                            },
+                        )
+                        .await
+                    {
+                        Ok(..) => Payload::Ack,
+                        Err(e) => Payload::Error(e.to_string()),
+                    }
+                }
+                _ => Payload::Error(format!("unexpected message type")),
+            };
+
+            req.reply(reply).await;
+        }
+
+        match &mut stage {
+            Stage::Ready | Stage::Complete => {
+                /*
+                 * If we are not working on something, just sleep for a
+                 * second and ping again in case there is a new directive.
+                 */
+                do_ping = true;
+                sleep_ms(1000).await;
+                continue;
+            }
+            Stage::NextTask => {
+                let job = cw.job.as_ref().unwrap();
+
+                /*
+                 * If any task fails, we will not execute subsequent tasks.
+                 * In case it is useful for diagnostic purposes, we will
+                 * still attempt to upload output files before we complete
+                 * the job.
+                 */
+                let failures = exit_details.iter().any(|ex| ex.code != 0);
+                if failures {
+                    println!("aborting after failed task");
+                }
+
+                if failures || tasks.is_empty() {
+                    /*
+                     * There are no more tasks to complete, so move on to
+                     * uploading outputs.
+                     */
+                    println!("no more tasks for job {}", job.id);
+
+                    stage = Stage::Upload(upload::upload(
+                        cw.clone(),
+                        job.output_rules.clone(),
+                    ));
                     continue;
                 }
-            },
-            What::Download(a) => {}
-            What::Upload(a) => {
-                assert!(matches!(stage, Stage::Upload));
+
+                let t = tasks.pop_front().unwrap();
+
+                /*
+                 * Emit an event that we can use to visually separate tasks
+                 * in the output.
+                 */
+                let msg = format!("starting task {}: \"{}\"", t.id, t.name);
+                cw.append_task_msg(&t, &msg).await;
+
+                /*
+                 * Write the submitted script to a file.
+                 */
+                let s = write_script(&t.script)?;
+
+                let mut cmd = Command::new("/bin/bash");
+                cmd.arg(&s);
+
+                /*
+                 * The user task should have a pristine and reproducible
+                 * environment that does not leak in artefacts of the
+                 * agent.
+                 */
+                cmd.env_clear();
+                if !t.env_clear {
+                    /*
+                     * Absent a request for an entirely clean slate, we
+                     * set a few specific environment variables.
+                     * XXX HOME/USER/LOGNAME should probably respect "uid"
+                     */
+                    cmd.env("HOME", "/root");
+                    cmd.env("USER", "root");
+                    cmd.env("LOGNAME", "root");
+                    cmd.env("TZ", "UTC");
+                    cmd.env(
+                        "PATH",
+                        "/usr/bin:/bin:/usr/sbin:/sbin:\
+                            /opt/ooce/bin:/opt/ooce/sbin",
+                    );
+                    cmd.env("LANG", "en_US.UTF-8");
+                    cmd.env("LC_ALL", "en_US.UTF-8");
+                    cmd.env("BUILDOMAT_JOB_ID", &job.id);
+                    cmd.env("BUILDOMAT_TASK_ID", t.id.to_string());
+                }
+                for (k, v) in t.env.iter() {
+                    /*
+                     * Overlay the user-provided environment onto what
+                     * we have so far, thus allowing them to replace
+                     * some or all of what we would otherwise provide.
+                     */
+                    cmd.env(k, v);
+                }
+
+                /*
+                 * Each task may be expected to run under a different user
+                 * account or with a different working directory.
+                 */
+                cmd.current_dir(&t.workdir);
+                cmd.uid(t.uid as u32);
+                cmd.gid(t.gid as u32);
+
+                match exec::run(cmd) {
+                    Ok(c) => {
+                        stage = Stage::Child(c, t, None);
+                    }
+                    Err(e) => {
+                        /*
+                         * Try to post the error we would have reported
+                         * to the server, but don't try too hard.
+                         */
+                        cw.client
+                            .worker_job_append(
+                                job.id.as_str(),
+                                &WorkerAppendJob {
+                                    stream: "agent".into(),
+                                    time: Utc::now(),
+                                    payload: format!("ERROR: exec: {:?}", e),
+                                },
+                            )
+                            .await
+                            .ok();
+                    }
+                }
+            }
+            Stage::Child(ch, t, failed) => {
+                let a = tokio::select! {
+                    _ = pingfreq.tick() => {
+                        do_ping = true;
+                        continue;
+                    }
+                    req = control.recv() => {
+                        creq = req;
+                        continue;
+                    }
+                    a = ch.recv() => a,
+                };
 
                 match a {
-                    upload::Activity::Scanned(count) => {
+                    Some(exec::Activity::Output(o)) => {
+                        cw.append_task(t, &o.to_record()).await;
+                    }
+                    Some(exec::Activity::Exit(ex)) => {
+                        let msg = format!(
+                            "process exited: \
+                                    duration {} ms, exit code {}",
+                            ex.duration_ms, ex.code
+                        );
+                        let rec = OutputRecord {
+                            stream: "task".to_string(),
+                            msg,
+                            time: ex.when,
+                        };
+                        cw.append_task(t, &rec).await;
+
+                        /*
+                         * Preserve the exit status for when we record task
+                         * completion, and so that we can determine whether
+                         * to execute any subsequent tasks.
+                         */
+                        *failed = Some(ex.code != 0);
+                        exit_details.push(ex);
+                    }
+                    Some(exec::Activity::Complete) => {
+                        /*
+                         * Record completion of this task within the job.
+                         */
+                        cw.task_complete(t, failed.unwrap()).await;
+                        stage = Stage::NextTask;
+                    }
+                    None => {
+                        stage = Stage::Complete;
+                        cw.append_msg("channel disconnected").await;
+
+                        cw.job_complete(true).await;
+                    }
+                }
+            }
+            Stage::Download(ch) => {
+                let a = tokio::select! {
+                    _ = pingfreq.tick() => {
+                        do_ping = true;
+                        continue;
+                    }
+                    a = ch.recv() => a,
+                };
+
+                match a {
+                    Some(download::Activity::Downloading(p)) => {
+                        cw.append_msg(&format!(
+                            "downloading input: {}",
+                            p.display(),
+                        ))
+                        .await;
+                    }
+                    Some(download::Activity::Downloaded(p)) => {
+                        cw.append_msg(&format!(
+                            "downloaded input: {}",
+                            p.display(),
+                        ))
+                        .await;
+                    }
+                    Some(download::Activity::Complete) => {
+                        stage = Stage::NextTask;
+                    }
+                    None => {
+                        cw.append_msg("download channel disconnected").await;
+                        cw.job_complete(true).await;
+                        stage = Stage::Complete;
+                    }
+                }
+            }
+            Stage::Upload(ch) => {
+                let a = tokio::select! {
+                    _ = pingfreq.tick() => {
+                        do_ping = true;
+                        continue;
+                    }
+                    a = ch.recv() => a,
+                };
+
+                match a {
+                    Some(upload::Activity::Scanned(count)) => {
                         cw.append_msg(&format!("found {} output files", count))
                             .await;
                     }
-                    upload::Activity::Uploading(p, sz) => {
+                    Some(upload::Activity::Uploading(p, sz)) => {
                         cw.append_msg(&format!(
                             "uploading: {} ({} bytes)",
                             p.display(),
@@ -642,307 +894,32 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                         ))
                         .await;
                     }
-                    upload::Activity::Uploaded(p) => {
+                    Some(upload::Activity::Uploaded(p)) => {
                         cw.append_msg(&format!("uploaded: {}", p.display()))
                             .await;
                     }
-                    upload::Activity::Complete => {
+                    Some(upload::Activity::Complete) => {
                         let failed = upload_errors
                             || exit_details.iter().any(|ex| ex.code != 0);
                         cw.job_complete(failed).await;
                         stage = Stage::Complete;
                     }
-                    upload::Activity::Error(s) => {
+                    Some(upload::Activity::Error(s)) => {
                         cw.append_msg(&format!("upload error: {}", s)).await;
                         upload_errors = true;
                     }
-                    upload::Activity::Warning(s) => {
+                    Some(upload::Activity::Warning(s)) => {
                         cw.append_msg(&format!("upload warning: {}", s)).await;
                     }
-                }
-            }
-            What::Download(a) => {
-                assert!(matches!(stage, Stage::Download));
-
-                match a {
-                    download::Activity::Downloading(p) => {
-                        cw.append_msg(&format!(
-                            "downloading input: {}",
-                            p.display(),
-                        ))
-                        .await;
-                    }
-                    download::Activity::Downloaded(p) => {
-                        cw.append_msg(&format!(
-                            "downloaded input: {}",
-                            p.display(),
-                        ))
-                        .await;
-                    }
-                    download::Activity::Complete => {
-                        stage = Stage::NextTask;
+                    None => {
+                        cw.append_msg("upload channel disconnected").await;
+                        cw.job_complete(true).await;
+                        stage = Stage::Complete;
                     }
                 }
             }
         }
     }
-
-    /*
-        loop {
-            /*
-             * Don't process events for more than 5 seconds at a time:
-             */
-            let end = Instant::now().checked_add(Duration::from_secs(5)).unwrap();
-            loop {
-                let rem = end.saturating_duration_since(Instant::now());
-                if rem.as_millis() == 0 {
-                    break;
-                }
-
-                match &mut stage {
-                    Stage::Ready | Stage::Complete => {
-                        /*
-                         * If we are not working on something, just sleep for a
-                         * second and ping again in case there is a new directive.
-                         */
-                        sleep_ms(1000).await;
-                        break;
-                    }
-                    Stage::NextTask => {
-                        let job = cw.job.as_ref().unwrap();
-
-                        /*
-                         * If any task fails, we will not execute subsequent tasks.
-                         * In case it is useful for diagnostic purposes, we will
-                         * still attempt to upload output files before we complete
-                         * the job.
-                         */
-                        let failures = exit_details.iter().any(|ex| ex.code != 0);
-                        if failures {
-                            println!("aborting after failed task");
-                        }
-
-                        if failures || tasks.is_empty() {
-                            /*
-                             * There are no more tasks to complete, so move on to
-                             * uploading outputs.
-                             */
-                            println!("no more tasks for for job {}", job.id);
-
-                            stage = Stage::Upload(upload::upload(
-                                cw.clone(),
-                                job.output_rules.clone(),
-                            ));
-                            break;
-                        }
-
-                        let t = tasks.pop_front().unwrap();
-
-                        /*
-                         * Emit an event that we can use to visually separate tasks
-                         * in the output.
-                         */
-                        let msg = format!("starting task {}: \"{}\"", t.id, t.name);
-                        cw.append_task_msg(&t, &msg).await;
-
-                        /*
-                         * Write the submitted script to a file.
-                         */
-                        let s = write_script(&t.script)?;
-
-                        let mut cmd = Command::new("/bin/bash");
-                        cmd.arg(&s);
-
-                        /*
-                         * The user task should have a pristine and reproducible
-                         * environment that does not leak in artefacts of the
-                         * agent.
-                         */
-                        cmd.env_clear();
-                        if !t.env_clear {
-                            /*
-                             * Absent a request for an entirely clean slate, we
-                             * set a few specific environment variables.
-                             * XXX HOME/USER/LOGNAME should probably respect "uid"
-                             */
-                            cmd.env("HOME", "/root");
-                            cmd.env("USER", "root");
-                            cmd.env("LOGNAME", "root");
-                            cmd.env("TZ", "UTC");
-                            cmd.env(
-                                "PATH",
-                                "/usr/bin:/bin:/usr/sbin:/sbin:\
-                                /opt/ooce/bin:/opt/ooce/sbin",
-                            );
-                            cmd.env("LANG", "en_US.UTF-8");
-                            cmd.env("LC_ALL", "en_US.UTF-8");
-                            cmd.env("BUILDOMAT_JOB_ID", &job.id);
-                            cmd.env("BUILDOMAT_TASK_ID", t.id.to_string());
-                        }
-                        for (k, v) in t.env.iter() {
-                            /*
-                             * Overlay the user-provided environment onto what
-                             * we have so far, thus allowing them to replace
-                             * some or all of what we would otherwise provide.
-                             */
-                            cmd.env(k, v);
-                        }
-
-                        /*
-                         * Each task may be expected to run under a different user
-                         * account or with a different working directory.
-                         */
-                        cmd.current_dir(&t.workdir);
-                        cmd.uid(t.uid as u32);
-                        cmd.gid(t.gid as u32);
-
-                        match exec::run(cmd) {
-                            Ok(c) => {
-                                stage = Stage::Child(c, t, None);
-                            }
-                            Err(e) => {
-                                /*
-                                 * Try to post the error we would have reported
-                                 * to the server, but don't try too hard.
-                                 */
-                                cw.client
-                                    .worker_job_append(
-                                        job.id.as_str(),
-                                        &WorkerAppendJob {
-                                            stream: "agent".into(),
-                                            time: Utc::now(),
-                                            payload: format!(
-                                                "ERROR: exec: {:?}",
-                                                e
-                                            ),
-                                        },
-                                    )
-                                    .await
-                                    .ok();
-                            }
-                        }
-                    }
-                    Stage::Child(ch, t, failed) => {
-                        match ch.recv_timeout(rem) {
-                            Ok(exec::Activity::Output(o)) => {
-                                cw.append_task(t, &o.to_record()).await;
-                            }
-                            Ok(exec::Activity::Exit(ex)) => {
-                                let msg = format!(
-                                    "process exited: \
-                                        duration {} ms, exit code {}",
-                                    ex.duration_ms, ex.code
-                                );
-                                let rec = OutputRecord {
-                                    stream: "task".to_string(),
-                                    msg,
-                                    time: ex.when,
-                                };
-                                cw.append_task(t, &rec).await;
-
-                                /*
-                                 * Preserve the exit status for when we record task
-                                 * completion, and so that we can determine whether
-                                 * to execute any subsequent tasks.
-                                 */
-                                *failed = Some(ex.code != 0);
-                                exit_details.push(ex);
-
-                                break;
-                            }
-                            Ok(exec::Activity::Complete) => {
-                                /*
-                                 * Record completion of this task within the job.
-                                 */
-                                cw.task_complete(t, failed.unwrap()).await;
-                                stage = Stage::NextTask;
-                                break;
-                            }
-                            Err(mpsc::RecvTimeoutError::Timeout) => {
-                                break;
-                            }
-                            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                                stage = Stage::Complete;
-                                cw.append_msg("channel disconnected").await;
-
-                                cw.job_complete(true).await;
-                                break;
-                            }
-                        }
-                    }
-                    Stage::Download(ch) => match ch.recv_timeout(rem) {
-                        Ok(download::Activity::Downloading(p)) => {
-                            cw.append_msg(&format!(
-                                "downloading input: {}",
-                                p.display(),
-                            ))
-                            .await;
-                        }
-                        Ok(download::Activity::Downloaded(p)) => {
-                            cw.append_msg(&format!(
-                                "downloaded input: {}",
-                                p.display(),
-                            ))
-                            .await;
-                        }
-                        Ok(download::Activity::Complete) => {
-                            stage = Stage::NextTask;
-                        }
-                        Err(mpsc::RecvTimeoutError::Timeout) => {
-                            break;
-                        }
-                        Err(mpsc::RecvTimeoutError::Disconnected) => {
-                            cw.append_msg("download channel disconnected").await;
-                            cw.job_complete(true).await;
-                            stage = Stage::Complete;
-                            break;
-                        }
-                    },
-                    Stage::Upload(ch) => match ch.recv_timeout(rem) {
-                        Ok(upload::Activity::Scanned(count)) => {
-                            cw.append_msg(&format!("found {} output files", count))
-                                .await;
-                        }
-                        Ok(upload::Activity::Uploading(p, sz)) => {
-                            cw.append_msg(&format!(
-                                "uploading: {} ({} bytes)",
-                                p.display(),
-                                sz
-                            ))
-                            .await;
-                        }
-                        Ok(upload::Activity::Uploaded(p)) => {
-                            cw.append_msg(&format!("uploaded: {}", p.display()))
-                                .await;
-                        }
-                        Ok(upload::Activity::Complete) => {
-                            let failed = upload_errors
-                                || exit_details.iter().any(|ex| ex.code != 0);
-                            cw.job_complete(failed).await;
-                            stage = Stage::Complete;
-                            break;
-                        }
-                        Ok(upload::Activity::Error(s)) => {
-                            cw.append_msg(&format!("upload error: {}", s)).await;
-                            upload_errors = true;
-                        }
-                        Ok(upload::Activity::Warning(s)) => {
-                            cw.append_msg(&format!("upload warning: {}", s)).await;
-                        }
-                        Err(mpsc::RecvTimeoutError::Timeout) => {
-                            break;
-                        }
-                        Err(mpsc::RecvTimeoutError::Disconnected) => {
-                            cw.append_msg("upload channel disconnected").await;
-                            cw.job_complete(true).await;
-                            stage = Stage::Complete;
-                            break;
-                        }
-                    },
-                }
-            }
-        }
-    */
 }
 
 #[tokio::main]
