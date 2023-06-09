@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 use crate::{App, FlushOut, FlushState};
@@ -66,6 +66,9 @@ struct BasicPrivate {
     job_outputs: Vec<BasicOutput>,
     #[serde(default)]
     job_outputs_extra: usize,
+
+    #[serde(default)]
+    extra_repo_ids: Vec<i64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -311,15 +314,63 @@ pub(crate) async fn run(
          * to update our state.
          */
         let bt = b.job_get(jid).await?.into_inner();
+        let running = bt.state == "running";
+        let complete = bt.state == "completed" || bt.state == "failed";
         let new_state = Some(bt.state);
-        let complete = if let Some(state) = new_state.as_deref() {
-            state == "completed" || state == "failed"
-        } else {
-            false
-        };
         if new_state != p.job_state {
             cr.flushed = false;
             p.job_state = new_state;
+        }
+
+        if running {
+            let store = b.job_store_get_all(jid).await?.into_inner();
+
+            if !store.contains_key("GITHUB_TOKEN") {
+                /*
+                 * As has become something of a theme, the GitHub API with which
+                 * applications can generate an ephemeral credential for access
+                 * to private repositories presents considerable opportunity for
+                 * improvement.  One cannot specify a retention period, so the
+                 * tokens just expire after around one hour.  If this is not
+                 * long enough for you, well, whose fault is that anyway?
+                 *
+                 * In order to provide the absolute freshest token that we can,
+                 * we must generate the token only once the job begins running:
+                 * we cannot control how long a job spends in the "queued"
+                 * state, as it depends on how busy the system is; we also
+                 * cannot control how long the job spends in the "waiting"
+                 * state, as it depends on how long its dependencies take to
+                 * complete execution before it.
+                 */
+                let token = app
+                    .temp_access_token(
+                        cs.install,
+                        &repo,
+                        Some(&p.extra_repo_ids),
+                    )
+                    .await?;
+
+                /*
+                 * Place the generated token in the property store for the job.
+                 * This store can be updated while the job is running.  Values
+                 * are obtained through the "bmat" control program inside the
+                 * job.  Timing is important but not critical: the job will wait
+                 * for the value to appear before continuing.
+                 */
+                b.job_store_put(
+                    jid,
+                    "GITHUB_TOKEN",
+                    &buildomat_client::types::JobStoreValue {
+                        /*
+                         * Mark this value as a secret so that it will not be
+                         * included in diagnostic output.
+                         */
+                        secret: true,
+                        value: token,
+                    },
+                )
+                .await?;
+            }
         }
 
         /*
@@ -534,7 +585,6 @@ pub(crate) async fn run(
          * whether the repository for the check run or one of the other
          * repositories to which the check needs access.
          */
-        let mut extras = Vec::new();
         if !c.access_repos.is_empty() {
             /*
              * First, make sure this job is authorised by a member of the
@@ -565,8 +615,8 @@ pub(crate) async fn run(
                 let msg = if let Some((owner, name)) = dep.split_once("/") {
                     match gh.repos().get(owner, name).await {
                         Ok(fr) => {
-                            if !extras.contains(&fr.id) {
-                                extras.push(fr.id);
+                            if !p.extra_repo_ids.contains(&fr.id) {
+                                p.extra_repo_ids.push(fr.id);
                             }
                             continue;
                         }
@@ -607,9 +657,6 @@ pub(crate) async fn run(
                 return Ok(false);
             }
         }
-
-        let token =
-            app.temp_access_token(cs.install, &repo, Some(&extras)).await?;
 
         /*
          * Create a series of tasks to configure the build environment
@@ -689,8 +736,6 @@ pub(crate) async fn run(
             });
         }
 
-        buildenv.insert("GITHUB_TOKEN".into(), token.clone());
-
         /*
          * Write the temporary access token which gives brief read-only access
          * to only this (potentially private) repository into the ~/.netrc file.
@@ -711,8 +756,12 @@ pub(crate) async fn run(
             workdir: Some("/home/build".into()),
             script: "\
                 #!/bin/bash\n\
+                \n\
                 set -o errexit\n\
                 set -o pipefail\n\
+                \n\
+                GITHUB_TOKEN=$(bmat store get GITHUB_TOKEN)\n\
+                \n\
                 cat >$HOME/.netrc <<EOF\n\
                 machine github.com\n\
                 login x-access-token\n\
@@ -726,8 +775,6 @@ pub(crate) async fn run(
                 "
             .into(),
         });
-
-        buildenv.remove("GITHUB_TOKEN");
 
         /*
          * By default, we assume that the target provides toolchains and other
