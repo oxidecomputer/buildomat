@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 use std::collections::HashMap;
@@ -1440,6 +1440,116 @@ impl Database {
             .drain(..)
             .map(|jt| (jt.name, jt.time.0))
             .collect())
+    }
+
+    pub fn job_store(&self, job: JobId) -> Result<HashMap<String, JobStore>> {
+        use schema::job_store;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        Ok(job_store::dsl::job_store
+            .filter(job_store::dsl::job.eq(job))
+            .get_results::<JobStore>(c)?
+            .into_iter()
+            .map(|js| (js.name.to_string(), js))
+            .collect())
+    }
+
+    pub fn job_store_put(
+        &self,
+        job: JobId,
+        name: &str,
+        value: &str,
+        secret: bool,
+        source: &str,
+    ) -> OResult<()> {
+        use schema::{job, job_store};
+
+        if name.is_empty()
+            || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            conflict!("invalid store entry name");
+        }
+
+        /*
+         * Cap the number of values and the size of each value:
+         */
+        let max_val_count = 100;
+        let max_val_kib = 10;
+        if value.as_bytes().len() > max_val_kib * 1024 {
+            conflict!("maximum value size is {max_val_kib}KiB");
+        }
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        c.immediate_transaction(|tx| {
+            /*
+             * Make sure the job exists and is not yet completed.  We do not
+             * allow store updates after the job is finished.
+             */
+            let j: Job = job::dsl::job.find(job).get_result(tx)?;
+            if j.complete {
+                conflict!("job {job} already complete; cannot update store");
+            }
+
+            /*
+             * First, check to see if this value already exists in the store:
+             */
+            let pre: Option<JobStore> = job_store::dsl::job_store
+                .filter(job_store::dsl::job.eq(job))
+                .filter(job_store::dsl::name.eq(name))
+                .get_result(tx)
+                .optional()?;
+
+            if let Some(pre) = pre {
+                /*
+                 * Overwrite the existing value.  If the value we are replacing
+                 * was already marked as a secret, we mark the updated value as
+                 * secret as well to avoid accidents.
+                 */
+                let new_secret = if pre.secret { true } else { secret };
+
+                let uc = diesel::update(job_store::dsl::job_store)
+                    .filter(job_store::dsl::job.eq(job))
+                    .filter(job_store::dsl::name.eq(name))
+                    .set((
+                        job_store::dsl::value.eq(value),
+                        job_store::dsl::secret.eq(new_secret),
+                        job_store::dsl::source.eq(source),
+                        job_store::dsl::time_update.eq(IsoDate::now()),
+                    ))
+                    .execute(tx)?;
+                assert_eq!(uc, 1);
+                return Ok(());
+            }
+
+            /*
+             * If the value does not already exist, we need to create it.  We
+             * also need to make sure we do not allow values to be stored in
+             * excess of the value count cap.
+             */
+            let count: i64 = job_store::dsl::job_store
+                .filter(job_store::dsl::job.eq(job))
+                .count()
+                .get_result(tx)?;
+            if count >= max_val_count {
+                conflict!("job {job} already has {count} store values");
+            }
+
+            let ic = diesel::insert_into(job_store::dsl::job_store)
+                .values(JobStore {
+                    job,
+                    name: name.to_string(),
+                    value: value.to_string(),
+                    secret,
+                    source: source.to_string(),
+                    time_update: IsoDate::now(),
+                })
+                .execute(tx)?;
+            assert_eq!(ic, 1);
+
+            Ok(())
+        })
     }
 
     pub fn task_complete(

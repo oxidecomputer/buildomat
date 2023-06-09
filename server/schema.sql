@@ -253,3 +253,15 @@ ALTER TABLE job_output_rule ADD COLUMN
 -- v 38
 ALTER TABLE job_output_rule ADD COLUMN
     require_match   INTEGER NOT NULL    DEFAULT 0;
+
+-- v 39
+CREATE TABLE job_store (
+    job             TEXT    NOT NULL,
+    name            TEXT    NOT NULL,
+    value           TEXT    NOT NULL,
+    secret          INTEGER NOT NULL,
+    source          TEXT    NOT NULL,
+    time_update     TEXT    NOT NULL,
+
+    PRIMARY KEY (job, name)
+);

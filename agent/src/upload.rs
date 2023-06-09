@@ -6,8 +6,10 @@ use std::collections::HashSet;
 use std::fs;
 use std::io::Read;
 use std::path::PathBuf;
-use std::sync::mpsc;
 
+use tokio::sync::mpsc;
+
+#[derive(Debug)]
 pub enum Activity {
     Error(String),
     Warning(String),
@@ -26,7 +28,7 @@ pub(crate) fn upload(
     cw: super::ClientWrap,
     rules: Vec<super::WorkerPingOutputRule>,
 ) -> mpsc::Receiver<Activity> {
-    let (tx, rx) = mpsc::channel::<Activity>();
+    let (tx, rx) = mpsc::channel::<Activity>(64);
 
     tokio::spawn(async move {
         let mut seen = HashSet::new();
@@ -48,6 +50,7 @@ pub(crate) fn upload(
                         "glob {:?} error: {:?}",
                         r.rule, e,
                     )))
+                    .await
                     .unwrap();
                     continue;
                 }
@@ -139,6 +142,7 @@ pub(crate) fn upload(
                                             "glob {:?} stat error: {:?}",
                                             r, e
                                         )))
+                                        .await
                                         .unwrap();
                                         continue;
                                     }
@@ -149,6 +153,7 @@ pub(crate) fn upload(
                                     "glob {:?} path error: {:?}",
                                     r, e
                                 )))
+                                .await
                                 .unwrap();
                                 break;
                             }
@@ -160,18 +165,19 @@ pub(crate) fn upload(
                         "glob {:?} error: {:?}",
                         r, e
                     )))
+                    .await
                     .unwrap();
                 }
             }
         }
 
-        tx.send(Activity::Scanned(uploads.len())).unwrap();
+        tx.send(Activity::Scanned(uploads.len())).await.unwrap();
 
         /*
          * Upload each scanned file.
          */
         'outer: for u in uploads.iter() {
-            tx.send(Activity::Uploading(u.path.clone(), u.size)).unwrap();
+            tx.send(Activity::Uploading(u.path.clone(), u.size)).await.unwrap();
 
             /*
              * XXX For now, individual upload size is capped at 1GB.
@@ -182,6 +188,7 @@ pub(crate) fn upload(
                     and cannot be uploaded at this time.",
                     u.path, u.size,
                 )))
+                .await
                 .unwrap();
                 continue;
             }
@@ -199,6 +206,7 @@ pub(crate) fn upload(
                         "open {:?} failed: {:?}",
                         u.path, e
                     )))
+                    .await
                     .unwrap();
                     continue;
                 }
@@ -225,6 +233,7 @@ pub(crate) fn upload(
                             "read {:?} failed: {:?}",
                             u.path, e
                         )))
+                        .await
                         .unwrap();
                         continue 'outer;
                     }
@@ -240,9 +249,9 @@ pub(crate) fn upload(
                 );
 
                 if change_ok {
-                    tx.send(Activity::Warning(msg)).unwrap();
+                    tx.send(Activity::Warning(msg)).await.unwrap();
                 } else {
-                    tx.send(Activity::Error(msg)).unwrap();
+                    tx.send(Activity::Error(msg)).await.unwrap();
                     continue;
                 }
 
@@ -255,6 +264,7 @@ pub(crate) fn upload(
                         than 1GiB and cannot be uploaded at this time.",
                         u.path, total,
                     )))
+                    .await
                     .unwrap();
                     continue;
                 }
@@ -262,7 +272,7 @@ pub(crate) fn upload(
 
             cw.output(&u.path, total, chunks.as_slice()).await;
 
-            tx.send(Activity::Uploaded(u.path.clone())).unwrap();
+            tx.send(Activity::Uploaded(u.path.clone())).await.unwrap();
 
             /*
              * Mark as used any rule that requires a match and which matches
@@ -284,11 +294,12 @@ pub(crate) fn upload(
                     "rule \"{}\" required a match, but was not used",
                     g,
                 )))
+                .await
                 .unwrap();
             }
         }
 
-        tx.send(Activity::Complete).unwrap();
+        tx.send(Activity::Complete).await.unwrap();
     });
 
     rx

@@ -1,12 +1,12 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 use std::io::{BufRead, BufReader, Read};
 use std::os::unix::process::ExitStatusExt;
 use std::process::{Command, Stdio};
-use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::{Duration, Instant};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use anyhow::Result;
 use chrono::prelude::*;
@@ -48,7 +48,10 @@ where
                 Ok(_) => {
                     let s = String::from_utf8_lossy(&buf);
 
-                    if tx.send(Activity::msg(&name, s.trim_end())).is_err() {
+                    if tx
+                        .blocking_send(Activity::msg(&name, s.trim_end()))
+                        .is_err()
+                    {
                         /*
                          * If the channel is not available, give up and close
                          * the stream.
@@ -61,7 +64,7 @@ where
                      * Try to report whatever error we experienced to the
                      * server, but don't panic if we cannot.
                      */
-                    tx.send(Activity::msg(
+                    tx.blocking_send(Activity::msg(
                         "error",
                         &format!("failed to read {}: {:?}", name, e),
                     ))
@@ -73,13 +76,14 @@ where
     }))
 }
 
+#[derive(Debug)]
 pub struct ExitDetails {
     pub duration_ms: u64,
     pub when: DateTime<Utc>,
     pub code: i32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct OutputDetails {
     stream: String,
     msg: String,
@@ -96,6 +100,7 @@ impl OutputDetails {
     }
 }
 
+#[derive(Debug)]
 pub enum Activity {
     Output(OutputDetails),
     Exit(ExitDetails),
@@ -171,7 +176,7 @@ pub fn thread_done(
 }
 
 pub fn run(mut cmd: Command) -> Result<Receiver<Activity>> {
-    let (tx, rx) = channel::<Activity>();
+    let (tx, rx) = channel::<Activity>(64);
 
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
@@ -188,9 +193,13 @@ pub fn run(mut cmd: Command) -> Result<Receiver<Activity>> {
         let end = Instant::now();
         let stdio_warning = match wait {
             Err(e) => {
-                tx.send(Activity::err(&format!("child wait failed: {:?}", e)))
+                tx.blocking_send(Activity::err(&format!(
+                    "child wait failed: {:?}",
+                    e
+                )))
+                .unwrap();
+                tx.blocking_send(Activity::exit(&start, &end, std::i32::MAX))
                     .unwrap();
-                tx.send(Activity::exit(&start, &end, std::i32::MAX)).unwrap();
                 false
             }
             Ok(es) => {
@@ -207,7 +216,7 @@ pub fn run(mut cmd: Command) -> Result<Receiver<Activity>> {
                     | !thread_done(&mut readerr, "stderr", until);
 
                 if let Some(sig) = es.signal() {
-                    tx.send(Activity::warn(&format!(
+                    tx.blocking_send(Activity::warn(&format!(
                         "child terminated by signal {}",
                         sig
                     )))
@@ -218,13 +227,13 @@ pub fn run(mut cmd: Command) -> Result<Receiver<Activity>> {
                 } else {
                     std::i32::MAX
                 };
-                tx.send(Activity::exit(&start, &end, code)).unwrap();
+                tx.blocking_send(Activity::exit(&start, &end, code)).unwrap();
                 stdio_warning
             }
         };
 
         if stdio_warning {
-            tx.send(Activity::warn(&format!(
+            tx.blocking_send(Activity::warn(&format!(
                 "stdio descriptors remain open after task exit; \
                 waiting 60 seconds for them to close",
             )))
@@ -234,21 +243,21 @@ pub fn run(mut cmd: Command) -> Result<Receiver<Activity>> {
         let until =
             Instant::now().checked_add(Duration::from_secs(60)).unwrap();
         if !thread_done(&mut readout, "stdout", until) {
-            tx.send(Activity::warn(
+            tx.blocking_send(Activity::warn(
                 "stdout descriptor may be held open by a background process; \
                 giving up!",
             ))
             .unwrap();
         }
         if !thread_done(&mut readerr, "stderr", until) {
-            tx.send(Activity::warn(
+            tx.blocking_send(Activity::warn(
                 "stderr descriptor may be held open by a background process; \
                 giving up!",
             ))
             .unwrap();
         }
 
-        tx.send(Activity::Complete).unwrap();
+        tx.blocking_send(Activity::Complete).unwrap();
     });
 
     Ok(rx)

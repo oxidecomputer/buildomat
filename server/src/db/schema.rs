@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 table! {
@@ -179,5 +179,16 @@ table! {
         job -> Text,
         name -> Text,
         time -> Text,
+    }
+}
+
+table! {
+    job_store (job, name) {
+        job -> Text,
+        name -> Text,
+        value -> Text,
+        secret -> Bool,
+        source -> Text,
+        time_update -> Text,
     }
 }

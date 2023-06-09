@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 use super::prelude::*;
@@ -41,6 +41,18 @@ pub(crate) struct JobInputPath {
 pub(crate) struct JobTaskPath {
     job: String,
     task: u32,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JobStorePath {
+    job: String,
+    name: String,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub(crate) struct WorkerJobStoreValue {
+    value: String,
+    secret: bool,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -315,6 +327,66 @@ pub(crate) async fn worker_task_complete(
 
     info!(log, "worker {} complete job {} task {}", w.id, j.id, p.task);
     c.db.task_complete(j.id, p.task, b.failed).or_500()?;
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct WorkerJobStoreGet {
+    value: Option<WorkerJobStoreValue>,
+}
+
+#[endpoint {
+    method = GET,
+    path = "/0/worker/job/{job}/store/{name}",
+}]
+pub(crate) async fn worker_job_store_get(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<JobStorePath>,
+) -> DSResult<HttpResponseOk<WorkerJobStoreGet>> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let w = c.require_worker(log, &rqctx.request).await?;
+
+    let p = path.into_inner();
+    let j = c.db.job_by_str(&p.job).or_500()?; /* XXX */
+    w.owns(log, &j)?;
+
+    info!(log, "worker {} job {} get store value {}", w.id, j.id, p.name);
+
+    let store = c.db.job_store(j.id).or_500()?;
+
+    Ok(HttpResponseOk(WorkerJobStoreGet {
+        value: store.get(&p.name).map(|v| WorkerJobStoreValue {
+            value: v.value.to_string(),
+            secret: v.secret,
+        }),
+    }))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/0/worker/job/{job}/store/{name}",
+}]
+pub(crate) async fn worker_job_store_put(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<JobStorePath>,
+    body: TypedBody<WorkerJobStoreValue>,
+) -> DSResult<HttpResponseUpdatedNoContent> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let w = c.require_worker(log, &rqctx.request).await?;
+
+    let b = body.into_inner();
+    let p = path.into_inner();
+    let j = c.db.job_by_str(&p.job).or_500()?; /* XXX */
+    w.owns(log, &j)?;
+
+    info!(log, "worker {} job {} put store value {}", w.id, j.id, p.name);
+
+    c.db.job_store_put(j.id, &p.name, &b.value, b.secret, "worker").or_500()?;
 
     Ok(HttpResponseUpdatedNoContent())
 }

@@ -181,6 +181,7 @@ dependencies = [
  "chrono",
  "futures",
  "glob",
+ "hiercmd",
  "openssl",
  "serde",
  "serde_json",

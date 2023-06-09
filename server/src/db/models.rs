@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 use super::schema::*;
@@ -348,4 +348,16 @@ pub struct JobTime {
     pub job: JobId,
     pub name: String,
     pub time: IsoDate,
+}
+
+#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
+#[diesel(table_name = job_store)]
+#[diesel(primary_key(job, name))]
+pub struct JobStore {
+    pub job: JobId,
+    pub name: String,
+    pub value: String,
+    pub secret: bool,
+    pub source: String,
+    pub time_update: IsoDate,
 }
