@@ -924,9 +924,22 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    match std::env::args().next().as_deref() {
+    let cmdname = std::env::args()
+        .next()
+        .as_deref()
+        .map(|s| {
+            let path = PathBuf::from(s);
+            path.file_name()
+                .map(|s| s.to_str())
+                .flatten()
+                .map(|s| Some(s.to_string()))
+                .flatten()
+        })
+        .flatten();
+
+    match cmdname.as_deref() {
         None => bail!("could not determine executable name?"),
-        Some("bmat") => {
+        Some(CONTROL_PROGRAM) => {
             /*
              * This is the in-job control entrypoint to be invoked by job
              * programs.
