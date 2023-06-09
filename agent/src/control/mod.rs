@@ -172,6 +172,11 @@ async fn cmd_store_put(mut l: Level<Stuff>) -> Result<()> {
 
     let a = args!(l);
 
+    /*
+     * Processing of the format of the input should be kept in sync with what
+     * "buildomat job store put" does outside the job; see the "buildomat"
+     * crate.
+     */
     let value = match a.args().len() {
         1 => {
             let mut s = String::new();

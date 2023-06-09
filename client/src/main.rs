@@ -5,7 +5,7 @@
 #![allow(unused_imports)]
 #![allow(clippy::many_single_char_names)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env::{args, var};
 use std::fs::{File, OpenOptions};
 use std::future::Future;
@@ -783,10 +783,10 @@ async fn do_job_store_get(mut l: Level<Stuff>) -> Result<()> {
 async fn do_job_store_list(mut l: Level<Stuff>) -> Result<()> {
     l.usage_args(Some("JOB"));
 
-    l.add_column("name", 23, true);
+    l.add_column("name", 16, true);
     l.add_column("flags", 5, true);
-    l.add_column("value", 43, true);
     l.add_column("age", 6, true);
+    l.add_column("value", 50, true);
     l.add_column("source", 10, false);
     l.add_column("updated", WIDTH_ISODATE, false);
 
@@ -800,7 +800,14 @@ async fn do_job_store_list(mut l: Level<Stuff>) -> Result<()> {
 
     let mut t = a.table();
 
-    let store = l.context().user().job_store_get_all(&job).await?.into_inner();
+    let store = l
+        .context()
+        .user()
+        .job_store_get_all(&job)
+        .await?
+        .into_inner()
+        .into_iter()
+        .collect::<BTreeMap<_, _>>();
 
     for (name, ent) in store {
         let mut r = Row::default();
