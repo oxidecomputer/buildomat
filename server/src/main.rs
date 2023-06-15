@@ -571,6 +571,7 @@ impl FileAgentQuery {
 #[endpoint {
     method = GET,
     path = "/file/agent",
+    unpublished = true,
 }]
 async fn file_agent(
     rqctx: RequestContext<Arc<Central>>,
@@ -663,6 +664,7 @@ async fn main() -> Result<()> {
     ad.register(api::factory::factory_lease).api_check()?;
     ad.register(api::factory::factory_lease_renew).api_check()?;
     ad.register(api::public::public_file_download).api_check()?;
+    ad.register(file_agent).api_check()?;
 
     if let Some(s) = p.opt_str("S") {
         let mut f = std::fs::OpenOptions::new()
@@ -672,12 +674,6 @@ async fn main() -> Result<()> {
         ad.openapi("Buildomat", "1.0").write(&mut f)?;
         return Ok(());
     }
-
-    /*
-     * These should not presently appear in the OpenAPI definition, so we
-     * register them after it is generated:
-     */
-    ad.register(file_agent).api_check()?;
 
     let bind_address =
         p.opt_str("b").as_deref().unwrap_or("127.0.0.1:9979").parse()?;
