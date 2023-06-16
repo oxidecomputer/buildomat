@@ -828,7 +828,10 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
             }
             "check_run" if &payload.action == "requested_action" => {
                 let actid = if let Some(ra) = &payload.requested_action {
-                    if ra.identifier != "auth" && ra.identifier != "cancel" {
+                    if ra.identifier != "auth"
+                        && ra.identifier != "cancel"
+                        && ra.identifier != "cancel_all"
+                    {
                         /*
                          * Authorisation and cancellation are the only actions
                          * we know how to do for now.
@@ -904,22 +907,48 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                         continue;
                     }
                     CheckRunVariety::Basic => {
-                        if actid != "cancel" {
-                            warn!(
-                                log,
-                                "delivery {} for {:?} on basic check run",
-                                del.seq,
-                                actid,
-                            );
-                            app.db.delivery_ack(del.seq, ack)?;
-                            continue;
-                        }
+                        match actid.as_str() {
+                            "cancel" => {
+                                /*
+                                 * Cancel any work that has been queued but not
+                                 * yet performed:
+                                 */
+                                variety::basic::cancel(app, &cs, &mut cr)
+                                    .await?;
+                            }
+                            "cancel_all" => {
+                                /*
+                                 * Cancel any work that has been queued but not
+                                 * yet performed for all basic variety check
+                                 * runs in this suite:
+                                 */
+                                for mut cr in
+                                    app.db.list_check_runs_for_suite(&cs.id)?
+                                {
+                                    if !cr.active
+                                        || !matches!(
+                                            cr.variety,
+                                            CheckRunVariety::Basic
+                                        )
+                                    {
+                                        continue;
+                                    }
 
-                        /*
-                         * Cancel any work that has been queued but not yet
-                         * performed:
-                         */
-                        variety::basic::cancel(app, &cs, &mut cr).await?;
+                                    variety::basic::cancel(app, &cs, &mut cr)
+                                        .await?;
+                                }
+                            }
+                            other => {
+                                warn!(
+                                    log,
+                                    "delivery {} for {:?} on basic check run",
+                                    del.seq,
+                                    other,
+                                );
+                                app.db.delivery_ack(del.seq, ack)?;
+                                continue;
+                            }
+                        }
 
                         app.db.delivery_ack(del.seq, ack)?;
                         continue;

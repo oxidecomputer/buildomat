@@ -199,11 +199,18 @@ pub(crate) async fn flush(
         summary += "\n\n";
     }
 
-    let cancel = vec![octorust::types::ChecksCreateRequestActions {
-        description: "Cancel execution and fail the check.".into(),
-        identifier: "cancel".into(),
-        label: "Cancel".into(),
-    }];
+    let cancel = vec![
+        octorust::types::ChecksCreateRequestActions {
+            description: "Cancel execution and fail the check.".into(),
+            identifier: "cancel".into(),
+            label: "Cancel this job".into(),
+        },
+        octorust::types::ChecksCreateRequestActions {
+            description: "Cancel all jobs and fail all checks.".into(),
+            identifier: "cancel_all".into(),
+            label: "Cancel all jobs".into(),
+        },
+    ];
 
     Ok(if p.complete {
         if let Some(e) = p.error.as_deref() {
