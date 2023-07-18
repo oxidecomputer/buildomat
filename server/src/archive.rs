@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 use std::io::ErrorKind;
@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use anyhow::{bail, Result};
 use chrono::prelude::*;
-use rusoto_s3::S3;
 #[allow(unused_imports)]
 use slog::{debug, error, info, warn, Logger};
 
@@ -17,7 +16,7 @@ use super::{db, Central};
 async fn archive_files_one(
     log: &Logger,
     c: &Central,
-    s3: &rusoto_s3::S3Client,
+    s3: &aws_sdk_s3::Client,
 ) -> Result<()> {
     while let Some(jf) = c.db.job_file_next_unarchived()? {
         let key = c.file_object_key(jf.job, jf.id);
@@ -48,19 +47,18 @@ async fn archive_files_one(
             );
         }
 
-        let content_length = Some(file_size.try_into()?);
-
-        let stream = tokio_util::io::ReaderStream::new(f);
-        let body = Some(rusoto_core::ByteStream::new(stream));
+        let stream = aws_smithy_http::byte_stream::ByteStream::read_from()
+            .file(f)
+            .build()
+            .await?;
 
         let res = s3
-            .put_object(rusoto_s3::PutObjectRequest {
-                bucket: c.config.storage.bucket.to_string(),
-                key: key.clone(),
-                content_length,
-                body,
-                ..Default::default()
-            })
+            .put_object()
+            .bucket(&c.config.storage.bucket)
+            .key(&key)
+            .content_length(file_size.try_into()?)
+            .body(stream)
+            .send()
             .await?;
 
         info!(

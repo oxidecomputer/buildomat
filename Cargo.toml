@@ -19,6 +19,12 @@ members = [
 
 [workspace.dependencies]
 anyhow = "1"
+aws-config = "0.55.3"
+aws-credential-types = "0.55.3"
+aws-sdk-s3 = "0.28.0"
+aws-smithy-http = "0.55.3"
+aws-smithy-types = "0.55.3"
+aws-types = "0.55.3"
 base64 = "0.13"
 bytes = "1.1"
 chrono = { version = "0.4", features = [ "serde" ] }
@@ -47,7 +53,6 @@ reqwest = { version = "0.11", features = [ "json", "stream" ] }
 rusoto_core = "0.48"
 rusoto_credential = "0.48"
 rusoto_ec2 = "0.48"
-rusoto_s3 = "0.48"
 rusty_ulid = "1"
 schemars = { version = "0.8", features = [ "chrono" ] }
 serde = { version = "1", features = [ "derive" ] }

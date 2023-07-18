@@ -6,6 +6,12 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow = { workspace = true }
+aws-config = "0.55.3"
+aws-credential-types = "0.55.3"
+aws-sdk-s3 = "0.28.0"
+aws-smithy-http = "0.55.3"
+aws-smithy-types = "0.55.3"
+aws-types = "0.55.3"
 base64 = { workspace = true }
 buildomat-common = { path = "../common" }
 buildomat-database = { path = "../database" }
@@ -15,9 +21,6 @@ dropshot = { workspace = true }
 getopts = { workspace = true }
 hyper = { workspace = true }
 hyper-staticfile = { workspace = true }
-rusoto_core = { workspace = true }
-rusoto_credential = { workspace = true }
-rusoto_s3 = { workspace = true }
 rusty_ulid = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }

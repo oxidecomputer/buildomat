@@ -9,7 +9,6 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::exit;
 use std::result::Result as SResult;
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -23,7 +22,6 @@ use hyper::{
     header::AUTHORIZATION, header::CONTENT_LENGTH, Body, Response, StatusCode,
 };
 use hyper_staticfile::FileBytesStream;
-use rusoto_s3::S3;
 use rusty_ulid::Ulid;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -90,20 +88,6 @@ impl<T> MakeInternalError<T>
     fn or_500(self) -> SResult<T, HttpError> {
         self.map_err(|e| {
             let msg = format!("ID decode error: {:?}", e);
-            HttpError::for_internal_error(msg)
-        })
-    }
-}
-
-impl<T> MakeInternalError<T>
-    for std::result::Result<
-        T,
-        rusoto_core::RusotoError<rusoto_s3::GetObjectError>,
-    >
-{
-    fn or_500(self) -> SResult<T, HttpError> {
-        self.map_err(|e| {
-            let msg = format!("object store get error: {:?}", e);
             HttpError::for_internal_error(msg)
         })
     }
@@ -178,6 +162,22 @@ struct ConfigFileStorage {
     region: String,
 }
 
+impl ConfigFileStorage {
+    fn creds(&self) -> aws_credential_types::Credentials {
+        aws_credential_types::Credentials::new(
+            &self.access_key_id,
+            &self.secret_access_key,
+            None,
+            None,
+            "buildomat",
+        )
+    }
+
+    fn region(&self) -> aws_types::region::Region {
+        aws_types::region::Region::new(self.region.to_string())
+    }
+}
+
 struct CentralInner {
     hold: bool,
     leases: jobs::Leases,
@@ -188,7 +188,7 @@ struct Central {
     db: db::Database,
     datadir: PathBuf,
     inner: Mutex<CentralInner>,
-    s3: rusoto_s3::S3Client,
+    s3: aws_sdk_s3::Client,
 }
 
 pub(crate) fn unauth_response<T>() -> SResult<T, HttpError> {
@@ -527,21 +527,16 @@ impl Central {
             let info = format!("object store at {}", key);
             let obj = self
                 .s3
-                .get_object(rusoto_s3::GetObjectRequest {
-                    bucket: self.config.storage.bucket.to_string(),
-                    key,
-                    ..Default::default()
-                })
+                .get_object()
+                .bucket(&self.config.storage.bucket)
+                .key(key)
+                .send()
                 .await?;
 
-            if let Some(body) = obj.body {
-                FileResponse {
-                    info,
-                    body: Body::wrap_stream(body),
-                    size: obj.content_length.unwrap() as u64,
-                }
-            } else {
-                bail!("no body on object request for {}/{}", job, file);
+            FileResponse {
+                info,
+                size: obj.content_length.try_into().unwrap(),
+                body: Body::wrap_stream(obj.body),
             }
         })
     }
@@ -696,15 +691,12 @@ async fn main() -> Result<()> {
     dbfile.push("data.sqlite3");
     let db = db::Database::new(log.clone(), dbfile, config.sqlite.cache_kb)?;
 
-    let credprov = rusoto_credential::StaticProvider::new_minimal(
-        config.storage.access_key_id.clone(),
-        config.storage.secret_access_key.clone(),
-    );
-    let s3 = rusoto_s3::S3Client::new_with(
-        rusoto_core::HttpClient::new()?,
-        credprov,
-        rusoto_core::Region::from_str(&config.storage.region)?,
-    );
+    let awscfg = aws_config::ConfigLoader::default()
+        .region(config.storage.region())
+        .credentials_provider(config.storage.creds())
+        .load()
+        .await;
+    let s3 = aws_sdk_s3::Client::new(&awscfg);
 
     let c = Arc::new(Central {
         inner: Mutex::new(CentralInner {
