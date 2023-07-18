@@ -645,6 +645,44 @@ async fn do_job_copy(mut l: Level<Stuff>) -> Result<()> {
     bail!("job {} does not have a file that matches {}", job, src);
 }
 
+async fn do_job_sign(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("JOB SRC"));
+
+    let a = args!(l);
+
+    if a.args().len() != 2 {
+        bad_args!(l, "specify a job and a job output path");
+    }
+
+    let job = a.args()[0].as_str();
+    let src = a.args()[1].as_str();
+
+    let c = l.context().user();
+    for o in c.job_outputs_get(job).await?.into_inner() {
+        if o.path != src {
+            continue;
+        }
+
+        let su = c
+            .job_output_signed_url(
+                job,
+                &o.id,
+                &JobOutputSignedUrl {
+                    content_disposition: None,
+                    content_type: Some("text/plain".into()),
+                    expiry_seconds: 3600,
+                },
+            )
+            .await?
+            .into_inner();
+
+        println!("{}", su.url);
+        return Ok(());
+    }
+
+    bail!("job {} does not have a file that matches {}", job, src);
+}
+
 async fn do_job_publish(mut l: Level<Stuff>) -> Result<()> {
     l.usage_args(Some("JOB SRC SERIES VERSION NAME"));
 
@@ -866,6 +904,7 @@ async fn do_job(mut l: Level<Stuff>) -> Result<()> {
         "copy from job outputs to local files",
         cmd!(do_job_copy),
     )?;
+    l.cmd("sign", "sign a download URL for a job output", cmd!(do_job_sign))?;
     l.cmd(
         "publish",
         "publish a job output for public consumption",

@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::process::exit;
 use std::result::Result as SResult;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use dropshot::{
@@ -115,6 +116,11 @@ struct FileResponse {
     pub info: String,
     pub body: Body,
     pub size: u64,
+}
+
+struct FilePresignedUrl {
+    pub info: String,
+    pub url: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -498,6 +504,49 @@ impl Central {
         Ok(fid)
     }
 
+    async fn file_presigned_url(
+        &self,
+        job: JobId,
+        file: JobFileId,
+        expiry_seconds: u64,
+        content_type: Option<&str>,
+        content_disposition: Option<&str>,
+    ) -> Result<FilePresignedUrl> {
+        if expiry_seconds > 3600 {
+            bail!("expiry too long");
+        }
+
+        /*
+         * Presigned URLs always come from the object store!
+         */
+        let key = self.file_object_key(job, file);
+        let info = format!("object store at {}", key);
+
+        let mut obj =
+            self.s3.get_object().bucket(&self.config.storage.bucket).key(key);
+
+        /*
+         * We may be asked to override some of the headers that S3 provides in
+         * the response.
+         */
+        if let Some(val) = content_type {
+            obj = obj.response_content_type(val);
+        }
+        if let Some(val) = content_disposition {
+            obj = obj.response_content_disposition(val);
+        }
+
+        let obj = obj
+            .presigned(
+                aws_sdk_s3::presigning::PresigningConfig::builder()
+                    .expires_in(Duration::from_secs(expiry_seconds))
+                    .build()?,
+            )
+            .await?;
+
+        Ok(FilePresignedUrl { info, url: obj.uri().to_string() })
+    }
+
     async fn file_response(
         &self,
         job: JobId,
@@ -519,9 +568,6 @@ impl Central {
         } else {
             /*
              * Otherwise, try to get it from the object store.
-             *
-             * XXX We could conceivably 302 redirect people to the actual object
-             * store with a presigned request?
              */
             let key = self.file_object_key(job, file);
             let info = format!("object store at {}", key);
@@ -627,6 +673,7 @@ async fn main() -> Result<()> {
     ad.register(api::user::job_events_get).api_check()?;
     ad.register(api::user::job_outputs_get).api_check()?;
     ad.register(api::user::job_output_download).api_check()?;
+    ad.register(api::user::job_output_signed_url).api_check()?;
     ad.register(api::user::job_output_publish).api_check()?;
     ad.register(api::user::job_get).api_check()?;
     ad.register(api::user::job_store_get_all).api_check()?;

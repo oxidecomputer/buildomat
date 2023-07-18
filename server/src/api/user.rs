@@ -163,6 +163,73 @@ pub(crate) async fn job_output_download(
     Ok(res.body(fr.body)?)
 }
 
+#[derive(Deserialize, Debug, JsonSchema)]
+pub(crate) struct JobOutputSignedUrl {
+    expiry_seconds: u64,
+    content_type: Option<String>,
+    content_disposition: Option<String>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct JobOutputSignedUrlResult {
+    url: String,
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/jobs/{job}/outputs/{output}/sign",
+}]
+pub(crate) async fn job_output_signed_url(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<JobsOutputsPath>,
+    body: TypedBody<JobOutputSignedUrl>,
+) -> DSResult<HttpResponseOk<JobOutputSignedUrlResult>> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let p = path.into_inner();
+    let b = body.into_inner();
+
+    if b.expiry_seconds > 3600 {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::BAD_REQUEST,
+            "URLs can last at most one hour (3600 seconds)".into(),
+        ));
+    }
+
+    let owner = c.require_user(log, &rqctx.request).await?;
+
+    let t = c.db.job_by_str(&p.job).or_500()?;
+    if t.owner != owner.id {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::FORBIDDEN,
+            "not your job".into(),
+        ));
+    }
+
+    let o = c.db.job_output_by_str(&p.job, &p.output).or_500()?;
+    let psu = c
+        .file_presigned_url(
+            t.id,
+            o.id,
+            b.expiry_seconds,
+            b.content_type.as_deref(),
+            b.content_disposition.as_deref(),
+        )
+        .await
+        .or_500()?;
+
+    info!(
+        log,
+        "job {} output {} path {:?} presigned URL is in the {}",
+        t.id, o.id, o.path, psu.info; "params" => ?b,
+    );
+
+    Ok(HttpResponseOk(JobOutputSignedUrlResult { url: psu.url }))
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct JobOutputPublish {
     series: String,
