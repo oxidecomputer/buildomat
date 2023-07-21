@@ -236,6 +236,14 @@ is:
   which defines some things about the way a job executes and what additional
   configuration options are required or available.
 
+These properties are optional, but not variety-specific:
+
+- `enable` **(boolean)**
+
+  To exclude a particular job file from processing, set this to `false`.  If
+  not specified, this property defaults to `true`.  This allows a job to be
+  temporarily disabled without needing to be removed from the repository.
+
 The rest of the configuration is variety-specific.
 
 ### Variety: Basic

@@ -54,6 +54,8 @@ fn true_if_missing() -> bool {
 struct FrontMatter {
     name: String,
     variety: CheckRunVariety,
+    #[serde(default = "true_if_missing")]
+    enable: bool,
     #[serde(default)]
     dependencies: HashMap<String, FrontMatterDepend>,
     #[serde(flatten)]
@@ -291,6 +293,13 @@ impl App {
                     .with_context(|| {
                         anyhow!("TOML front matter in {:?}", ent.path)
                     })?;
+
+                if !toml.enable {
+                    /*
+                     * Skip job files that have been marked as disabled.
+                     */
+                    continue;
+                }
 
                 if jobfiles.len() > 32 {
                     bail!("too many job files; you can have at most 32");
