@@ -9,9 +9,9 @@ doctest = false
 
 [dependencies]
 anyhow = { workspace = true }
-buildomat-common = { path = "../common" }
-buildomat-database = { path = "../database" }
-wollongong-common = { path = "../github_common" }
+buildomat-common = { path = "../buildomat-common" }
+buildomat-database = { path = "../buildomat-database" }
+wollongong-common = { path = "../wollongong-common" }
 chrono = { workspace = true }
 diesel = { workspace = true }
 rand = { workspace = true }

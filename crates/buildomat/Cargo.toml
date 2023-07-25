@@ -6,8 +6,8 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow = { workspace = true }
-buildomat-common = { path = "../common" }
-buildomat-client = { path = "../openapi" }
+buildomat-common = { path = "../buildomat-common" }
+buildomat-client = { path = "../buildomat-client" }
 bytes = { workspace = true }
 chrono = { workspace = true }
 dirs-next = { workspace = true }

@@ -21,4 +21,4 @@ serde_json = { workspace = true }
 slog = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
-wollongong-common = { path = "../github_common" }
+wollongong-common = { path = "../wollongong-common" }

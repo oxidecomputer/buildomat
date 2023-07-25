@@ -11,5 +11,5 @@ hiercmd = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
-wollongong-common = { path = "../github_common" }
-wollongong-database = { path = "../github_database" }
+wollongong-common = { path = "../wollongong-common" }
+wollongong-database = { path = "../wollongong-database" }
