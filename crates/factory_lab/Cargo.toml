@@ -7,9 +7,9 @@ license = "MPL-2.0"
 [dependencies]
 anyhow = { workspace = true }
 base64 = { workspace = true }
-buildomat-common = { path = "../../common" }
-buildomat-database = { path = "../../database" }
-buildomat-client = { path = "../../openapi" }
+buildomat-common = { path = "../common" }
+buildomat-database = { path = "../database" }
+buildomat-client = { path = "../openapi" }
 chrono = { workspace = true }
 diesel = { workspace = true }
 dropshot = { workspace = true }
