@@ -37,6 +37,17 @@ pub enum DatabaseError {
     Json(#[from] serde_json::Error),
 }
 
+impl DatabaseError {
+    pub fn is_locked_database(&self) -> bool {
+        match self {
+            DatabaseError::Sql(e) => {
+                e.to_string().contains("database is locked")
+            }
+            _ => false,
+        }
+    }
+}
+
 pub type DBResult<T> = std::result::Result<T, DatabaseError>;
 
 macro_rules! conflict {
@@ -81,12 +92,50 @@ impl Database {
         headers: &HashMap<String, String>,
         payload: &serde_json::Value,
         recvtime: DateTime<Utc>,
-    ) -> DBResult<DeliverySeq> {
+    ) -> DBResult<(DeliverySeq, bool)> {
         use schema::delivery;
 
         let c = &mut self.1.lock().unwrap().conn;
 
         c.immediate_transaction(|tx| {
+            /*
+             * In the event of a delivery failure, an operator may direct GitHub
+             * to replay a prior delivery.  Use the GitHub-provided unique UUID
+             * to locate our existing record of a replayed delivery if one
+             * exists.
+             */
+            let old: Option<Delivery> = delivery::dsl::delivery
+                .filter(delivery::dsl::uuid.eq(uuid))
+                .get_result(tx)
+                .optional()?;
+
+            if let Some(old) = old {
+                let Delivery {
+                    seq: oldseq,
+                    uuid: olduuid,
+                    event: oldevent,
+                    payload: oldpayload,
+
+                    /*
+                     * Ignore fields that are specific to our internal handling
+                     * of the incoming request and any subsequent processing:
+                     */
+                    headers: _,
+                    recvtime: _,
+                    ack: _,
+                } = old;
+
+                assert_eq!(&olduuid, uuid);
+                if event != &oldevent || payload != &oldpayload.0 {
+                    conflict!(
+                        "delivery {seq} exists for {uuid} with different \
+                        payload"
+                    );
+                }
+
+                return Ok((oldseq, false));
+            }
+
             let max: Option<DeliverySeq> = delivery::dsl::delivery
                 .select(diesel::dsl::max(delivery::dsl::seq))
                 .get_result(tx)?;
@@ -111,7 +160,7 @@ impl Database {
                 .execute(tx)?;
             assert_eq!(ic, 1);
 
-            Ok(seq)
+            Ok((seq, true))
         })
     }
 
@@ -210,7 +259,7 @@ impl Database {
     pub fn remove_deliveries(
         &self,
         dels: &[(DeliverySeq, String)],
-    ) -> Result<()> {
+    ) -> DBResult<()> {
         use schema::delivery;
 
         let c = &mut self.1.lock().unwrap().conn;
@@ -222,7 +271,7 @@ impl Database {
                     .filter(delivery::dsl::uuid.eq(uuid))
                     .execute(tx)?;
                 if dc != 1 {
-                    bail!("failed to delete delivery {}", seq.0);
+                    conflict!("failed to delete delivery {}", seq.0);
                 }
             }
             Ok(())

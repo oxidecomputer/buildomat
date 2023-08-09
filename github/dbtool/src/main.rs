@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use wollongong_common::hooktypes;
 use wollongong_database::Database;
 
@@ -160,19 +160,29 @@ async fn do_delivery_archive(mut l: Level<Stuff>) -> Result<()> {
         f.flush()?;
         f.sync_all()?;
 
-        l.context().db().remove_deliveries(
-            &da.records
-                .into_iter()
-                .map(|d| {
-                    (
-                        wollongong_database::types::DeliverySeq(
-                            d.seq.try_into().unwrap(),
-                        ),
-                        d.uuid,
-                    )
-                })
-                .collect::<Vec<_>>(),
-        )?;
+        let dels = da
+            .records
+            .into_iter()
+            .map(|d| {
+                (
+                    wollongong_database::types::DeliverySeq(
+                        d.seq.try_into().unwrap(),
+                    ),
+                    d.uuid,
+                )
+            })
+            .collect::<Vec<_>>();
+        loop {
+            match l.context().db().remove_deliveries(&dels) {
+                Ok(_) => break,
+                Err(e) if e.is_locked_database() => {
+                    eprintln!("WARNING: database locked... retrying...");
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+                Err(e) => bail!("{e}"),
+            }
+        }
 
         let delta = Instant::now().duration_since(start);
         println!("took {} milliseconds", delta.as_millis());

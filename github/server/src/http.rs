@@ -12,10 +12,11 @@ use schemars::JsonSchema;
 #[allow(unused_imports)]
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
-use slog::{debug, error, info, o, trace, Logger};
+use slog::{debug, error, info, o, trace, warn, Logger};
 use std::collections::{HashMap, HashSet};
 use std::result::Result as SResult;
 use std::sync::Arc;
+use std::time::Duration;
 use wollongong_database::types::*;
 
 use super::{variety, App};
@@ -291,12 +292,31 @@ async fn webhook(
 
     trace!(log, "from GitHub: {:#?}", v);
 
-    let seq = app
-        .db
-        .store_delivery(uuid, event, &headers, &v, Utc::now())
-        .to_500()?;
+    let then = Utc::now();
 
-    info!(log, "stored as delivery seq {}", seq);
+    let (seq, new_delivery) = loop {
+        match app.db.store_delivery(uuid, event, &headers, &v, then) {
+            Ok(del) => break del,
+            Err(e) if e.is_locked_database() => {
+                /*
+                 * Clients under our control will retry on failures, but
+                 * generally GitHub will not retry a failed delivery.  If the
+                 * database is locked by another process, sleep and try again
+                 * until we succeed.
+                 */
+                warn!(log, "delivery uuid {uuid} sleeping for lock..");
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                continue;
+            }
+            Err(e) => return interr(log, &format!("storing delivery: {e}")),
+        }
+    };
+
+    if new_delivery {
+        info!(log, "stored as delivery seq {seq} uuid {uuid}");
+    } else {
+        warn!(log, "replayed delivery seq {seq} uuid {uuid}");
+    }
 
     Ok(HttpResponseOk(()))
 }
