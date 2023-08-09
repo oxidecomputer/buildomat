@@ -339,6 +339,7 @@ async fn status(
         .iter()
         .map(|t| (t.id.to_string(), t.name.to_string()))
         .collect::<HashMap<String, String>>();
+    let mut users: HashMap<String, String> = Default::default();
 
     fn github_url(tags: &HashMap<String, String>) -> Option<String> {
         let owner = tags.get("gong.repo.owner")?;
@@ -485,10 +486,17 @@ async fn status(
                 for job in w.jobs.iter() {
                     seen.insert(job.id.to_string());
 
-                    let owner = b.user_get(&job.owner).await.to_500()?;
+                    if !users.contains_key(&job.owner) {
+                        let owner = b.user_get(&job.owner).await.to_500()?;
+                        users.insert(job.owner.clone(), owner.name.to_string());
+                    }
 
                     out += "<li>";
-                    out += &format!("job {} user {}", job.id, owner.name);
+                    out += &format!(
+                        "job {} user {}",
+                        job.id,
+                        users.get(&job.owner).unwrap()
+                    );
                     if let Some(job) = jobs.iter().find(|j| j.id == job.id) {
                         out += &dump_info(&job);
                     }
@@ -543,10 +551,14 @@ async fn status(
                 out += "<ul>\n";
             }
 
-            let owner = b.user_get(&job.owner).await.to_500()?;
+            if !users.contains_key(&job.owner) {
+                let owner = b.user_get(&job.owner).await.to_500()?;
+                users.insert(job.owner.clone(), owner.name.to_string());
+            }
 
             out += "<li>";
-            out += &format!("{} user {}", job.id, owner.name);
+            out +=
+                &format!("{} user {}", job.id, users.get(&job.owner).unwrap());
             out += &dump_info(&job);
             out += "<br>\n";
         }
@@ -563,10 +575,13 @@ async fn status(
             continue;
         }
 
-        let owner = b.user_get(&job.owner).await.to_500()?;
+        if !users.contains_key(&job.owner) {
+            let owner = b.user_get(&job.owner).await.to_500()?;
+            users.insert(job.owner.clone(), owner.name.to_string());
+        }
 
         out += "<li>";
-        out += &format!("{} user {}", job.id, owner.name);
+        out += &format!("{} user {}", job.id, users.get(&job.owner).unwrap());
         let (colour, word) = if job.state == "failed" {
             if job.cancelled {
                 ("dabea6", "CANCEL")
