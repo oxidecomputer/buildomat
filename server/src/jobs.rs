@@ -257,8 +257,10 @@ async fn recycle_on_complete_one(log: &Logger, c: &Central) -> Result<()> {
      * First, check to see if there are any workers that have completed the
      * job they have been assigned.
      */
-    for w in c.db.workers()?.iter() {
-        if w.deleted || w.recycle {
+    for w in c.db.workers_active()?.iter() {
+        assert!(!w.deleted);
+
+        if w.recycle {
             continue;
         }
 

@@ -17,8 +17,10 @@ async fn worker_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
      * We want to set a rough timeout for job execution to prevent things
      * getting hung and running forever.
      */
-    for w in c.db.workers()? {
-        if w.recycle || w.deleted {
+    for w in c.db.workers_active()? {
+        assert!(!w.deleted);
+
+        if w.recycle {
             continue;
         }
 

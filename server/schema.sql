@@ -265,3 +265,9 @@ CREATE TABLE job_store (
 
     PRIMARY KEY (job, name)
 );
+
+-- v 40
+CREATE INDEX workers_active ON worker (deleted) WHERE deleted = 0;
+
+-- v 41
+CREATE INDEX jobs_for_worker ON job (worker) WHERE worker IS NOT NULL;
