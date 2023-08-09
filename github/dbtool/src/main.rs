@@ -115,55 +115,64 @@ async fn do_delivery_archive(mut l: Level<Stuff>) -> Result<()> {
             l.context().archive("delivery", &first.recvtime_day_prefix())?;
         println!("archive to {:?}", out);
 
-        let mut records = Vec::new();
+        let records = wholeday
+            .into_iter()
+            .map(|del| {
+                let wollongong_database::types::Delivery {
+                    seq,
+                    uuid,
+                    event,
+                    headers,
+                    payload,
+                    recvtime,
+                    ack,
+                } = del;
 
-        for del in wholeday.iter() {
-            let wollongong_database::types::Delivery {
-                seq,
-                uuid,
-                event,
-                headers,
-                payload,
-                recvtime,
-                ack,
-            } = del;
+                println!(
+                    "{} seq {} event \"{}\"",
+                    recvtime.0.to_rfc3339(),
+                    seq,
+                    event
+                );
 
-            println!(
-                "{} seq {} event \"{}\"",
-                recvtime.0.to_rfc3339(),
-                seq,
-                event
-            );
-
-            records.push(Delivery {
-                seq: seq.0 as u64,
-                uuid: uuid.to_string(),
-                event: event.to_string(),
-                headers: headers
-                    .0
-                    .iter()
-                    .map(|(a, b)| (a.clone(), b.clone()))
-                    .collect(),
-                payload: payload.0.clone(),
-                recvtime: recvtime.0,
-                ack: ack.unwrap(),
+                Delivery {
+                    seq: seq.0 as u64,
+                    uuid,
+                    event,
+                    headers: headers.0.into_iter().collect(),
+                    payload: payload.0,
+                    recvtime: recvtime.0,
+                    ack: ack.unwrap(),
+                }
             })
-        }
+            .collect::<Vec<_>>();
+        let da = DeliveryArchive { v: "1".to_string(), records };
 
-        let mut f = std::fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&out)
-            .with_context(|| anyhow!("creating {:?}", out))?;
-        let buf = serde_json::to_vec_pretty(&DeliveryArchive {
-            v: "1".to_string(),
-            records,
-        })?;
-        f.write_all(&buf)?;
+        let mut bw = std::io::BufWriter::new(
+            std::fs::OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&out)
+                .with_context(|| anyhow!("creating {:?}", out))?,
+        );
+        serde_json::to_writer_pretty(&mut bw, &da)?;
+        let mut f = bw.into_inner()?;
         f.flush()?;
         f.sync_all()?;
 
-        l.context().db().remove_deliveries(wholeday.as_slice())?;
+        l.context().db().remove_deliveries(
+            &da.records
+                .into_iter()
+                .map(|d| {
+                    (
+                        wollongong_database::types::DeliverySeq(
+                            d.seq.try_into().unwrap(),
+                        ),
+                        d.uuid,
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )?;
 
         let delta = Instant::now().duration_since(start);
         println!("took {} milliseconds", delta.as_millis());

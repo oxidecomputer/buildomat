@@ -207,19 +207,22 @@ impl Database {
             .get_results(c)?)
     }
 
-    pub fn remove_deliveries(&self, dels: &[Delivery]) -> Result<()> {
+    pub fn remove_deliveries(
+        &self,
+        dels: &[(DeliverySeq, String)],
+    ) -> Result<()> {
         use schema::delivery;
 
         let c = &mut self.1.lock().unwrap().conn;
 
         c.immediate_transaction(|tx| {
-            for del in dels.iter() {
+            for (seq, uuid) in dels.iter() {
                 let dc = diesel::delete(delivery::dsl::delivery)
-                    .filter(delivery::dsl::seq.eq(del.seq))
-                    .filter(delivery::dsl::uuid.eq(&del.uuid))
+                    .filter(delivery::dsl::seq.eq(seq))
+                    .filter(delivery::dsl::uuid.eq(uuid))
                     .execute(tx)?;
                 if dc != 1 {
-                    bail!("failed to delete delivery {}", del.seq);
+                    bail!("failed to delete delivery {}", seq.0);
                 }
             }
             Ok(())
