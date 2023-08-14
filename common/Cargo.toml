@@ -14,6 +14,7 @@ new_mime_guess = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
 rusty_ulid = { workspace = true }
+schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 slog = { workspace = true }

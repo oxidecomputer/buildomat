@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 use std::collections::HashMap;
@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use buildomat_client::types::*;
+use buildomat_types::metadata;
 use rusty_ulid::Ulid;
 use slog::{debug, error, info, o, trace, warn, Logger};
 
@@ -253,10 +254,28 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
                         w.id
                     );
 
+                    let mut addresses = Vec::new();
+                    let hc = c.config.host.get(&nodename).unwrap();
+                    if let Some(ips) = hc.extra_ips.as_ref() {
+                        addresses.push(metadata::FactoryAddresses {
+                            name: "extra".to_string(),
+                            cidr: ips.cidr.to_string(),
+                            first: ips.first.to_string(),
+                            count: ips.count,
+                            gateway: hc.gateway.as_deref().map(str::to_string),
+                            routed: false,
+                        });
+                    }
+
                     c.client
                         .factory_worker_associate(
                             &w.id,
-                            &FactoryWorkerAssociate { private: i.id() },
+                            &FactoryWorkerAssociate {
+                                private: i.id(),
+                                metadata: Some(metadata::FactoryMetadata::V1(
+                                    metadata::FactoryMetadataV1 { addresses },
+                                )),
+                            },
                         )
                         .await?;
                     info!(

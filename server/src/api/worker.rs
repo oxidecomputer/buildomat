@@ -94,6 +94,7 @@ pub(crate) struct WorkerPingJob {
 pub(crate) struct WorkerPingResult {
     poweroff: bool,
     job: Option<WorkerPingJob>,
+    factory_metadata: Option<metadata::FactoryMetadata>,
 }
 
 #[endpoint {
@@ -111,6 +112,8 @@ pub(crate) async fn worker_ping(
     info!(log, "worker ping!"; "id" => w.id.to_string());
 
     c.db.worker_ping(w.id).or_500()?;
+
+    let factory_metadata = w.factory_metadata().or_500()?;
 
     let job = if w.wait_for_flush {
         /*
@@ -175,7 +178,11 @@ pub(crate) async fn worker_ping(
         }
     };
 
-    let res = WorkerPingResult { poweroff: w.recycle || w.deleted, job };
+    let res = WorkerPingResult {
+        poweroff: w.recycle || w.deleted,
+        job,
+        factory_metadata,
+    };
 
     Ok(HttpResponseOk(res))
 }

@@ -7,6 +7,7 @@ use std::{io::Read, ops::Range, time::Duration};
 use anyhow::{bail, Result};
 use bytes::BytesMut;
 use hiercmd::prelude::*;
+use ipnet::IpAdd;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::UnixStream,
@@ -76,8 +77,188 @@ pub async fn main() -> Result<()> {
     let mut l = Level::new("bmat", s);
 
     l.cmd("store", "access the job store", cmd!(cmd_store))?;
+    l.cmd("address", "manage IP addresses for this job", cmd!(cmd_address))?;
+    l.hcmd("eng", "for working on and testing buildomat", cmd!(cmd_eng))?;
 
     sel!(l).run().await
+}
+
+async fn cmd_address(mut l: Level<Stuff>) -> Result<()> {
+    l.context_mut().connect().await?;
+
+    l.cmda("list", "ls", "list IP addresses", cmd!(cmd_address_list))?;
+
+    sel!(l).run().await
+}
+
+async fn cmd_address_list(mut l: Level<Stuff>) -> Result<()> {
+    l.add_column("name", 16, true);
+    l.add_column("cidr", 18, true);
+    l.add_column("first", 15, true);
+    l.add_column("last", 15, true);
+    l.add_column("count", 5, true);
+    l.add_column("family", 6, false);
+    l.add_column("network", 15, false);
+    l.add_column("mask", 15, false);
+    l.add_column("routed", 6, false);
+    l.add_column("gateway", 15, false);
+
+    l.optopt("f", "", "find exactly one match for this name or fail", "NAME");
+
+    let a = no_args!(l);
+
+    let filter = a.opts().opt_str("f");
+
+    let addrs = loop {
+        let mout = Message {
+            id: l.context_mut().ids.next().unwrap(),
+            payload: Payload::MetadataAddresses,
+        };
+
+        match l.context_mut().send_and_recv(&mout).await {
+            Ok(min) => match min.payload {
+                Payload::Error(e) => {
+                    bail!("WARNING: control request failure: {e}");
+                }
+                Payload::MetadataAddressesResult(addrs) => {
+                    break addrs;
+                }
+                other => bail!("unexpected response: {other:?}"),
+            },
+            Err(e) => {
+                /*
+                 * Requests to the agent are relatively simple and over a UNIX
+                 * socket; they should not fail.  This implies something has
+                 * gone seriously wrong and it is unlikely that it will be fixed
+                 * without intervention.  Don't retry.
+                 */
+                bail!("could not talk to the agent: {e}");
+            }
+        }
+    };
+
+    let mut t = a.table();
+    let mut count = 0;
+
+    for addr in addrs {
+        if let Some(filter) = filter.as_deref() {
+            if filter != addr.name {
+                continue;
+            }
+        }
+
+        let Ok(first) = addr.first.parse::<std::net::IpAddr>() else {
+            continue;
+        };
+        let Ok(net) = addr.cidr.parse::<ipnet::IpNet>() else {
+            continue;
+        };
+        if addr.count < 1 {
+            continue;
+        }
+
+        match (net, first) {
+            (ipnet::IpNet::V4(net), std::net::IpAddr::V4(ip)) => {
+                if !net.contains(&ip)
+                    || net.network() == ip && net.broadcast() == ip
+                {
+                    continue;
+                }
+
+                let last =
+                    ip.saturating_add(addr.count.checked_sub(1).unwrap());
+
+                if !net.contains(&last)
+                    || net.network() == last
+                    || net.broadcast() == last
+                {
+                    continue;
+                }
+
+                let mut r = Row::default();
+
+                r.add_str("name", &addr.name);
+                r.add_str("cidr", &net.to_string());
+                r.add_str("first", &first.to_string());
+                r.add_str("last", &last.to_string());
+                r.add_u64("count", addr.count.try_into().unwrap());
+                r.add_str("family", "inet");
+                r.add_str("network", &net.network().to_string());
+                r.add_str("mask", &net.netmask().to_string());
+                r.add_str("routed", if addr.routed { "yes" } else { "no" });
+                r.add_str("gateway", addr.gateway.as_deref().unwrap_or("-"));
+
+                t.add_row(r);
+                count += 1;
+            }
+            (ipnet::IpNet::V6(_), std::net::IpAddr::V6(_)) => {
+                /*
+                 * No IPv6 support at the moment.
+                 */
+                continue;
+            }
+            _ => {
+                /*
+                 * Weird combination?
+                 */
+                continue;
+            }
+        }
+    }
+
+    match (filter.as_deref(), count) {
+        (None, _) | (Some(_), 1) => (),
+        (Some(filter), 0) => {
+            bail!("IP address range {filter:?} not found");
+        }
+        (Some(filter), n) => {
+            bail!("{n} IP address ranges matched name {filter:?}");
+        }
+    }
+
+    print!("{}", t.output()?);
+    Ok(())
+}
+
+async fn cmd_eng(mut l: Level<Stuff>) -> Result<()> {
+    l.context_mut().connect().await?;
+
+    l.cmd("metadata", "dump the factory metadata", cmd!(cmd_eng_metadata))?;
+
+    sel!(l).run().await
+}
+
+async fn cmd_eng_metadata(mut l: Level<Stuff>) -> Result<()> {
+    let _ = no_args!(l);
+
+    loop {
+        let mout = Message {
+            id: l.context_mut().ids.next().unwrap(),
+            payload: Payload::MetadataAddresses,
+        };
+
+        match l.context_mut().send_and_recv(&mout).await {
+            Ok(min) => match min.payload {
+                Payload::Error(e) => {
+                    bail!("WARNING: control request failure: {e}");
+                }
+                Payload::MetadataAddressesResult(addrs) => {
+                    println!("addrs = {addrs:#?}");
+                    break Ok(());
+                }
+                other => bail!("unexpected response: {other:?}"),
+            },
+            Err(e) => {
+                /*
+                 * Requests to the agent are relatively simple and over a UNIX
+                 * socket; they should not fail.  This implies something has
+                 * gone seriously wrong and it is unlikely that it will be fixed
+                 * without intervention.  Don't retry.
+                 */
+                bail!("could not talk to the agent: {e}");
+            }
+        }
+    }
 }
 
 async fn cmd_store(mut l: Level<Stuff>) -> Result<()> {

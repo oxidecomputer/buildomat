@@ -271,3 +271,7 @@ CREATE INDEX workers_active ON worker (deleted) WHERE deleted = 0;
 
 -- v 41
 CREATE INDEX jobs_for_worker ON job (worker) WHERE worker IS NOT NULL;
+
+-- v 42
+ALTER TABLE worker ADD COLUMN
+    factory_metadata TEXT;

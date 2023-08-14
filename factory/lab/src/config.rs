@@ -62,17 +62,24 @@ impl ConfigFileTarget {
 }
 
 #[derive(Deserialize, Debug, Clone)]
+pub(crate) struct ConfigFileExtraIps {
+    pub cidr: String,
+    pub first: String,
+    pub count: u32,
+}
+
+#[derive(Deserialize, Debug, Clone)]
 pub(crate) struct ConfigFileHost {
     #[allow(dead_code)]
     pub ip: String,
+    pub gateway: Option<String>,
     pub console: String,
     pub lab_baseurl: String,
     pub nodename: String,
     pub lom_ip: String,
     pub lom_username: String,
     pub lom_password: String,
-    #[serde(default)]
     pub debug_os_dir: Option<String>,
-    #[serde(default)]
     pub debug_os_postboot_sh: Option<String>,
+    pub extra_ips: Option<ConfigFileExtraIps>,
 }

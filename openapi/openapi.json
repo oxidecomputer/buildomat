@@ -1942,6 +1942,31 @@
           "request_id"
         ]
       },
+      "FactoryAddresses": {
+        "type": "object",
+        "properties": {
+          "cidr": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "first": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "cidr",
+          "count",
+          "first",
+          "name"
+        ]
+      },
       "FactoryCreate": {
         "type": "object",
         "properties": {
@@ -1999,6 +2024,31 @@
             ]
           }
         }
+      },
+      "FactoryMetadata": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "addresses": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/FactoryAddresses"
+                }
+              },
+              "v": {
+                "type": "string",
+                "enum": [
+                  "1"
+                ]
+              }
+            },
+            "required": [
+              "v"
+            ]
+          }
+        ]
       },
       "FactoryPingResult": {
         "type": "object",
@@ -2086,6 +2136,14 @@
       "FactoryWorkerAssociate": {
         "type": "object",
         "properties": {
+          "metadata": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FactoryMetadata"
+              }
+            ]
+          },
           "private": {
             "type": "string"
           }
@@ -2942,6 +3000,14 @@
       "WorkerPingResult": {
         "type": "object",
         "properties": {
+          "factory_metadata": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FactoryMetadata"
+              }
+            ]
+          },
           "job": {
             "nullable": true,
             "allOf": [

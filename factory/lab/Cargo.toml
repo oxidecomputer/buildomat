@@ -10,6 +10,7 @@ base64 = { workspace = true }
 buildomat-common = { path = "../../common" }
 buildomat-database = { path = "../../database" }
 buildomat-client = { path = "../../openapi" }
+buildomat-types = { path = "../../types" }
 chrono = { workspace = true }
 diesel = { workspace = true }
 dropshot = { workspace = true }

@@ -1,0 +1,10 @@
+[package]
+name = "buildomat-types"
+version = "0.0.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

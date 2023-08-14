@@ -1,3 +1,7 @@
+/*
+ * Copyright 2023 Oxide Computer Company
+ */
+
 use std::time::Duration;
 
 use anyhow::{bail, Result};
@@ -6,7 +10,13 @@ use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 pub mod gen {
     use super::*;
 
-    progenitor::generate_api!(spec = "openapi.json", interface = Positional);
+    progenitor::generate_api!(
+        spec = "openapi.json",
+        interface = Positional,
+        replace = {
+            FactoryMetadata = buildomat_types::metadata::FactoryMetadata,
+        },
+    );
 }
 
 pub mod prelude {

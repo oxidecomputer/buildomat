@@ -3,6 +3,8 @@
  */
 
 use super::schema::*;
+use anyhow::Result;
+use buildomat_types::metadata;
 use chrono::prelude::*;
 use diesel::deserialize::FromSql;
 use diesel::serialize::ToSql;
@@ -10,7 +12,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use buildomat_database::*;
-pub use buildomat_database::{Dictionary, IsoDate};
+pub use buildomat_database::{Dictionary, IsoDate, JsonValue};
 
 integer_new_type!(UnixUid, u32, i32, Integer, diesel::sql_types::Integer);
 integer_new_type!(UnixGid, u32, i32, Integer, diesel::sql_types::Integer);
@@ -218,6 +220,7 @@ pub struct Worker {
     pub factory: Option<FactoryId>,
     pub target: Option<TargetId>,
     pub wait_for_flush: bool,
+    pub factory_metadata: Option<JsonValue>,
 }
 
 impl Worker {
@@ -239,7 +242,7 @@ impl Worker {
     pub fn factory(&self) -> FactoryId {
         self.factory.unwrap_or_else(|| {
             /*
-             * XXX No new workers will be created without a factory, but but old
+             * XXX No new workers will be created without a factory, but old
              * records might not have had one.  This is the ID of a made up
              * factory that does not otherwise exist:
              */
@@ -256,6 +259,15 @@ impl Worker {
              */
             TargetId::from_str("00E82MSW0000000000000TT000").unwrap()
         })
+    }
+
+    pub fn factory_metadata(
+        &self,
+    ) -> Result<Option<metadata::FactoryMetadata>> {
+        self.factory_metadata
+            .as_ref()
+            .map(|j| Ok(serde_json::from_value(j.0.clone())?))
+            .transpose()
     }
 }
 

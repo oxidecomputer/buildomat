@@ -14,6 +14,7 @@ members = [
 	"github/server",
 	"openapi",
 	"server",
+	"types",
 	"xtask",
 ]
 
@@ -41,6 +42,7 @@ html-escape = "0.2"
 http = "0.2"
 hyper = "0.14"
 hyper-staticfile = { version = "0.8.0", git = "https://github.com/jclulow/hyper-staticfile", branch = "jclulow" }
+ipnet = "2.8"
 jsonwebtoken = "7.2"
 libc = "0.2.113"
 new_mime_guess = "4"

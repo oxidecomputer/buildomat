@@ -9,6 +9,7 @@ use std::sync::Mutex;
 
 use anyhow::{anyhow, bail, Result};
 use buildomat_common::*;
+use buildomat_types::*;
 use chrono::prelude::*;
 use diesel::prelude::*;
 #[allow(unused_imports)]
@@ -28,6 +29,8 @@ pub enum OperationError {
     Conflict(String),
     #[error(transparent)]
     Sql(#[from] diesel::result::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -351,8 +354,21 @@ impl Database {
         &self,
         wid: WorkerId,
         factory_private: &str,
+        factory_metadata: Option<&metadata::FactoryMetadata>,
     ) -> OResult<()> {
         let c = &mut self.1.lock().unwrap().conn;
+
+        /*
+         * First, convert the provided metadata object to a serde JSON value.
+         * We'll use this (rather than the concrete string) for comparison with
+         * an existing record because the string might not be serialised
+         * byte-for-byte the same each time.
+         */
+        let factory_metadata = factory_metadata
+            .as_ref()
+            .map(|md| serde_json::to_value(md))
+            .transpose()?
+            .map(|j| JsonValue(j));
 
         c.immediate_transaction(|tx| {
             use schema::worker;
@@ -385,6 +401,36 @@ impl Database {
                 let count = diesel::update(worker::dsl::worker)
                     .filter(worker::dsl::id.eq(w.id))
                     .set(worker::dsl::factory_private.eq(factory_private))
+                    .execute(tx)?;
+                assert_eq!(count, 1);
+            }
+
+            if let Some(current) = w.factory_metadata.as_ref() {
+                /*
+                 * The worker record already has factory metadata.
+                 */
+                if let Some(new) = factory_metadata.as_ref() {
+                    if current.0 == new.0 {
+                        /*
+                         * The factory metadata in the database matches what we
+                         * have already.
+                         */
+                    } else {
+                        conflict!(
+                            "worker {} factory metadata mismatch: {:?} != {:?}",
+                            w.id,
+                            current,
+                            factory_metadata,
+                        );
+                    }
+                }
+            } else if let Some(factory_metadata) = factory_metadata {
+                /*
+                 * Store the factory metadata for this worker:
+                 */
+                let count = diesel::update(worker::dsl::worker)
+                    .filter(worker::dsl::id.eq(w.id))
+                    .set(worker::dsl::factory_metadata.eq(factory_metadata))
                     .execute(tx)?;
                 assert_eq!(count, 1);
             }
@@ -439,6 +485,7 @@ impl Database {
             id: WorkerId::generate(),
             bootstrap: genkey(64),
             factory_private: None,
+            factory_metadata: None,
             token: None,
             deleted: false,
             recycle: false,

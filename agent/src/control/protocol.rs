@@ -3,6 +3,7 @@
  */
 
 use anyhow::{bail, Result};
+use buildomat_types::metadata;
 use bytes::{Buf, BufMut, BytesMut};
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +23,9 @@ pub enum Payload {
     StoreGetResult(Option<StoreEntry>),
 
     StorePut(String, String, bool),
+
+    MetadataAddresses,
+    MetadataAddressesResult(Vec<metadata::FactoryAddresses>),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

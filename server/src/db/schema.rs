@@ -117,6 +117,7 @@ table! {
         factory -> Nullable<Text>,
         target -> Nullable<Text>,
         wait_for_flush -> Bool,
+        factory_metadata -> Nullable<Text>,
     }
 }
 

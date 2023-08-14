@@ -203,7 +203,9 @@ async fn handle_client_turn(
     while let Some(msg) = ci.decoder.take()? {
         match ci.state {
             ClientState::Running => match &msg.payload {
-                Payload::StoreGet(..) | Payload::StorePut(..) => {
+                Payload::StoreGet(..)
+                | Payload::StorePut(..)
+                | Payload::MetadataAddresses => {
                     /*
                      * These are requests from the control program.  Pass them
                      * on to the main loop.

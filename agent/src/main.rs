@@ -25,6 +25,7 @@ use tokio::time::MissedTickBehavior;
 
 use buildomat_client::types::*;
 use buildomat_common::*;
+use buildomat_types::*;
 
 mod control;
 mod download;
@@ -568,6 +569,8 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
     let mut control = control::server::listen()?;
     let mut creq: Option<control::server::Request> = None;
 
+    let mut metadata: Option<metadata::FactoryMetadata> = None;
+
     let mut do_ping = true;
     loop {
         if do_ping {
@@ -577,6 +580,8 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                     sleep_ms(1000).await;
                 }
                 Ok(p) => {
+                    let p = p.into_inner();
+
                     if p.poweroff {
                         println!("powering off at server request");
                         if let Err(e) = hard_reset() {
@@ -615,6 +620,10 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                     }
 
                     do_ping = false;
+
+                    if let Some(md) = p.factory_metadata {
+                        metadata = Some(md);
+                    }
                 }
             }
             continue;
@@ -657,6 +666,14 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                         Ok(..) => Payload::Ack,
                         Err(e) => Payload::Error(e.to_string()),
                     }
+                }
+                Payload::MetadataAddresses => {
+                    Payload::MetadataAddressesResult(match metadata.as_ref() {
+                        Some(metadata::FactoryMetadata::V1(md)) => {
+                            md.addresses.clone()
+                        }
+                        _ => Default::default(),
+                    })
                 }
                 _ => Payload::Error(format!("unexpected message type")),
             };

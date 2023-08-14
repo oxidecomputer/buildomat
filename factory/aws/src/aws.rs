@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 use std::collections::HashMap;
@@ -274,6 +274,7 @@ async fn aws_worker_one(
                                 &w.id,
                                 &FactoryWorkerAssociate {
                                     private: i.id.to_string(),
+                                    metadata: None,
                                 },
                             )
                             .await?;
@@ -485,7 +486,10 @@ async fn aws_worker_one(
         c.client
             .factory_worker_associate(
                 &w.id,
-                &FactoryWorkerAssociate { private: instance_id.to_string() },
+                &FactoryWorkerAssociate {
+                    private: instance_id.to_string(),
+                    metadata: None,
+                },
             )
             .await?;
     }
