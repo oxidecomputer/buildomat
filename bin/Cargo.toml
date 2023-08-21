@@ -1,15 +1,20 @@
 [package]
-name = "buildomat-github-dbtool"
+name = "buildomat"
 version = "0.0.0"
 edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
 anyhow = { workspace = true }
+buildomat-common = { path = "../common" }
+buildomat-client = { path = "../client" }
+bytes = { workspace = true }
 chrono = { workspace = true }
+dirs-next = { workspace = true }
+futures = { workspace = true }
 hiercmd = { workspace = true }
+rusty_ulid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
-buildomat-github-common = { path = "../common" }
-buildomat-github-database = { path = "../database" }
+toml = { workspace = true }

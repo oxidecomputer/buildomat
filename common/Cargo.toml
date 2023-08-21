@@ -10,7 +10,7 @@ doctest = false
 [dependencies]
 anyhow = { workspace = true }
 base64 = { workspace = true }
-buildomat-client = { path = "../openapi" }
+buildomat-client = { path = "../client" }
 chrono = { workspace = true }
 getopts = { workspace = true }
 new_mime_guess = { workspace = true }

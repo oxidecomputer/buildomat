@@ -3,6 +3,8 @@
  */
 
 use anyhow::{anyhow, bail, Context, Result};
+use buildomat_github_common::hooktypes;
+use buildomat_github_database::Database;
 use chrono::prelude::*;
 use hiercmd::prelude::*;
 use serde::Serialize;
@@ -11,8 +13,6 @@ use std::io::Write;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use wollongong_common::hooktypes;
-use wollongong_database::Database;
 
 const SHORT_SHA_LEN: usize = 16;
 
@@ -118,7 +118,7 @@ async fn do_delivery_archive(mut l: Level<Stuff>) -> Result<()> {
         let records = wholeday
             .into_iter()
             .map(|del| {
-                let wollongong_database::types::Delivery {
+                let buildomat_github_database::types::Delivery {
                     seq,
                     uuid,
                     event,
@@ -165,7 +165,7 @@ async fn do_delivery_archive(mut l: Level<Stuff>) -> Result<()> {
             .into_iter()
             .map(|d| {
                 (
-                    wollongong_database::types::DeliverySeq(
+                    buildomat_github_database::types::DeliverySeq(
                         d.seq.try_into().unwrap(),
                     ),
                     d.uuid,
@@ -367,7 +367,7 @@ async fn do_check(mut l: Level<Stuff>) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let mut l = Level::new("wollongong-dbtool", Stuff::default());
+    let mut l = Level::new("buildomat-github-dbtool", Stuff::default());
 
     l.cmda("delivery", "del", "webhook deliveries", cmd!(do_delivery))?;
     l.cmda("repository", "repo", "GitHub repositories", cmd!(do_repository))?;

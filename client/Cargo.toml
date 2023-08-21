@@ -1,20 +1,17 @@
 [package]
-name = "buildomat"
+name = "buildomat-client"
 version = "0.0.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lib]
+doctest = false
+
 [dependencies]
 anyhow = { workspace = true }
-buildomat-common = { path = "../common" }
-buildomat-client = { path = "../openapi" }
-bytes = { workspace = true }
+buildomat-types = { path = "../types" }
 chrono = { workspace = true }
-dirs-next = { workspace = true }
 futures = { workspace = true }
-hiercmd = { workspace = true }
-rusty_ulid = { workspace = true }
+progenitor = { workspace = true }
+reqwest = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
-tokio = { workspace = true }
-toml = { workspace = true }

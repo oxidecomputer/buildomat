@@ -4,8 +4,8 @@ use std::sync::Arc;
 use crate::App;
 use anyhow::Result;
 use buildomat_common::*;
+use buildomat_github_database::types::*;
 use serde::{Deserialize, Serialize};
-use wollongong_database::types::*;
 
 pub const CONTROL_RUN_NAME: &str = "*control";
 

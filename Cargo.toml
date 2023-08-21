@@ -1,6 +1,7 @@
 [workspace]
 members = [
 	"agent",
+	"bin",
 	"bunyan",
 	"client",
 	"common",
@@ -12,7 +13,6 @@ members = [
 	"github/dbtool",
 	"github/ghtool",
 	"github/server",
-	"openapi",
 	"server",
 	"types",
 	"xtask",

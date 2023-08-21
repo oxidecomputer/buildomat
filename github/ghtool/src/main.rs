@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 use anyhow::{anyhow, Result};
@@ -20,7 +20,7 @@ impl Stuff {
     fn app_client(&self) -> octorust::Client {
         octorust::Client::custom(
             "https://api.github.com",
-            "jclulow/wollongong@0",
+            buildomat_github_common::USER_AGENT,
             octorust::auth::Credentials::JWT(self.make_jwt()),
             reqwest::Client::builder().build().unwrap(),
         )
@@ -34,7 +34,7 @@ impl Stuff {
 
         octorust::Client::custom(
             "https://api.github.com",
-            "jclulow/wollongong@0",
+            buildomat_github_common::USER_AGENT,
             octorust::auth::Credentials::InstallationToken(iat),
             reqwest::Client::builder().build().unwrap(),
         )
@@ -253,7 +253,7 @@ async fn do_user(mut l: Level<Stuff>) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let mut l = Level::new("wollongong-ghtool", Stuff::default());
+    let mut l = Level::new("buildomat-github-ghtool", Stuff::default());
 
     l.cmd("info", "get information about the configured app", cmd!(do_info))?;
     l.cmd("installs", "dump info about installations", cmd!(do_installs))?;

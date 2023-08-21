@@ -1,5 +1,6 @@
 use anyhow::{bail, Result};
 use buildomat_database::*;
+use buildomat_github_common::hooktypes;
 use chrono::prelude::*;
 use diesel::deserialize::FromSql;
 use diesel::prelude::*;
@@ -7,7 +8,6 @@ use diesel::serialize::ToSql;
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::{collections::HashMap, str::FromStr};
-use wollongong_common::hooktypes;
 
 use super::schema::*;
 

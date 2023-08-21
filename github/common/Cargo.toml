@@ -1,5 +1,5 @@
 [package]
-name = "wollongong-common"
+name = "buildomat-github-common"
 version = "0.0.0"
 edition = "2021"
 license = "MPL-2.0"

@@ -5,6 +5,7 @@
 use crate::{App, FlushOut, FlushState};
 use anyhow::{bail, Result};
 use buildomat_common::*;
+use buildomat_github_database::types::*;
 use chrono::SecondsFormat;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -13,7 +14,6 @@ use slog::{debug, error, info, o, trace, warn, Logger};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
-use wollongong_database::types::*;
 
 const KILOBYTE: f64 = 1024.0;
 const MEGABYTE: f64 = 1024.0 * KILOBYTE;

@@ -11,7 +11,7 @@ vendored-openssl = ['openssl/vendored']
 [dependencies]
 anyhow = { workspace = true }
 buildomat-common = { path = "../common" }
-buildomat-client = { path = "../openapi" }
+buildomat-client = { path = "../client" }
 buildomat-types = { path = "../types" }
 bytes = { workspace = true }
 chrono = { workspace = true }

@@ -1,5 +1,5 @@
 [package]
-name = "wollongong-ghtool"
+name = "buildomat-github-ghtool"
 version = "0.0.0"
 edition = "2021"
 license = "MPL-2.0"
@@ -21,4 +21,4 @@ serde_json = { workspace = true }
 slog = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
-wollongong-common = { path = "../common" }
+buildomat-github-common = { path = "../common" }

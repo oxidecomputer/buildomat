@@ -1,5 +1,5 @@
 [package]
-name = "wollongong-database"
+name = "buildomat-github-database"
 version = "0.0.0"
 edition = "2021"
 license = "MPL-2.0"
@@ -11,7 +11,7 @@ doctest = false
 anyhow = { workspace = true }
 buildomat-common = { path = "../../common" }
 buildomat-database = { path = "../../database" }
-wollongong-common = { path = "../common" }
+buildomat-github-common = { path = "../common" }
 chrono = { workspace = true }
 diesel = { workspace = true }
 rand = { workspace = true }

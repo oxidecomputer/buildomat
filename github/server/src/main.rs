@@ -1,19 +1,19 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 #![allow(clippy::vec_init_then_push)]
 
 use anyhow::{anyhow, bail, Context, Result};
 use buildomat_common::*;
+use buildomat_github_common::hooktypes;
+use buildomat_github_database::types::*;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use slog::{debug, error, info, o, trace, warn, Logger};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use variety::control::{ControlPrivate, CONTROL_RUN_NAME};
-use wollongong_common::hooktypes;
-use wollongong_database::types::*;
 
 mod config;
 mod http;
@@ -76,7 +76,7 @@ struct LoadedFromSha<T> {
 
 struct App {
     log: Logger,
-    db: wollongong_database::Database,
+    db: buildomat_github_database::Database,
     config: config::Config,
     jwt: octorust::auth::JWTCredentials,
 }
@@ -93,7 +93,7 @@ impl App {
     fn app_client(&self) -> octorust::Client {
         octorust::Client::custom(
             "https://api.github.com",
-            "jclulow/wollongong@0",
+            buildomat_github_common::USER_AGENT,
             octorust::auth::Credentials::JWT(self.jwt.clone()),
             reqwest::Client::builder().build().unwrap(),
         )
@@ -107,7 +107,7 @@ impl App {
 
         octorust::Client::custom(
             "https://api.github.com",
-            "jclulow/wollongong@0",
+            buildomat_github_common::USER_AGENT,
             octorust::auth::Credentials::InstallationToken(iat),
             reqwest::Client::builder().build().unwrap(),
         )
@@ -2151,7 +2151,7 @@ async fn bgtask(app: Arc<App>) {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let log = make_log("wollongong");
+    let log = make_log("github-server");
 
     info!(log, "ok");
 
@@ -2171,7 +2171,7 @@ async fn main() -> Result<()> {
     let app0 = Arc::new(App {
         log: log.clone(),
         jwt: jwt.clone(),
-        db: wollongong_database::Database::new(
+        db: buildomat_github_database::Database::new(
             log.new(o!("component" => "db")),
             "var/data.sqlite3",
             config.sqlite.cache_kb,

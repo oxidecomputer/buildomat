@@ -714,6 +714,102 @@ dependencies = [
 ]
 
 [[package]]
+name = "buildomat-github-common"
+version = "0.0.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "buildomat-github-database"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "buildomat-common",
+ "buildomat-database",
+ "buildomat-github-common",
+ "chrono",
+ "diesel",
+ "rand",
+ "rusty_ulid",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "slog",
+ "thiserror",
+]
+
+[[package]]
+name = "buildomat-github-dbtool"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "buildomat-github-common",
+ "buildomat-github-database",
+ "chrono",
+ "hiercmd",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "buildomat-github-ghtool"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "base64 0.13.1",
+ "buildomat-github-common",
+ "chrono",
+ "hiercmd",
+ "hmac-sha256",
+ "hyper",
+ "jsonwebtoken",
+ "octorust",
+ "pem 2.0.1",
+ "reqwest",
+ "rusty_ulid",
+ "serde",
+ "serde_json",
+ "slog",
+ "tokio",
+ "toml 0.5.11",
+]
+
+[[package]]
+name = "buildomat-github-server"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "base64 0.13.1",
+ "buildomat-bunyan",
+ "buildomat-client",
+ "buildomat-common",
+ "buildomat-github-common",
+ "buildomat-github-database",
+ "chrono",
+ "dropshot",
+ "futures",
+ "hmac-sha256",
+ "html-escape",
+ "hyper",
+ "jsonwebtoken",
+ "octorust",
+ "pem 2.0.1",
+ "reqwest",
+ "rusty_ulid",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-util 0.6.10",
+ "toml 0.5.11",
+]
+
+[[package]]
 name = "buildomat-server"
 version = "0.0.0"
 dependencies = [
@@ -4059,102 +4155,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "80d0f4e272c85def139476380b12f9ac60926689dd2e01d4923222f40580869d"
 dependencies = [
  "winapi",
-]
-
-[[package]]
-name = "wollongong-common"
-version = "0.0.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "wollongong-database"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "buildomat-common",
- "buildomat-database",
- "chrono",
- "diesel",
- "rand",
- "rusty_ulid",
- "serde",
- "serde_json",
- "serde_with",
- "slog",
- "thiserror",
- "wollongong-common",
-]
-
-[[package]]
-name = "wollongong-dbtool"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "chrono",
- "hiercmd",
- "serde",
- "serde_json",
- "tokio",
- "wollongong-common",
- "wollongong-database",
-]
-
-[[package]]
-name = "wollongong-ghtool"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "base64 0.13.1",
- "chrono",
- "hiercmd",
- "hmac-sha256",
- "hyper",
- "jsonwebtoken",
- "octorust",
- "pem 2.0.1",
- "reqwest",
- "rusty_ulid",
- "serde",
- "serde_json",
- "slog",
- "tokio",
- "toml 0.5.11",
- "wollongong-common",
-]
-
-[[package]]
-name = "wollongong-server"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "base64 0.13.1",
- "buildomat-bunyan",
- "buildomat-client",
- "buildomat-common",
- "chrono",
- "dropshot",
- "futures",
- "hmac-sha256",
- "html-escape",
- "hyper",
- "jsonwebtoken",
- "octorust",
- "pem 2.0.1",
- "reqwest",
- "rusty_ulid",
- "schemars",
- "serde",
- "serde_json",
- "slog",
- "tempfile",
- "thiserror",
- "tokio",
- "tokio-util 0.6.10",
- "toml 0.5.11",
- "wollongong-common",
- "wollongong-database",
 ]
 
 [[package]]

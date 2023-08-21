@@ -56,7 +56,7 @@ generator.
 
 The core buildomat API server.  Manages the creation, tracking, and destruction
 of AWS EC2 instances as required to execute jobs.  This component can be used
-by both the GitHub integration server (Wollongong) and the client command.
+by both the GitHub integration server and the client command.
 
 #### Agent (`buildomat-agent`, in `agent`/)
 
@@ -67,14 +67,15 @@ out to receive instructions.  The agent does not require a public IP, or any
 direct inbound connectivity, to allow agents to run inside remote NAT
 environments.
 
-### GitHub Integration (Wollongong)
+### GitHub Integration (formerly known as Wollongong)
 
-Wollongong is the GitHub-specific portion of the buildomat suite.  It is
-responsible for receiving and processing notifications of new commits and pull
-requests on GitHub, starting any configured build jobs, and reporting the
-results so that they are visible through the GitHub user interface.
+The GitHub-specific portion of the buildomat suite sits in front of the core
+buildomat service.  It is responsible for receiving and processing
+notifications of new commits and pull requests on GitHub, starting any
+configured build jobs, and reporting the results so that they are visible
+through the GitHub user interface.
 
-#### Server (`wollongong-server`, in `github/server/`)
+#### Server (`buildomat-github-server`, in `github/server/`)
 
 This server acts as a [GitHub App](https://docs.github.com/en/developers/apps).
 It is responsible for processing incoming [GitHub
@@ -86,15 +87,15 @@ detailed logs) and access to any artefacts that jobs produce.  This server
 keeps state required to manage the interaction with GitHub, but does not store
 job data; requests for logs or artefacts are proxied back to the core server.
 
-#### Database Tool (`wollongong-dbtool`, in `github/dbtool/`)
+#### Database Tool (`buildomat-github-dbtool`, in `github/dbtool/`)
 
-This tool can be used to inspect the database state kept by Wollongong as it
-tracks GitHub pull requests and commits.  Unlike the core client tool, this
-program directly interacts with a local SQLite database.
+This tool can be used to inspect the database state kept by the GitHub
+integration as it tracks GitHub pull requests and commits.  Unlike the core
+client tool, this program directly interacts with a local SQLite database.
 
 ```
-$ wollongong-dbtool
-Usage: wollongong-dbtool COMMAND [ARGS...]
+$ buildomat-github-dbtool
+Usage: buildomat-github-dbtool COMMAND [ARGS...]
 
 Commands:
     delivery (del)      webhook deliveries
@@ -112,7 +113,7 @@ Of particular note, the tool is useful for inspecting and replaying received
 webhook events; e.g.,
 
 ```
-$ wollongong-dbtool del ls
+$ buildomat-github-dbtool del ls
 SEQ   ACK RECVTIME             EVENT          ACTION
 0     1   2021-10-05T01:58:32Z ping           -
 1     1   2021-10-05T02:25:33Z installation   created
@@ -126,7 +127,7 @@ SEQ   ACK RECVTIME             EVENT          ACTION
 ...
 ```
 
-The `wollongong-dbtool del unack SEQ` command can be used to trigger the
+The `buildomat-github-dbtool del unack SEQ` command can be used to trigger the
 reprocessing of an invididual webhook message.
 
 ## Per-repository Configuration

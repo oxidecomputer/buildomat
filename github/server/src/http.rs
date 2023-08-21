@@ -4,6 +4,7 @@
 
 use anyhow::{anyhow, bail, Result};
 use buildomat_common::*;
+use buildomat_github_database::types::*;
 use chrono::prelude::*;
 use dropshot::{
     endpoint, ConfigDropshot, HttpError, HttpResponseOk, RequestContext,
@@ -17,7 +18,6 @@ use std::collections::{HashMap, HashSet};
 use std::result::Result as SResult;
 use std::sync::Arc;
 use std::time::Duration;
-use wollongong_database::types::*;
 
 use super::{variety, App};
 
@@ -39,7 +39,9 @@ trait ToHttpError<T> {
     fn to_500(self) -> SResult<T, HttpError>;
 }
 
-impl<T> ToHttpError<T> for SResult<T, wollongong_database::DatabaseError> {
+impl<T> ToHttpError<T>
+    for SResult<T, buildomat_github_database::DatabaseError>
+{
     fn to_500(self) -> SResult<T, HttpError> {
         self.map_err(|e| {
             let msg = format!("internal error: {}", e);
