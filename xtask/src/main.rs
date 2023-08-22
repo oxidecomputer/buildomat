@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::io::{Seek, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -174,10 +175,114 @@ fn build_linux_agent() -> Result<()> {
     Ok(())
 }
 
+fn crates() -> Result<()> {
+    let xtask_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let root = {
+        let mut t = xtask_dir.clone();
+        assert!(t.pop());
+        t
+    };
+
+    let res = Command::new(env!("CARGO"))
+        .arg("tree")
+        .arg("--depth")
+        .arg("0")
+        .arg("--prefix")
+        .arg("none")
+        .arg("--workspace")
+        .current_dir(&root)
+        .output()?;
+
+    if !res.status.success() {
+        bail!("could not list crates in workspace?");
+    }
+
+    let mut crates = Vec::new();
+
+    let out = String::from_utf8(res.stdout)?;
+    for l in out.lines() {
+        if l.trim().is_empty() {
+            continue;
+        }
+
+        if let Some((p, tail)) = l.split_once(' ') {
+            if let Some((_ver, path)) = tail.split_once(' ') {
+                if let Some(tail) = path.strip_prefix('(') {
+                    if let Some(path) = tail.strip_suffix(')') {
+                        let n = p
+                            .split('-')
+                            .map(str::to_string)
+                            .collect::<Vec<_>>();
+
+                        crates.push((n, path.to_string()));
+                        continue;
+                    }
+                }
+            }
+        }
+
+        eprintln!("WARNING: weird line from cargo tree: {l:?}");
+    }
+
+    crates.sort_by(|a, b| {
+        let aa = a.0.first().map(|v| v.starts_with("buildomat"));
+        let bb = b.0.first().map(|v| v.starts_with("buildomat"));
+        if aa.unwrap_or(false) && !bb.unwrap_or(false) {
+            Ordering::Less
+        } else if !aa.unwrap_or(false) && bb.unwrap_or(false) {
+            Ordering::Greater
+        } else {
+            let al = a.0.len();
+            let bl = b.0.len();
+
+            if al != bl {
+                al.cmp(&bl)
+            } else {
+                for i in 0..al {
+                    match a.0.get(i).unwrap().cmp(b.0.get(i).unwrap()) {
+                        o @ (Ordering::Less | Ordering::Greater) => return o,
+                        Ordering::Equal => continue,
+                    }
+                }
+
+                Ordering::Equal
+            }
+        }
+    });
+
+    for (n, p) in crates.iter() {
+        if n.len() < 3 && n[0].starts_with("buildomat") {
+            println!("{:<28} {}", n.join("-"), p);
+        }
+    }
+
+    let mut prior = "".to_string();
+    for (n, p) in crates.iter() {
+        if n.len() >= 3 {
+            let pfx = n[0..n.len() - 1].join("-");
+            if pfx != prior {
+                println!();
+                prior = pfx;
+            }
+            println!("{:<28} {}", n.join("-"), p);
+        }
+    }
+
+    println!();
+    for (n, p) in crates.iter() {
+        if n.len() < 3 && !n[0].starts_with("buildomat") {
+            println!("{:<28} {}", n.join("-"), p);
+        }
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
     match std::env::args().skip(1).next().as_deref() {
         Some("openapi") => openapi(),
         Some("build-linux-agent") => build_linux_agent(),
+        Some("crates") => crates(),
         Some(_) | None => {
             bail!("do not know how to do that");
         }
