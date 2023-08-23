@@ -49,7 +49,7 @@ fn openapi() -> Result<()> {
     let buildomat_client_dir = {
         let mut t = xtask_dir.clone();
         assert!(t.pop());
-        t.push("openapi");
+        t.push("client");
         t
     };
 
