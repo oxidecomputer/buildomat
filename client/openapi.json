@@ -1956,15 +1956,23 @@
           "first": {
             "type": "string"
           },
+          "gateway": {
+            "nullable": true,
+            "type": "string"
+          },
           "name": {
             "type": "string"
+          },
+          "routed": {
+            "type": "boolean"
           }
         },
         "required": [
           "cidr",
           "count",
           "first",
-          "name"
+          "name",
+          "routed"
         ]
       },
       "FactoryCreate": {

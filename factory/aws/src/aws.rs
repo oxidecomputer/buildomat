@@ -239,7 +239,9 @@ async fn aws_worker_one(
              */
             let w = c
                 .client
-                .factory_worker_get(&id.to_string())
+                .factory_worker_get()
+                .worker(id.to_string())
+                .send()
                 .await?
                 .into_inner();
             match w.worker {
@@ -270,13 +272,10 @@ async fn aws_worker_one(
                             w.id
                         );
                         c.client
-                            .factory_worker_associate(
-                                &w.id,
-                                &FactoryWorkerAssociate {
-                                    private: i.id.to_string(),
-                                    metadata: None,
-                                },
-                            )
+                            .factory_worker_associate()
+                            .worker(&w.id)
+                            .body_map(|body| body.private(&i.id))
+                            .send()
                             .await?;
                     }
 
@@ -314,7 +313,9 @@ async fn aws_worker_one(
                                     "renew lease {} for worker {}", lid, w.id
                                 );
                                 c.client
-                                    .factory_lease_renew(&lid.to_string())
+                                    .factory_lease_renew()
+                                    .job(lid.to_string())
+                                    .send()
                                     .await?;
                             }
                         }
@@ -354,7 +355,7 @@ async fn aws_worker_one(
      * instance, they must be scrubbed from the database as detritus from prior
      * failed runs.
      */
-    for w in c.client.factory_workers().await?.into_inner() {
+    for w in c.client.factory_workers().send().await?.into_inner() {
         let rm = if let Some(instance_id) = w.private.as_deref() {
             /*
              * There is a record of a particular instance ID for this worker.
@@ -415,7 +416,7 @@ async fn aws_worker_one(
         };
 
         if rm {
-            c.client.factory_worker_destroy(&w.id).await?;
+            c.client.factory_worker_destroy().worker(&w.id).send().await?;
         }
     }
 
@@ -444,9 +445,9 @@ async fn aws_worker_one(
          */
         let res = c
             .client
-            .factory_lease(&FactoryWhatsNext {
-                supported_targets: c.targets.clone(),
-            })
+            .factory_lease()
+            .body_map(|body| body.supported_targets(c.targets.clone()))
+            .send()
             .await?
             .into_inner();
 
@@ -468,11 +469,9 @@ async fn aws_worker_one(
 
         let w = c
             .client
-            .factory_worker_create(&FactoryWorkerCreate {
-                target: lease.target.to_string(),
-                job: None,
-                wait_for_flush: false,
-            })
+            .factory_worker_create()
+            .body_map(|body| body.target(&lease.target))
+            .send()
             .await?;
 
         let instance_id =
@@ -484,13 +483,10 @@ async fn aws_worker_one(
          * Record the instance ID against the worker for which it was created:
          */
         c.client
-            .factory_worker_associate(
-                &w.id,
-                &FactoryWorkerAssociate {
-                    private: instance_id.to_string(),
-                    metadata: None,
-                },
-            )
+            .factory_worker_associate()
+            .worker(&w.id)
+            .body_map(|body| body.private(&instance_id))
+            .send()
             .await?;
     }
 

@@ -4,6 +4,7 @@
 
 use crate::{App, FlushOut, FlushState};
 use anyhow::{bail, Result};
+use buildomat_client::types::{DependSubmit, JobOutput};
 use buildomat_common::*;
 use buildomat_github_database::types::*;
 use chrono::SecondsFormat;
@@ -83,7 +84,7 @@ impl BasicOutput {
         app: &Arc<App>,
         cs: &CheckSuite,
         cr: &CheckRun,
-        o: &buildomat_client::types::JobOutput,
+        o: &JobOutput,
     ) -> BasicOutput {
         let name = o
             .path
@@ -320,7 +321,7 @@ pub(crate) async fn run(
          * We have submitted the task to buildomat already, so just try
          * to update our state.
          */
-        let bt = b.job_get(jid).await?.into_inner();
+        let bt = b.job_get().job(jid).send().await?.into_inner();
         let running = bt.state == "running";
         let complete = bt.state == "completed" || bt.state == "failed";
         let new_state = Some(bt.state);
@@ -330,7 +331,8 @@ pub(crate) async fn run(
         }
 
         if running {
-            let store = b.job_store_get_all(jid).await?.into_inner();
+            let store =
+                b.job_store_get_all().job(jid).send().await?.into_inner();
 
             if !store.contains_key("GITHUB_TOKEN") {
                 /*
@@ -364,19 +366,18 @@ pub(crate) async fn run(
                  * job.  Timing is important but not critical: the job will wait
                  * for the value to appear before continuing.
                  */
-                b.job_store_put(
-                    jid,
-                    "GITHUB_TOKEN",
-                    &buildomat_client::types::JobStoreValue {
+                b.job_store_put()
+                    .job(jid)
+                    .name("GITHUB_TOKEN")
+                    .body_map(|body| {
                         /*
                          * Mark this value as a secret so that it will not be
                          * included in diagnostic output.
                          */
-                        secret: true,
-                        value: token,
-                    },
-                )
-                .await?;
+                        body.secret(true).value(token)
+                    })
+                    .send()
+                    .await?;
             }
         }
 
@@ -392,8 +393,13 @@ pub(crate) async fn run(
         if now - p.event_last_redraw_time >= 6 || complete {
             let mut change = false;
 
-            for ev in
-                b.job_events_get(jid, Some(p.event_minseq)).await?.into_inner()
+            for ev in b
+                .job_events_get()
+                .job(jid)
+                .minseq(p.event_minseq)
+                .send()
+                .await?
+                .into_inner()
             {
                 change = true;
                 if ev.seq + 1 > p.event_minseq {
@@ -475,7 +481,7 @@ pub(crate) async fn run(
             /*
              * Collect the list of uploaded artefacts.  Keep at most 25 of them.
              */
-            let outputs = b.job_outputs_get(jid).await?;
+            let outputs = b.job_outputs_get().job(jid).send().await?;
             if !outputs.is_empty() {
                 cr.flushed = false;
             }
@@ -498,17 +504,17 @@ pub(crate) async fn run(
                 if let Some(o) =
                     outputs.iter().find(|o| o.path == p.from_output)
                 {
-                    b.job_output_publish(
-                        jid,
-                        &o.id,
-                        &buildomat_client::types::JobOutputPublish {
-                            series: p.series.to_string(),
-                            version: cs.head_sha.to_string(),
-                            name: p.name.to_string(),
-                        },
-                    )
-                    .await
-                    .ok();
+                    b.job_output_publish()
+                        .job(jid)
+                        .output(&o.id)
+                        .body_map(|body| {
+                            body.series(&p.series)
+                                .version(&cs.head_sha)
+                                .name(&p.name)
+                        })
+                        .send()
+                        .await
+                        .ok();
                 }
             }
         }
@@ -550,7 +556,7 @@ pub(crate) async fn run(
                      */
                     depends.insert(
                         name.to_string(),
-                        buildomat_client::types::DependSubmit {
+                        DependSubmit {
                             copy_outputs: true,
                             on_completed: true,
                             on_failed: false,
@@ -871,16 +877,14 @@ pub(crate) async fn run(
             tags.insert("gong.plan.sha".to_string(), sha.to_string());
         }
 
-        let body = &buildomat_client::types::JobSubmit {
-            name: format!("gong/{}", cr.id),
-            output_rules: c.output_rules.clone(),
-            target: c.target.as_deref().unwrap_or("default").into(),
-            tasks,
-            inputs: Default::default(),
-            tags,
-            depends,
-        };
-        let jsr = match b.job_submit(body).await {
+        let body = buildomat_client::types::JobSubmit::builder()
+            .name(format!("gong/{}", cr.id))
+            .output_rules(c.output_rules.clone())
+            .target(c.target.as_deref().unwrap_or("default"))
+            .tasks(tasks)
+            .tags(tags)
+            .depends(depends);
+        let jsr = match b.job_submit().body(body).send().await {
             Ok(rv) => rv.into_inner(),
             Err(buildomat_client::Error::ErrorResponse(rv))
                 if rv.status().is_client_error() =>
@@ -1103,7 +1107,8 @@ pub(crate) async fn artefact(
     if let Some(id) = &p.buildomat_id {
         let bm = app.buildomat(&app.db.load_repository(cs.repo)?);
 
-        let backend = bm.job_output_download(id, output).await?;
+        let backend =
+            bm.job_output_download().job(id).output(output).send().await?;
         let cl = backend.content_length().unwrap();
 
         /*
@@ -1211,8 +1216,8 @@ pub(crate) async fn details(
          * Try to fetch the log output of the job itself.
          */
         let bm = app.buildomat(&app.db.load_repository(cs.repo)?);
-        let job = bm.job_get(jid).await?;
-        let outputs = bm.job_outputs_get(jid).await?.into_inner();
+        let job = bm.job_get().job(jid).send().await?;
+        let outputs = bm.job_outputs_get().job(jid).send().await?.into_inner();
 
         out += &format!("<h2>Buildomat Job: {}</h2>\n", jid);
 
@@ -1286,7 +1291,7 @@ pub(crate) async fn details(
             \">DETAILS</td>\n";
         out += "</tr>\n";
 
-        for ev in bm.job_events_get(jid, None).await?.into_inner() {
+        for ev in bm.job_events_get().job(jid).send().await?.into_inner() {
             if ev.task != last {
                 let cols = if local_time { 4 } else { 3 };
                 out += &format!("<tr><td colspan=\"{cols}\">&nbsp;</td></tr>");
@@ -1399,7 +1404,7 @@ pub(crate) async fn cancel(
          * If we already started the buildomat job, we need to cancel it.
          */
         let b = app.buildomat(&repo);
-        let j = b.job_get(&jid).await?;
+        let j = b.job_get().job(jid).send().await?;
 
         if j.state == "complete" || j.state == "failed" {
             /*
@@ -1409,7 +1414,7 @@ pub(crate) async fn cancel(
         }
 
         info!(log, "cancelling backend buildomat job {}", jid);
-        b.job_cancel(&jid).await?;
+        b.job_cancel().job(jid).send().await?;
     } else {
         /*
          * Otherwise, report the failure and halt check run processing.

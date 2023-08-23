@@ -80,7 +80,8 @@ impl Stuff {
              * support filtering by username in the query string, so we must
              * check the results match what we expected.
              */
-            let users = self.admin().users_list(Some(name)).await?.into_inner();
+            let users =
+                self.admin().users_list().name(name).send().await?.into_inner();
             for user in users {
                 if user.name == name {
                     return Ok(user.id);
@@ -231,25 +232,29 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
     /*
      * Create the job on the server.
      */
-    let t = TaskSubmit {
-        name: "default".to_string(),
-        script,
-        env_clear,
-        env,
-        gid: None,
-        uid: None,
-        workdir: None,
-    };
-    let j = JobSubmit {
-        name,
-        target,
-        output_rules,
-        tasks: vec![t],
-        inputs: inputs.keys().cloned().collect(),
-        tags,
-        depends,
-    };
-    let x = l.context().user().job_submit(&j).await?;
+    let x = l
+        .context()
+        .user()
+        .job_submit()
+        .body(JobSubmit {
+            name,
+            target,
+            output_rules,
+            tasks: vec![TaskSubmit {
+                name: "default".to_string(),
+                script,
+                env_clear,
+                env,
+                gid: None,
+                uid: None,
+                workdir: None,
+            }],
+            inputs: inputs.keys().cloned().collect(),
+            tags,
+            depends,
+        })
+        .send()
+        .await?;
     w.lap("job submit");
 
     for (name, path) in inputs.iter() {
@@ -279,7 +284,10 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
             chunks.push(
                 l.context()
                     .user()
-                    .job_upload_chunk(&x.id, buf)
+                    .job_upload_chunk()
+                    .job(&x.id)
+                    .body(buf)
+                    .send()
                     .await?
                     .into_inner()
                     .id,
@@ -290,14 +298,10 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
 
         l.context()
             .user()
-            .job_add_input(
-                &x.id,
-                &JobAddInput {
-                    chunks,
-                    name: name.to_string(),
-                    size: total as i64,
-                },
-            )
+            .job_add_input()
+            .job(&x.id)
+            .body_map(|body| body.chunks(chunks).name(name).size(total as i64))
+            .send()
             .await?;
         w.lap(&format!("add input {}", name));
     }
@@ -324,7 +328,7 @@ async fn poll_job(l: &Level<Stuff>, id: &str, json: bool) -> Result<()> {
     let mut exit_status = 0;
     let mut last_state = String::new();
     loop {
-        let t = match l.context().user().job_get(id).await {
+        let t = match l.context().user().job_get().job(id).send().await {
             Ok(t) => t,
             Err(_) => {
                 sleep_ms(500).await;
@@ -343,8 +347,14 @@ async fn poll_job(l: &Level<Stuff>, id: &str, json: bool) -> Result<()> {
             last_state = t.state.to_string();
         }
 
-        if let Ok(events) =
-            l.context().user().job_events_get(id, Some(nextseq)).await
+        if let Ok(events) = l
+            .context()
+            .user()
+            .job_events_get()
+            .job(id)
+            .minseq(nextseq)
+            .send()
+            .await
         {
             if events.is_empty() {
                 if t.state == "completed" || t.state == "failed" {
@@ -387,26 +397,26 @@ async fn poll_job(l: &Level<Stuff>, id: &str, json: bool) -> Result<()> {
 
 async fn do_info(mut l: Level<Stuff>) -> Result<()> {
     no_args!(l);
-    let whoami = l.context().user().whoami().await?;
+    let whoami = l.context().user().whoami().send().await?;
     println!("{:#?}", whoami);
     Ok(())
 }
 
 async fn do_control_resume(mut l: Level<Stuff>) -> Result<()> {
     no_args!(l);
-    println!("{:?}", l.context().admin().control_resume().await?);
+    println!("{:?}", l.context().admin().control_resume().send().await?);
     Ok(())
 }
 
 async fn do_control_hold(mut l: Level<Stuff>) -> Result<()> {
     no_args!(l);
-    println!("{:?}", l.context().admin().control_hold().await?);
+    println!("{:?}", l.context().admin().control_hold().send().await?);
     Ok(())
 }
 
 async fn do_control_recycle(mut l: Level<Stuff>) -> Result<()> {
     no_args!(l);
-    println!("{:?}", l.context().admin().workers_recycle().await?);
+    println!("{:?}", l.context().admin().workers_recycle().send().await?);
     Ok(())
 }
 
@@ -427,7 +437,7 @@ async fn do_job_cancel(mut l: Level<Stuff>) -> Result<()> {
         bad_args!(l, "specify job ID");
     }
 
-    l.context().user().job_cancel(a.args()[0].as_str()).await?;
+    l.context().user().job_cancel().job(a.args()[0].as_str()).send().await?;
 
     Ok(())
 }
@@ -447,7 +457,9 @@ async fn do_job_outputs(mut l: Level<Stuff>) -> Result<()> {
     }
     let j = a.args()[0].as_str();
 
-    for i in l.context().user().job_outputs_get(j).await?.into_inner() {
+    for i in
+        l.context().user().job_outputs_get().job(j).send().await?.into_inner()
+    {
         let mut r = Row::default();
         r.add_str("id", &i.id);
         r.add_str("path", &i.path);
@@ -484,7 +496,7 @@ async fn do_job_list(mut l: Level<Stuff>) -> Result<()> {
 
     let mut t = a.table();
 
-    for job in l.context().user().jobs_get().await?.into_inner() {
+    for job in l.context().user().jobs_get().send().await?.into_inner() {
         if ftags.iter().any(|(k, v)| {
             let jv = job.tags.get(k);
             jv != Some(v)
@@ -539,7 +551,7 @@ async fn do_job_dump(mut l: Level<Stuff>) -> Result<()> {
     let c = l.context().user();
 
     for id in a.args() {
-        let job = c.job_get(id).await?;
+        let job = c.job_get().job(id).send().await?;
 
         println!("{:<26} {:<15} {}", job.id, job.state, job.name);
         println!("{:#?}", job);
@@ -567,7 +579,7 @@ async fn do_job_timings(mut l: Level<Stuff>) -> Result<()> {
     let c = l.context().user();
 
     for id in a.args() {
-        let job = c.job_get(id).await?;
+        let job = c.job_get().job(id).send().await?;
 
         if let Some((mfrom, mto)) = &measure {
             match (job.times.get(mfrom), job.times.get(mto)) {
@@ -617,7 +629,7 @@ async fn do_job_copy(mut l: Level<Stuff>) -> Result<()> {
     let dst = a.args()[2].as_str();
 
     let c = l.context().user();
-    for o in c.job_outputs_get(job).await?.into_inner() {
+    for o in c.job_outputs_get().job(job).send().await?.into_inner() {
         if o.path == src {
             eprintln!(
                 "downloading {} -> {} ({}KB)",
@@ -625,7 +637,13 @@ async fn do_job_copy(mut l: Level<Stuff>) -> Result<()> {
                 dst,
                 o.size / 1024,
             );
-            let mut res = c.job_output_download(job, &o.id).await?.into_inner();
+            let mut res = c
+                .job_output_download()
+                .job(job)
+                .output(&o.id)
+                .send()
+                .await?
+                .into_inner();
 
             let mut f = std::fs::OpenOptions::new()
                 .create(true)
@@ -658,21 +676,19 @@ async fn do_job_sign(mut l: Level<Stuff>) -> Result<()> {
     let src = a.args()[1].as_str();
 
     let c = l.context().user();
-    for o in c.job_outputs_get(job).await?.into_inner() {
+    for o in c.job_outputs_get().job(job).send().await?.into_inner() {
         if o.path != src {
             continue;
         }
 
         let su = c
-            .job_output_signed_url(
-                job,
-                &o.id,
-                &JobOutputSignedUrl {
-                    content_disposition: None,
-                    content_type: Some("text/plain".into()),
-                    expiry_seconds: 3600,
-                },
-            )
+            .job_output_signed_url()
+            .job(job)
+            .output(&o.id)
+            .body_map(|body| {
+                body.content_type("text/plain".to_string()).expiry_seconds(3600)
+            })
+            .send()
             .await?
             .into_inner();
 
@@ -703,7 +719,7 @@ async fn do_job_publish(mut l: Level<Stuff>) -> Result<()> {
     let name = a.args()[4].as_str();
 
     let c = l.context().user();
-    for o in c.job_outputs_get(job).await?.into_inner() {
+    for o in c.job_outputs_get().job(job).send().await?.into_inner() {
         if o.path == src {
             println!(
                 "publishing {} -> {}/{}/{} ({}KB)",
@@ -714,16 +730,14 @@ async fn do_job_publish(mut l: Level<Stuff>) -> Result<()> {
                 o.size / 1024
             );
 
-            c.job_output_publish(
-                job,
-                &o.id,
-                &JobOutputPublish {
-                    name: name.to_string(),
-                    series: series.to_string(),
-                    version: version.to_string(),
-                },
-            )
-            .await?;
+            c.job_output_publish()
+                .job(job)
+                .output(&o.id)
+                .body_map(|body| {
+                    body.name(name).series(series).version(version)
+                })
+                .send()
+                .await?;
             return Ok(());
         }
     }
@@ -770,11 +784,11 @@ async fn do_job_store_put(mut l: Level<Stuff>) -> Result<()> {
 
     l.context()
         .user()
-        .job_store_put(
-            &job,
-            &name,
-            &buildomat_client::types::JobStoreValue { secret, value },
-        )
+        .job_store_put()
+        .job(&job)
+        .name(&name)
+        .body_map(|body| body.secret(secret).value(value))
+        .send()
         .await?;
 
     Ok(())
@@ -792,7 +806,14 @@ async fn do_job_store_get(mut l: Level<Stuff>) -> Result<()> {
     let job = a.args()[0].to_string();
     let name = a.args()[1].to_string();
 
-    let store = l.context().user().job_store_get_all(&job).await?.into_inner();
+    let store = l
+        .context()
+        .user()
+        .job_store_get_all()
+        .job(&job)
+        .send()
+        .await?
+        .into_inner();
 
     if let Some(ent) = store.get(&name) {
         if ent.secret {
@@ -849,7 +870,9 @@ async fn do_job_store_list(mut l: Level<Stuff>) -> Result<()> {
     let store = l
         .context()
         .user()
-        .job_store_get_all(&job)
+        .job_store_get_all()
+        .job(&job)
+        .send()
         .await?
         .into_inner()
         .into_iter()
@@ -924,7 +947,13 @@ async fn do_user_create(mut l: Level<Stuff>) -> Result<()> {
     }
     let name = a.args()[0].to_string();
 
-    let res = l.context().admin().user_create(&UserCreate { name }).await?;
+    let res = l
+        .context()
+        .admin()
+        .user_create()
+        .body_map(|body| body.name(name))
+        .send()
+        .await?;
 
     println!("{}", res.token);
     Ok(())
@@ -941,7 +970,13 @@ async fn do_user_grant(mut l: Level<Stuff>) -> Result<()> {
     let id = l.context().user_to_id(&a.args()[0]).await?;
     let privilege = a.args()[1].to_string();
 
-    l.context().admin().user_privilege_grant(&id, &privilege).await?;
+    l.context()
+        .admin()
+        .user_privilege_grant()
+        .user(&id)
+        .privilege(&privilege)
+        .send()
+        .await?;
     Ok(())
 }
 
@@ -956,7 +991,13 @@ async fn do_user_revoke(mut l: Level<Stuff>) -> Result<()> {
     let id = l.context().user_to_id(&a.args()[0]).await?;
     let privilege = a.args()[1].to_string();
 
-    l.context().admin().user_privilege_revoke(&id, &privilege).await?;
+    l.context()
+        .admin()
+        .user_privilege_revoke()
+        .user(&id)
+        .privilege(&privilege)
+        .send()
+        .await?;
     Ok(())
 }
 
@@ -969,7 +1010,7 @@ async fn do_user_list(mut l: Level<Stuff>) -> Result<()> {
 
     let mut t = a.table();
 
-    for u in l.context().admin().users_list(None).await?.into_inner() {
+    for u in l.context().admin().users_list().send().await?.into_inner() {
         let mut r = Row::default();
         r.add_str("id", &u.id);
         r.add_str("name", &u.name);
@@ -994,7 +1035,7 @@ async fn do_user_show(mut l: Level<Stuff>) -> Result<()> {
     }
     let id = l.context().user_to_id(&a.args()[0]).await?;
 
-    let res = l.context().admin().user_get(&id).await?;
+    let res = l.context().admin().user_get().user(&id).send().await?;
 
     println!("id:          {}", res.id);
     println!("name:        {}", res.name);
@@ -1034,7 +1075,15 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
 
     let mut t = a.table();
 
-    for w in c.admin().workers_list(Some(active)).await?.into_inner().workers {
+    for w in c
+        .admin()
+        .workers_list()
+        .active(active)
+        .send()
+        .await?
+        .into_inner()
+        .workers
+    {
         if active && w.deleted {
             continue;
         }
@@ -1074,7 +1123,9 @@ async fn do_worker_recycle(mut l: Level<Stuff>) -> Result<()> {
     }
 
     for arg in a.args() {
-        if let Err(e) = l.context().admin().worker_recycle(&arg).await {
+        if let Err(e) =
+            l.context().admin().worker_recycle().worker(arg).send().await
+        {
             bail!("ERROR: recycling {}: {:?}", arg, e);
         }
     }
@@ -1124,8 +1175,13 @@ async fn do_factory_create(mut l: Level<Stuff>) -> Result<()> {
     }
     let name = a.args()[0].to_string();
 
-    let res =
-        l.context().admin().factory_create(&FactoryCreate { name }).await?;
+    let res = l
+        .context()
+        .admin()
+        .factory_create()
+        .body_map(|body| body.name(name))
+        .send()
+        .await?;
 
     println!("{}", res.token);
     Ok(())
@@ -1149,8 +1205,13 @@ async fn do_target_create(mut l: Level<Stuff>) -> Result<()> {
     let name = a.args()[0].to_string();
     let desc = a.opts().opt_str("d").unwrap();
 
-    let res =
-        l.context().admin().target_create(&TargetCreate { name, desc }).await?;
+    let res = l
+        .context()
+        .admin()
+        .target_create()
+        .body_map(|body| body.name(name).desc(desc))
+        .send()
+        .await?;
 
     println!("{}", res.id);
     Ok(())
@@ -1172,7 +1233,12 @@ async fn do_target_rename(mut l: Level<Stuff>) -> Result<()> {
     let res = l
         .context()
         .admin()
-        .target_rename(&id, &TargetRename { new_name, signpost_description })
+        .target_rename()
+        .target(&id)
+        .body_map(|body| {
+            body.new_name(new_name).signpost_description(signpost_description)
+        })
+        .send()
         .await?;
 
     println!("{}", res.id);
@@ -1190,7 +1256,7 @@ async fn do_target_list(mut l: Level<Stuff>) -> Result<()> {
 
     let mut t = a.table();
 
-    for targ in l.context().admin().targets_list().await?.into_inner() {
+    for targ in l.context().admin().targets_list().send().await?.into_inner() {
         let mut r = Row::default();
         r.add_str("id", &targ.id);
         r.add_str("name", &targ.name);
@@ -1215,7 +1281,13 @@ async fn do_target_restrict(mut l: Level<Stuff>) -> Result<()> {
     let id = a.args()[0].to_string();
     let privilege = a.args()[1].to_string();
 
-    l.context().admin().target_require_privilege(&id, &privilege).await?;
+    l.context()
+        .admin()
+        .target_require_privilege()
+        .target(&id)
+        .privilege(&privilege)
+        .send()
+        .await?;
     Ok(())
 }
 
@@ -1229,7 +1301,12 @@ async fn do_target_unrestrict(mut l: Level<Stuff>) -> Result<()> {
     }
     let id = a.args()[0].to_string();
 
-    l.context().admin().target_require_no_privilege(&id).await?;
+    l.context()
+        .admin()
+        .target_require_no_privilege()
+        .target(&id)
+        .send()
+        .await?;
     Ok(())
 }
 
@@ -1250,7 +1327,10 @@ async fn do_target_redirect(mut l: Level<Stuff>) -> Result<()> {
 
     l.context()
         .admin()
-        .target_redirect(&id, &TargetRedirect { redirect: Some(redirect) })
+        .target_redirect()
+        .target(&id)
+        .body_map(|body| body.redirect(redirect))
+        .send()
         .await?;
     Ok(())
 }
@@ -1268,10 +1348,11 @@ async fn do_target_unredirect(mut l: Level<Stuff>) -> Result<()> {
     }
     let id = a.args()[0].to_string();
 
-    l.context()
-        .admin()
-        .target_redirect(&id, &TargetRedirect { redirect: None })
-        .await?;
+    /*
+     * By omitting the body altogether, we clear the redirect property on the
+     * server.
+     */
+    l.context().admin().target_redirect().target(id).send().await?;
     Ok(())
 }
 
@@ -1351,33 +1432,38 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
 
     let users = s
         .admin()
-        .users_list(None)
+        .users_list()
+        .send()
         .await?
-        .iter()
-        .map(|u| (u.id.to_string(), u.name.to_string()))
+        .into_inner()
+        .into_iter()
+        .map(|u| (u.id, u.name))
         .collect::<HashMap<String, String>>();
     w.lap("users_list");
 
     let targets = s
         .admin()
         .targets_list()
+        .send()
         .await?
-        .iter()
-        .map(|t| (t.id.to_string(), t.name.to_string()))
+        .into_inner()
+        .into_iter()
+        .map(|t| (t.id, t.name))
         .collect::<HashMap<String, String>>();
     w.lap("targets_list");
 
     /*
      * Load active jobs:
      */
-    let jobs = s.admin().admin_jobs_get(Some(true), None).await?.into_inner();
+    let jobs =
+        s.admin().admin_jobs_get().active(true).send().await?.into_inner();
     w.lap("admin_jobs_get active");
 
     /*
      * Load some of recently completed jobs:
      */
     let oldjobs = if let Some(nrc) = nrc {
-        s.admin().admin_jobs_get(None, Some(nrc)).await?.into_inner()
+        s.admin().admin_jobs_get().completed(nrc).send().await?.into_inner()
     } else {
         Default::default()
     };
@@ -1386,7 +1472,7 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
     /*
      * Load active workers:
      */
-    let res = s.admin().workers_list(Some(true)).await?.into_inner();
+    let res = s.admin().workers_list().active(true).send().await?.into_inner();
     w.lap("workers_list");
 
     fn github_url(tags: &HashMap<String, String>) -> Option<String> {

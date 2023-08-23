@@ -100,14 +100,17 @@ impl ClientWrap {
     async fn append(&self, rec: &OutputRecord) {
         let job = self.job.as_ref().unwrap();
 
-        let wat = WorkerAppendJob {
-            stream: rec.stream.to_string(),
-            time: rec.time,
-            payload: rec.msg.to_string(),
-        };
-
         loop {
-            match self.client.worker_job_append(job.id.as_str(), &wat).await {
+            match self
+                .client
+                .worker_job_append()
+                .job(&job.id)
+                .body_map(|body| {
+                    body.stream(&rec.stream).time(rec.time).payload(&rec.msg)
+                })
+                .send()
+                .await
+            {
                 Ok(_) => return,
                 Err(e) => {
                     println!("ERROR: append: {:?}", e);
@@ -124,16 +127,16 @@ impl ClientWrap {
     async fn append_task(&self, task: &WorkerPingTask, rec: &OutputRecord) {
         let job = self.job.as_ref().unwrap();
 
-        let wat = WorkerAppendJob {
-            stream: rec.stream.to_string(),
-            time: rec.time,
-            payload: rec.msg.to_string(),
-        };
-
         loop {
             match self
                 .client
-                .worker_task_append(job.id.as_str(), task.id, &wat)
+                .worker_task_append()
+                .job(&job.id)
+                .task(task.id)
+                .body_map(|body| {
+                    body.stream(&rec.stream).time(rec.time).payload(&rec.msg)
+                })
+                .send()
                 .await
             {
                 Ok(_) => return,
@@ -151,12 +154,15 @@ impl ClientWrap {
 
     async fn task_complete(&self, task: &WorkerPingTask, failed: bool) {
         let job = self.job.as_ref().unwrap();
-        let wac = WorkerCompleteTask { failed };
 
         loop {
             match self
                 .client
-                .worker_task_complete(job.id.as_str(), task.id, &wac)
+                .worker_task_complete()
+                .job(&job.id)
+                .task(task.id)
+                .body_map(|body| body.failed(failed))
+                .send()
                 .await
             {
                 Ok(_) => return,
@@ -170,10 +176,16 @@ impl ClientWrap {
 
     async fn job_complete(&self, failed: bool) {
         let job = self.job.as_ref().unwrap();
-        let wac = WorkerCompleteJob { failed };
 
         loop {
-            match self.client.worker_job_complete(job.id.as_str(), &wac).await {
+            match self
+                .client
+                .worker_job_complete()
+                .job(&job.id)
+                .body_map(|body| body.failed(failed))
+                .send()
+                .await
+            {
                 Ok(_) => return,
                 Err(e) => {
                     println!("ERROR: complete: {:?}", e);
@@ -189,7 +201,10 @@ impl ClientWrap {
         loop {
             match self
                 .client
-                .worker_job_upload_chunk(&job.id, buf.clone())
+                .worker_job_upload_chunk()
+                .job(&job.id)
+                .body(buf.clone())
+                .send()
                 .await
             {
                 Ok(uc) => {
@@ -212,7 +227,14 @@ impl ClientWrap {
         };
 
         loop {
-            match self.client.worker_job_add_output(&job.id, &wao).await {
+            match self
+                .client
+                .worker_job_add_output()
+                .job(&job.id)
+                .body(&wao)
+                .send()
+                .await
+            {
                 Ok(_) => return,
                 Err(e) => {
                     println!("ERROR: add output: {:?}", e);
@@ -226,7 +248,14 @@ impl ClientWrap {
         let job = self.job.as_ref().unwrap();
 
         'outer: loop {
-            match self.client.worker_job_input_download(&job.id, id).await {
+            match self
+                .client
+                .worker_job_input_download()
+                .job(&job.id)
+                .input(id)
+                .send()
+                .await
+            {
                 Ok(res) => {
                     let mut body = res.into_inner();
 
@@ -541,10 +570,9 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
     let res = loop {
         let res = cw
             .client
-            .worker_bootstrap(&WorkerBootstrap {
-                bootstrap: cf.bootstrap.to_string(),
-                token: cf.token.to_string(),
-            })
+            .worker_bootstrap()
+            .body_map(|body| body.bootstrap(&cf.bootstrap).token(&cf.token))
+            .send()
             .await;
 
         match res {
@@ -574,7 +602,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
     let mut do_ping = true;
     loop {
         if do_ping {
-            match cw.client.worker_ping().await {
+            match cw.client.worker_ping().send().await {
                 Err(e) => {
                     println!("PING ERROR: {e}");
                     sleep_ms(1000).await;
@@ -637,7 +665,14 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                 Payload::StoreGet(name) => {
                     let job = cw.job.as_ref().unwrap();
 
-                    match cw.client.worker_job_store_get(&job.id, name).await {
+                    match cw
+                        .client
+                        .worker_job_store_get()
+                        .job(&job.id)
+                        .name(name)
+                        .send()
+                        .await
+                    {
                         Ok(res) => Payload::StoreGetResult(
                             res.into_inner().value.map(|v| StoreEntry {
                                 name: name.to_string(),
@@ -653,14 +688,11 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
 
                     match cw
                         .client
-                        .worker_job_store_put(
-                            &job.id,
-                            name,
-                            &buildomat_client::types::WorkerJobStoreValue {
-                                secret: *secret,
-                                value: value.to_string(),
-                            },
-                        )
+                        .worker_job_store_put()
+                        .job(&job.id)
+                        .name(name)
+                        .body_map(|body| body.secret(*secret).value(value))
+                        .send()
                         .await
                     {
                         Ok(..) => Payload::Ack,
@@ -789,14 +821,15 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                          * to the server, but don't try too hard.
                          */
                         cw.client
-                            .worker_job_append(
-                                job.id.as_str(),
-                                &WorkerAppendJob {
-                                    stream: "agent".into(),
-                                    time: Utc::now(),
-                                    payload: format!("ERROR: exec: {:?}", e),
-                                },
+                            .worker_job_append()
+                            .job(&job.id)
+                            .body(
+                                WorkerAppendJob::builder()
+                                    .stream("agent")
+                                    .time(Utc::now())
+                                    .payload(format!("ERROR: exec: {:?}", e)),
                             )
+                            .send()
                             .await
                             .ok();
                     }

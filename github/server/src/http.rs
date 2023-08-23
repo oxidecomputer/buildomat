@@ -342,9 +342,10 @@ async fn status(
     /*
      * Load active jobs, recently completed jobs, and active workers:
      */
-    let jobs = b.admin_jobs_get(Some(true), None).await.to_500()?;
+    let jobs = b.admin_jobs_get().active(true).send().await.to_500()?;
     let oldjobs = {
-        let mut oldjobs = b.admin_jobs_get(None, Some(40)).await.to_500()?;
+        let mut oldjobs =
+            b.admin_jobs_get().completed(40).send().await.to_500()?;
         /*
          * Display most recent job first by sorting the ID backwards; a ULID
          * begins with a timestamp prefix, so a lexicographical sort is ordered
@@ -353,9 +354,10 @@ async fn status(
         oldjobs.sort_by(|a, b| b.id.cmp(&a.id));
         oldjobs
     };
-    let workers = b.workers_list(Some(true)).await.to_500()?;
+    let workers = b.workers_list().active(true).send().await.to_500()?;
     let targets = b
         .targets_list()
+        .send()
         .await
         .to_500()?
         .iter()
@@ -509,7 +511,12 @@ async fn status(
                     seen.insert(job.id.to_string());
 
                     if !users.contains_key(&job.owner) {
-                        let owner = b.user_get(&job.owner).await.to_500()?;
+                        let owner = b
+                            .user_get()
+                            .user(&job.owner)
+                            .send()
+                            .await
+                            .to_500()?;
                         users.insert(job.owner.clone(), owner.name.to_string());
                     }
 
@@ -574,7 +581,8 @@ async fn status(
             }
 
             if !users.contains_key(&job.owner) {
-                let owner = b.user_get(&job.owner).await.to_500()?;
+                let owner =
+                    b.user_get().user(&job.owner).send().await.to_500()?;
                 users.insert(job.owner.clone(), owner.name.to_string());
             }
 
@@ -598,7 +606,7 @@ async fn status(
         }
 
         if !users.contains_key(&job.owner) {
-            let owner = b.user_get(&job.owner).await.to_500()?;
+            let owner = b.user_get().user(&job.owner).send().await.to_500()?;
             users.insert(job.owner.clone(), owner.name.to_string());
         }
 
@@ -673,7 +681,12 @@ async fn published_file(
     let b = app.buildomat_admin();
 
     let backend = b
-        .public_file_download(&bmu, &path.series, &path.version, &path.name)
+        .public_file_download()
+        .username(&bmu)
+        .series(&path.series)
+        .version(&path.version)
+        .name(&path.name)
+        .send()
         .await
         .to_500()?;
 

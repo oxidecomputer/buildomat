@@ -8,11 +8,9 @@ use anyhow::{bail, Result};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 
 pub mod gen {
-    use super::*;
-
     progenitor::generate_api!(
         spec = "openapi.json",
-        interface = Positional,
+        interface = Builder,
         replace = {
             FactoryMetadata = buildomat_types::metadata::FactoryMetadata,
         },
