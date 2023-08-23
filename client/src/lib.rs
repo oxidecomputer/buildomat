@@ -7,6 +7,8 @@ use std::time::Duration;
 use anyhow::{bail, Result};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 
+pub mod ext;
+
 pub mod gen {
     progenitor::generate_api!(
         spec = "openapi.json",
@@ -20,6 +22,7 @@ pub mod gen {
 pub mod prelude {
     pub use super::gen::prelude::*;
     pub use futures::StreamExt;
+    pub use super::ext::*;
 }
 pub use gen::{types, Client, Error};
 

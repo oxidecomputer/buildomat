@@ -3,7 +3,6 @@
  */
 
 use std::io::{IsTerminal, Read};
-use std::str::FromStr;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -51,10 +50,6 @@ pub fn make_log(name: &'static str) -> Logger {
             o!(),
         )
     }
-}
-
-pub fn to_ulid(id: &str) -> Result<Ulid> {
-    Ok(Ulid::from_str(id)?)
 }
 
 pub async fn sleep_ms(ms: u64) {
@@ -172,51 +167,6 @@ impl DateTimeExt for DateTime<Utc> {
         } else {
             Duration::from_secs(0)
         }
-    }
-}
-
-pub trait ClientJobExt {
-    fn duration(&self, from: &str, until: &str) -> Option<Duration>;
-}
-
-impl ClientJobExt for buildomat_client::types::Job {
-    fn duration(&self, from: &str, until: &str) -> Option<Duration> {
-        let from = if let Some(from) = self.times.get(from) {
-            from
-        } else {
-            return None;
-        };
-        let until = if let Some(until) = self.times.get(until) {
-            until
-        } else {
-            return None;
-        };
-
-        if let Ok(dur) = until.signed_duration_since(*from).to_std() {
-            if dur.is_zero() {
-                None
-            } else {
-                Some(dur)
-            }
-        } else {
-            None
-        }
-    }
-}
-
-pub trait ClientIdExt {
-    fn id(&self) -> Result<Ulid>;
-}
-
-impl ClientIdExt for buildomat_client::types::Worker {
-    fn id(&self) -> Result<Ulid> {
-        to_ulid(&self.id)
-    }
-}
-
-impl ClientIdExt for buildomat_client::types::Job {
-    fn id(&self) -> Result<Ulid> {
-        to_ulid(&self.id)
     }
 }
 

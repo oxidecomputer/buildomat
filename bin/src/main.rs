@@ -17,7 +17,7 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
-use buildomat_client::{types::*, Client, ClientBuilder};
+use buildomat_client::{ext::*, types::*, Client, ClientBuilder};
 use buildomat_common::*;
 use chrono::prelude::*;
 use futures::StreamExt;

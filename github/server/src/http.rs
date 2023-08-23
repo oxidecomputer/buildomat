@@ -1,8 +1,9 @@
 /*
- * Copyright 2022 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 use anyhow::{anyhow, bail, Result};
+use buildomat_client::ext::*;
 use buildomat_common::*;
 use buildomat_github_database::types::*;
 use chrono::prelude::*;
