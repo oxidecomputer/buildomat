@@ -20,9 +20,9 @@ pub mod gen {
 }
 
 pub mod prelude {
+    pub use super::ext::*;
     pub use super::gen::prelude::*;
     pub use futures::StreamExt;
-    pub use super::ext::*;
 }
 pub use gen::{types, Client, Error};
 

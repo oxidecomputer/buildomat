@@ -2,13 +2,13 @@
  * Copyright 2023 Oxide Computer Company
  */
 
-use std::path::{Path};
+use std::path::Path;
 
-use anyhow::{Result};
+use anyhow::Result;
+use buildomat_common::*;
 use serde::Deserialize;
 #[allow(unused_imports)]
 use slog::{error, info, o, warn, Logger};
-use buildomat_common::*;
 
 #[derive(Deserialize, Debug)]
 pub struct ConfigFile {
@@ -29,6 +29,25 @@ pub struct ConfigFileGeneral {
 #[derive(Deserialize, Debug)]
 pub struct ConfigFileJob {
     pub max_runtime: u64,
+    #[serde(default = "default_max_size_per_file_mb")]
+    pub max_size_per_file_mb: u64,
+}
+
+impl ConfigFileJob {
+    pub fn max_bytes_per_output(&self) -> u64 {
+        self.max_size_per_file_mb.saturating_mul(1024 * 1024)
+    }
+
+    pub fn max_bytes_per_input(&self) -> u64 {
+        self.max_size_per_file_mb.saturating_mul(1024 * 1024)
+    }
+}
+
+fn default_max_size_per_file_mb() -> u64 {
+    /*
+     * By default, allow 1GB files to be uploaded:
+     */
+    1 * 1024
 }
 
 #[derive(Deserialize, Debug)]

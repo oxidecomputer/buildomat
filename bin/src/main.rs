@@ -227,6 +227,34 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
         })
         .collect::<Result<HashMap<String, DependSubmit>>>()?;
 
+    /*
+     * Check that the set of input files will fit within any quota requirements
+     * in place on the server.  The server will eventually reject our request if
+     * it exceeds the quota anyway, but we can fail quickly and with a helpful
+     * error message here.
+     */
+    if !inputs.is_empty() {
+        let q = l.context().user().quota().send().await?.into_inner();
+
+        for (_, p) in inputs.iter() {
+            let md =
+                p.metadata().map_err(|e| anyhow!("input file {p:?}: {e}"))?;
+
+            if !md.is_file() {
+                bail!("input file {p:?} is not a regular file");
+            }
+
+            if md.len() > q.max_bytes_per_input {
+                bail!(
+                    "input file {p:?} is {} bytes long, \
+                    but the maximum input file size is {} bytes",
+                    md.len(),
+                    q.max_bytes_per_input,
+                );
+            }
+        }
+    }
+
     let mut w = Stopwatch::start(a.opts().opt_present("v"));
 
     /*
@@ -296,13 +324,43 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
             w.lap(&format!("upload {} chunk {}", name, chunks.len()));
         }
 
-        l.context()
-            .user()
-            .job_add_input()
-            .job(&x.id)
-            .body_map(|body| body.chunks(chunks).name(name).size(total as i64))
-            .send()
-            .await?;
+        let commit_id = Ulid::generate();
+
+        loop {
+            match l
+                .context()
+                .user()
+                .job_add_input()
+                .job(&x.id)
+                .body_map(|body| {
+                    body.chunks(chunks.clone())
+                        .name(name)
+                        .size(total as i64)
+                        .commit_id(commit_id.to_string())
+                })
+                .send()
+                .await
+            {
+                Ok(jair) => {
+                    if !jair.complete {
+                        /*
+                         * XXX For now, we poll on completion.  It would
+                         * obviously better to be notified, e.g., through long
+                         * polling.
+                         */
+                        sleep_ms(1000).await;
+                        continue;
+                    }
+
+                    if let Some(e) = &jair.error {
+                        bail!("input file error: {e}");
+                    }
+
+                    break;
+                }
+                Err(e) => bail!("input file error: {e}"),
+            }
+        }
         w.lap(&format!("add input {}", name));
     }
 

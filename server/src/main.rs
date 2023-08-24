@@ -27,7 +27,7 @@ use rusty_ulid::Ulid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 #[allow(unused_imports)]
-use slog::{error, info, warn, Logger};
+use slog::{error, info, o, warn, Logger};
 #[macro_use]
 extern crate diesel;
 use buildomat_common::*;
@@ -37,6 +37,7 @@ mod archive;
 mod chunks;
 mod config;
 mod db;
+mod files;
 mod jobs;
 mod workers;
 
@@ -133,6 +134,7 @@ struct Central {
     config: config::ConfigFile,
     db: db::Database,
     datadir: PathBuf,
+    files: files::Files,
     inner: Mutex<CentralInner>,
     s3: aws_sdk_s3::Client,
 }
@@ -526,6 +528,24 @@ impl Central {
             }
         })
     }
+
+    fn complete_job(
+        &self,
+        log: &Logger,
+        job: JobId,
+        failed: bool,
+    ) -> Result<bool> {
+        if let Err(e) = self.files.mark_job_completed(job) {
+            warn!(log, "job {job} cannot be completed yet: {e}");
+            bail!("{}", e);
+        }
+
+        let res = self.db.job_complete(job, failed)?;
+
+        self.files.forget_job(job);
+
+        Ok(res)
+    }
 }
 
 #[allow(dead_code)]
@@ -621,15 +641,19 @@ async fn main() -> Result<()> {
     ad.register(api::user::job_submit).api_check()?;
     ad.register(api::user::job_upload_chunk).api_check()?;
     ad.register(api::user::job_add_input).api_check()?;
+    ad.register(api::user::job_add_input_sync).api_check()?;
     ad.register(api::user::job_cancel).api_check()?;
     ad.register(api::user::jobs_get).api_check()?;
+    ad.register(api::user::quota).api_check()?;
     ad.register(api::user::whoami).api_check()?;
     ad.register(api::worker::worker_bootstrap).api_check()?;
     ad.register(api::worker::worker_ping).api_check()?;
     ad.register(api::worker::worker_job_append).api_check()?;
     ad.register(api::worker::worker_job_complete).api_check()?;
     ad.register(api::worker::worker_job_upload_chunk).api_check()?;
+    ad.register(api::worker::worker_job_quota).api_check()?;
     ad.register(api::worker::worker_job_add_output).api_check()?;
+    ad.register(api::worker::worker_job_add_output_sync).api_check()?;
     ad.register(api::worker::worker_job_input_download).api_check()?;
     ad.register(api::worker::worker_job_store_get).api_check()?;
     ad.register(api::worker::worker_job_store_put).api_check()?;
@@ -685,6 +709,8 @@ async fn main() -> Result<()> {
         .await;
     let s3 = aws_sdk_s3::Client::new(&awscfg);
 
+    let files = files::Files::new(log.new(o!("component" => "files")));
+
     let c = Arc::new(Central {
         inner: Mutex::new(CentralInner {
             hold: config.admin.hold,
@@ -694,7 +720,10 @@ async fn main() -> Result<()> {
         datadir,
         db,
         s3,
+        files,
     });
+
+    c.files.start(&c, 4);
 
     let c0 = Arc::clone(&c);
     let log0 = log.clone();

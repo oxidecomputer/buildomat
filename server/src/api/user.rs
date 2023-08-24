@@ -642,6 +642,30 @@ fn parse_output_rule(input: &str) -> DSResult<db::CreateOutputRule> {
     Ok(db::CreateOutputRule { rule, ignore, require_match, size_change_ok })
 }
 
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct Quota {
+    max_bytes_per_input: u64,
+}
+
+#[endpoint {
+    method = GET,
+    path = "/0/quota",
+}]
+pub(crate) async fn quota(
+    rqctx: RequestContext<Arc<Central>>,
+) -> DSResult<HttpResponseOk<Quota>> {
+    let c = rqctx.context();
+
+    /*
+     * For now, this request just presents statically configured quota
+     * information.  These limits are enforced in requests, but we expose them
+     * here so that client tools can present better diagnostic information.
+     */
+    Ok(HttpResponseOk(Quota {
+        max_bytes_per_input: c.config.job.max_bytes_per_input(),
+    }))
+}
+
 #[endpoint {
     method = POST,
     path = "/0/jobs",
@@ -661,6 +685,14 @@ pub(crate) async fn job_submit(
             None,
             StatusCode::BAD_REQUEST,
             "too many tasks".into(),
+        ));
+    }
+
+    if new_job.inputs.len() > 25 {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::BAD_REQUEST,
+            "too many inputs".into(),
         ));
     }
 
@@ -843,6 +875,142 @@ pub(crate) async fn job_upload_chunk(
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct JobAddInput {
     name: String,
+    size: u64,
+    chunks: Vec<String>,
+    commit_id: String,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct JobAddInputResult {
+    complete: bool,
+    error: Option<String>,
+}
+
+#[endpoint {
+    method = POST,
+    path = "/1/jobs/{job}/input",
+}]
+pub(crate) async fn job_add_input(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<JobsPath>,
+    add: TypedBody<JobAddInput>,
+) -> DSResult<HttpResponseOk<JobAddInputResult>> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let owner = c.require_user(log, &rqctx.request).await?;
+
+    let p = path.into_inner();
+
+    let add = add.into_inner();
+    if add.name.contains('/') {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::BAD_REQUEST,
+            "name must not be a path".into(),
+        ));
+    }
+
+    let max = c.config.job.max_bytes_per_input();
+    if add.size > max {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::BAD_REQUEST,
+            format!(
+                "input file size {} bigger than allowed maximum {max} bytes",
+                add.size,
+            ),
+        ));
+    }
+
+    let chunks = add
+        .chunks
+        .iter()
+        .map(|f| Ok(Ulid::from_str(f.as_str())?))
+        .collect::<Result<Vec<_>>>()
+        .or_500()?;
+    let commit_id = Ulid::from_str(add.commit_id.as_str()).or_500()?;
+
+    let job = c.db.job_by_str(&p.job).or_500()?;
+    if job.owner != owner.id {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::FORBIDDEN,
+            "not your job".into(),
+        ));
+    }
+
+    /*
+     * The transition from waiting to queued occurs as soon as the last input is
+     * committed.  Clients still need to be able to confirm that previously
+     * uploaded inputs have finished committing after this transition occurs.
+     *
+     * Though this may perhaps seem like a race condition waiting to happen, it
+     * is not: a final check is made within a database transaction prior to file
+     * commit; this merely allows for a faster failure and better error message.
+     */
+    if !job.waiting && !c.files.commit_file_exists(job.id, commit_id) {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::CONFLICT,
+            "cannot add inputs to a job that is not waiting".into(),
+        ));
+    }
+
+    let res = c.files.commit_file(
+        job.id,
+        commit_id,
+        crate::files::FileKind::Input { name: add.name.to_string() },
+        add.size,
+        chunks,
+    );
+
+    match res {
+        Ok(Some(Ok(()))) => Ok(HttpResponseOk(JobAddInputResult {
+            complete: true,
+            error: None,
+        })),
+        Ok(Some(Err(msg))) => Ok(HttpResponseOk(JobAddInputResult {
+            complete: true,
+            error: Some(msg.to_string()),
+        })),
+        Ok(None) => {
+            /*
+             * This job is either queued or active, but not yet complete.
+             */
+            Ok(HttpResponseOk(JobAddInputResult {
+                complete: false,
+                error: None,
+            }))
+        }
+        Err(e) => {
+            /*
+             * This is a failure to _submit_ the job; e.g., invalid arguments,
+             * or arguments inconsistent with a prior call using the same commit
+             * ID.
+             */
+            warn!(
+                log,
+                "user {} job {} upload {} commit {} size {}: {:?}",
+                owner.id,
+                job.id,
+                add.name,
+                add.commit_id,
+                add.size,
+                e,
+            );
+            Err(HttpError::for_client_error(
+                Some("invalid".to_string()),
+                StatusCode::BAD_REQUEST,
+                format!("{}", e),
+            ))
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JobAddInputSync {
+    name: String,
     size: i64,
     chunks: Vec<String>,
 }
@@ -850,11 +1018,12 @@ pub(crate) struct JobAddInput {
 #[endpoint {
     method = POST,
     path = "/0/jobs/{job}/input",
+    unpublished = true,
 }]
-pub(crate) async fn job_add_input(
+pub(crate) async fn job_add_input_sync(
     rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobsPath>,
-    add: TypedBody<JobAddInput>,
+    add: TypedBody<JobAddInputSync>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let log = &rqctx.log;
@@ -881,14 +1050,16 @@ pub(crate) async fn job_add_input(
     }
 
     /*
-     * XXX For now, individual upload size is capped at 1GB.
+     * Individual inputs using the old blocking entrypoint are capped at 1GB to
+     * avoid request timeouts.  Larger inputs are possible using the new
+     * asynchronous job mechanism.
      */
     let add = add.into_inner();
     let addsize = if add.size < 0 || add.size > 1024 * 1024 * 1024 {
         return Err(HttpError::for_client_error(
             Some("invalid".to_string()),
             StatusCode::BAD_REQUEST,
-            format!("size {} must be >=0", add.size),
+            format!("size {} must be between 0 and 1073741824", add.size),
         ));
     } else {
         add.size as u64

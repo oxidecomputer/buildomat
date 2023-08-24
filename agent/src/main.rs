@@ -18,6 +18,7 @@ use anyhow::{bail, Result};
 use chrono::prelude::*;
 use futures::StreamExt;
 use hiercmd::prelude::*;
+use rusty_ulid::Ulid;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
@@ -218,12 +219,19 @@ impl ClientWrap {
         }
     }
 
-    async fn output(&self, path: &Path, size: u64, chunks: &[String]) {
+    async fn output(
+        &self,
+        path: &Path,
+        size: u64,
+        chunks: &[String],
+    ) -> Option<String> {
         let job = self.job.as_ref().unwrap();
+        let commit_id = Ulid::generate();
         let wao = WorkerAddOutput {
             chunks: chunks.to_vec(),
             path: path.to_str().unwrap().to_string(),
-            size: size as i64,
+            size,
+            commit_id: commit_id.to_string(),
         };
 
         loop {
@@ -235,7 +243,24 @@ impl ClientWrap {
                 .send()
                 .await
             {
-                Ok(_) => return,
+                Ok(waor) => {
+                    if !waor.complete {
+                        /*
+                         * XXX For now, we poll on completion.  It would
+                         * obviously be better to be notified, e.g., through
+                         * long polling.
+                         */
+                        sleep_ms(1000).await;
+                        continue;
+                    }
+
+                    if let Some(e) = &waor.error {
+                        println!("ERROR: output file error: {:?}", e);
+                        return Some(e.to_string());
+                    } else {
+                        return None;
+                    }
+                }
                 Err(e) => {
                     println!("ERROR: add output: {:?}", e);
                     sleep_ms(1000).await;
@@ -288,6 +313,22 @@ impl ClientWrap {
                 }
                 Err(e) => {
                     println!("ERROR: input: {:?}", e);
+                    sleep_ms(1000).await;
+                }
+            }
+        }
+    }
+
+    async fn quota(&self) -> WorkerJobQuota {
+        let job = self.job.as_ref().unwrap();
+
+        loop {
+            match self.client.worker_job_quota().job(&job.id).send().await {
+                Ok(wq) => {
+                    return wq.into_inner();
+                }
+                Err(e) => {
+                    println!("ERROR: asking for quota: {:?}", e);
                     sleep_ms(1000).await;
                 }
             }

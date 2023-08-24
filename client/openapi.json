@@ -900,42 +900,6 @@
         }
       }
     },
-    "/0/jobs/{job}/input": {
-      "post": {
-        "operationId": "job_add_input",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "job",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/JobAddInput"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/0/jobs/{job}/outputs": {
       "get": {
         "operationId": "job_outputs_get",
@@ -1227,6 +1191,29 @@
                 "schema": {}
               }
             }
+          }
+        }
+      }
+    },
+    "/0/quota": {
+      "get": {
+        "operationId": "quota",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Quota"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1603,9 +1590,9 @@
         }
       }
     },
-    "/0/worker/job/{job}/output": {
-      "post": {
-        "operationId": "worker_job_add_output",
+    "/0/worker/job/{job}/quota": {
+      "get": {
+        "operationId": "worker_job_quota",
         "parameters": [
           {
             "in": "path",
@@ -1616,19 +1603,16 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WorkerAddOutput"
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerJobQuota"
+                }
               }
             }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1875,6 +1859,92 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/1/jobs/{job}/input": {
+      "post": {
+        "operationId": "job_add_input",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobAddInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobAddInputResult"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/1/worker/job/{job}/output": {
+      "post": {
+        "operationId": "worker_job_add_output",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerAddOutput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerAddOutputResult"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -2265,18 +2335,38 @@
               "type": "string"
             }
           },
+          "commit_id": {
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
           "size": {
             "type": "integer",
-            "format": "int64"
+            "format": "uint64",
+            "minimum": 0
           }
         },
         "required": [
           "chunks",
+          "commit_id",
           "name",
           "size"
+        ]
+      },
+      "JobAddInputResult": {
+        "type": "object",
+        "properties": {
+          "complete": {
+            "type": "boolean"
+          },
+          "error": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "complete"
         ]
       },
       "JobEvent": {
@@ -2485,6 +2575,19 @@
         },
         "required": [
           "id"
+        ]
+      },
+      "Quota": {
+        "type": "object",
+        "properties": {
+          "max_bytes_per_input": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "max_bytes_per_input"
         ]
       },
       "Target": {
@@ -2791,18 +2894,38 @@
               "type": "string"
             }
           },
+          "commit_id": {
+            "type": "string"
+          },
           "path": {
             "type": "string"
           },
           "size": {
             "type": "integer",
-            "format": "int64"
+            "format": "uint64",
+            "minimum": 0
           }
         },
         "required": [
           "chunks",
+          "commit_id",
           "path",
           "size"
+        ]
+      },
+      "WorkerAddOutputResult": {
+        "type": "object",
+        "properties": {
+          "complete": {
+            "type": "boolean"
+          },
+          "error": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "complete"
         ]
       },
       "WorkerAppendJob": {
@@ -2901,6 +3024,19 @@
           "owner",
           "state",
           "tags"
+        ]
+      },
+      "WorkerJobQuota": {
+        "type": "object",
+        "properties": {
+          "max_bytes_per_output": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "max_bytes_per_output"
         ]
       },
       "WorkerJobStoreGet": {

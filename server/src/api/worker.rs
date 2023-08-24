@@ -422,8 +422,16 @@ pub(crate) async fn worker_job_complete(
     let j = c.db.job_by_str(&p.job).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
+    if let Err(e) = c.complete_job(log, j.id, b.failed) {
+        error!(log, "worker {} cannot complete job {}: {e}", w.id, j.id);
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::CONFLICT,
+            format!("cannot complete job: {e}"),
+        ));
+    }
+
     info!(log, "worker {} complete job {}", w.id, j.id);
-    c.db.job_complete(j.id, b.failed).or_500()?;
 
     Ok(HttpResponseUpdatedNoContent())
 }
@@ -462,8 +470,136 @@ pub(crate) async fn worker_job_upload_chunk(
     Ok(HttpResponseCreated(UploadedChunk { id: cid.to_string() }))
 }
 
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct WorkerJobQuota {
+    max_bytes_per_output: u64,
+}
+
+#[endpoint {
+    method = GET,
+    path = "/0/worker/job/{job}/quota",
+}]
+pub(crate) async fn worker_job_quota(
+    rqctx: RequestContext<Arc<Central>>,
+    _path: TypedPath<JobPath>,
+) -> DSResult<HttpResponseOk<WorkerJobQuota>> {
+    let c = rqctx.context();
+
+    /*
+     * For now, this request just presents statically configured quota
+     * information.  In the future, we should have the server examine the set of
+     * outputs the job has presently produced and furnish the agent with the
+     * number of bytes that remain in the per-job output quota.
+     */
+    Ok(HttpResponseOk(WorkerJobQuota {
+        max_bytes_per_output: c.config.job.max_bytes_per_output(),
+    }))
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct WorkerAddOutput {
+    path: String,
+    size: u64,
+    chunks: Vec<String>,
+    commit_id: String,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct WorkerAddOutputResult {
+    complete: bool,
+    error: Option<String>,
+}
+
+#[endpoint {
+    method = POST,
+    path = "/1/worker/job/{job}/output",
+}]
+pub(crate) async fn worker_job_add_output(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<JobPath>,
+    add: TypedBody<WorkerAddOutput>,
+) -> DSResult<HttpResponseOk<WorkerAddOutputResult>> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let w = c.require_worker(log, &rqctx.request).await?;
+    let j = c.db.job_by_str(&path.into_inner().job).or_500()?; /* XXX */
+    w.owns(log, &j)?;
+
+    let add = add.into_inner();
+    let chunks = add
+        .chunks
+        .iter()
+        .map(|f| Ok(Ulid::from_str(f.as_str())?))
+        .collect::<Result<Vec<_>>>()
+        .or_500()?;
+    let commit_id = Ulid::from_str(add.commit_id.as_str()).or_500()?;
+
+    let max = c.config.job.max_bytes_per_output();
+    if add.size > max {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::BAD_REQUEST,
+            format!(
+                "output file size {} bigger than allowed maximum {max} bytes",
+                add.size,
+            ),
+        ));
+    }
+
+    let res = c.files.commit_file(
+        j.id,
+        commit_id,
+        crate::files::FileKind::Output { path: add.path.to_string() },
+        add.size,
+        chunks,
+    );
+
+    match res {
+        Ok(Some(Ok(()))) => Ok(HttpResponseOk(WorkerAddOutputResult {
+            complete: true,
+            error: None,
+        })),
+        Ok(Some(Err(msg))) => Ok(HttpResponseOk(WorkerAddOutputResult {
+            complete: true,
+            error: Some(msg.to_string()),
+        })),
+        Ok(None) => {
+            /*
+             * This job is either queued or active, but not yet complete.
+             */
+            Ok(HttpResponseOk(WorkerAddOutputResult {
+                complete: false,
+                error: None,
+            }))
+        }
+        Err(e) => {
+            /*
+             * This is a failure to _submit_ the job; e.g., invalid arguments,
+             * or arguments inconsistent with a prior call using the same commit
+             * ID.
+             */
+            warn!(
+                log,
+                "worker {} job {} upload {} commit {} size {}: {:?}",
+                w.id,
+                j.id,
+                add.path,
+                add.commit_id,
+                add.size,
+                e,
+            );
+            Err(HttpError::for_client_error(
+                Some("invalid".to_string()),
+                StatusCode::BAD_REQUEST,
+                format!("{}", e),
+            ))
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct WorkerAddOutputSync {
     path: String,
     size: i64,
     chunks: Vec<String>,
@@ -472,24 +608,27 @@ pub(crate) struct WorkerAddOutput {
 #[endpoint {
     method = POST,
     path = "/0/worker/job/{job}/output",
+    unpublished = true,
 }]
-pub(crate) async fn worker_job_add_output(
+pub(crate) async fn worker_job_add_output_sync(
     rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobPath>,
-    add: TypedBody<WorkerAddOutput>,
+    add: TypedBody<WorkerAddOutputSync>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let log = &rqctx.log;
 
     /*
-     * XXX For now, individual upload size is capped at 1GB.
+     * Individual outputs using the old blocking entrypoint are capped at 1GB to
+     * avoid request timeouts.  Larger outputs are possible using the new
+     * asynchronous job mechanism.
      */
     let add = add.into_inner();
     let addsize = if add.size < 0 || add.size > 1024 * 1024 * 1024 {
         return Err(HttpError::for_client_error(
             Some("invalid".to_string()),
             StatusCode::BAD_REQUEST,
-            format!("size {} must be >=0", add.size),
+            format!("size {} must be between 0 and 1073741824", add.size),
         ));
     } else {
         add.size as u64
