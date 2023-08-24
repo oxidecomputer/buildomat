@@ -259,28 +259,6 @@ impl Files {
     }
 
     /**
-     * This is a cheaper version of commit_file() that does not require passing
-     * in all of the arguments again.  Callers can use this instead once they
-     * have had at least one confirmed return from commit_file() for their
-     * commit ID.
-     */
-    pub fn commit_file_result(
-        &self,
-        job: JobId,
-        commit_id: Ulid,
-    ) -> Result<Option<std::result::Result<(), String>>> {
-        let fi = self.inner.lock().unwrap();
-
-        let id = BackgroundId(job, commit_id);
-
-        if let Some(fc) = fi.commits.get(&id) {
-            Ok(fc.observe())
-        } else {
-            bail!("job {job} commit {commit_id} not previously enqueued");
-        }
-    }
-
-    /**
      * Check to see if a job has been submitted with this commit ID for this job
      * already.
      */

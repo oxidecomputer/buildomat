@@ -664,6 +664,14 @@ pub(crate) async fn job_submit(
         ));
     }
 
+    if new_job.inputs.len() > 25 {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::BAD_REQUEST,
+            "too many inputs".into(),
+        ));
+    }
+
     if new_job.tags.len() > 100 {
         return Err(HttpError::for_client_error(
             None,
@@ -879,6 +887,18 @@ pub(crate) async fn job_add_input(
         ));
     }
 
+    let max = c.config.job.max_bytes_per_input();
+    if add.size > max {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::BAD_REQUEST,
+            format!(
+                "input file size {} bigger than allowed maximum {max} bytes",
+                add.size,
+            ),
+        ));
+    }
+
     let chunks = add
         .chunks
         .iter()
@@ -1006,14 +1026,16 @@ pub(crate) async fn job_add_input_sync(
     }
 
     /*
-     * XXX For now, individual upload size is capped at 1GB.
+     * Individual inputs using the old blocking entrypoint are capped at 1GB to
+     * avoid request timeouts.  Larger inputs are possible using the new
+     * asynchronous job mechanism.
      */
     let add = add.into_inner();
     let addsize = if add.size < 0 || add.size > 1024 * 1024 * 1024 {
         return Err(HttpError::for_client_error(
             Some("invalid".to_string()),
             StatusCode::BAD_REQUEST,
-            format!("size {} must be >=0", add.size),
+            format!("size {} must be between 0 and 1073741824", add.size),
         ));
     } else {
         add.size as u64

@@ -33,6 +33,16 @@ pub struct ConfigFileJob {
     pub max_size_per_output_mb: u64,
 }
 
+impl ConfigFileJob {
+    pub fn max_bytes_per_output(&self) -> u64 {
+        self.max_size_per_output_mb.saturating_mul(1024 * 1024)
+    }
+
+    pub fn max_bytes_per_input(&self) -> u64 {
+        self.max_size_per_output_mb.saturating_mul(1024 * 1024)
+    }
+}
+
 fn default_max_size_per_output_mb() -> u64 {
     /*
      * By default, allow 1GB files to be uploaded:

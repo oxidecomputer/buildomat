@@ -539,6 +539,18 @@ pub(crate) async fn worker_job_add_output(
         .or_500()?;
     let commit_id = Ulid::from_str(add.commit_id.as_str()).or_500()?;
 
+    let max = c.config.job.max_bytes_per_output();
+    if add.size > max {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::BAD_REQUEST,
+            format!(
+                "output file size {} bigger than allowed maximum {max} bytes",
+                add.size,
+            ),
+        ));
+    }
+
     let res = c.files.commit_file(
         j.id,
         commit_id,
@@ -611,14 +623,16 @@ pub(crate) async fn worker_job_add_output_sync(
     let log = &rqctx.log;
 
     /*
-     * XXX For now, individual upload size is capped at 1GB.
+     * Individual outputs using the old blocking entrypoint are capped at 1GB to
+     * avoid request timeouts.  Larger outputs are possible using the new
+     * asynchronous job mechanism.
      */
     let add = add.into_inner();
     let addsize = if add.size < 0 || add.size > 1024 * 1024 * 1024 {
         return Err(HttpError::for_client_error(
             Some("invalid".to_string()),
             StatusCode::BAD_REQUEST,
-            format!("size {} must be >=0", add.size),
+            format!("size {} must be between 0 and 1073741824", add.size),
         ));
     } else {
         add.size as u64
