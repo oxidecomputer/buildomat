@@ -1567,6 +1567,39 @@
         }
       }
     },
+    "/0/worker/job/{job}/quota": {
+      "get": {
+        "operationId": "worker_job_quota",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerJobQuota"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/0/worker/job/{job}/store/{name}": {
       "get": {
         "operationId": "worker_job_store_get",
@@ -2955,6 +2988,19 @@
           "owner",
           "state",
           "tags"
+        ]
+      },
+      "WorkerJobQuota": {
+        "type": "object",
+        "properties": {
+          "max_bytes_per_output": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "max_bytes_per_output"
         ]
       },
       "WorkerJobStoreGet": {

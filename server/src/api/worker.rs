@@ -470,6 +470,36 @@ pub(crate) async fn worker_job_upload_chunk(
     Ok(HttpResponseCreated(UploadedChunk { id: cid.to_string() }))
 }
 
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct WorkerJobQuota {
+    max_bytes_per_output: u64,
+}
+
+#[endpoint {
+    method = GET,
+    path = "/0/worker/job/{job}/quota",
+}]
+pub(crate) async fn worker_job_quota(
+    rqctx: RequestContext<Arc<Central>>,
+    _path: TypedPath<JobPath>,
+) -> DSResult<HttpResponseOk<WorkerJobQuota>> {
+    let c = rqctx.context();
+
+    /*
+     * For now, this request just presents statically configured quota
+     * information.  In the future, we should have the server examine the set of
+     * outputs the job has presently produced and furnish the agent with the
+     * number of bytes that remain in the per-job output quota.
+     */
+    Ok(HttpResponseOk(WorkerJobQuota {
+        max_bytes_per_output: c
+            .config
+            .job
+            .max_size_per_output_mb
+            .saturating_mul(1024 * 1024),
+    }))
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct WorkerAddOutput {
     path: String,

@@ -18,11 +18,11 @@ use anyhow::{bail, Result};
 use chrono::prelude::*;
 use futures::StreamExt;
 use hiercmd::prelude::*;
+use rusty_ulid::Ulid;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use tokio::time::MissedTickBehavior;
-use rusty_ulid::Ulid;
 
 use buildomat_client::types::*;
 use buildomat_common::*;
@@ -313,6 +313,22 @@ impl ClientWrap {
                 }
                 Err(e) => {
                     println!("ERROR: input: {:?}", e);
+                    sleep_ms(1000).await;
+                }
+            }
+        }
+    }
+
+    async fn quota(&self) -> WorkerJobQuota {
+        let job = self.job.as_ref().unwrap();
+
+        loop {
+            match self.client.worker_job_quota().job(&job.id).send().await {
+                Ok(wq) => {
+                    return wq.into_inner();
+                }
+                Err(e) => {
+                    println!("ERROR: asking for quota: {:?}", e);
                     sleep_ms(1000).await;
                 }
             }

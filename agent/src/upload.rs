@@ -1,11 +1,11 @@
 /*
- * Copyright 2022 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 use std::collections::HashSet;
 use std::fs;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tokio::sync::mpsc;
 
@@ -19,6 +19,32 @@ pub enum Activity {
     Complete,
 }
 
+struct Uploader {
+    cw: super::ClientWrap,
+    tx: mpsc::Sender<Activity>,
+    rules: Vec<super::WorkerPingOutputRule>,
+}
+
+impl Uploader {
+    async fn quota_check(&self, path: &Path, size: u64) -> bool {
+        let max_bytes_per_output = self.cw.quota().await.max_bytes_per_output;
+
+        if size <= max_bytes_per_output {
+            true
+        } else {
+            self.tx
+                .send(Activity::Error(format!(
+                    "file {path:?} is {size} bytes in size, which is larger \
+                than the maximum output size of {max_bytes_per_output} \
+                bytes and cannot be uploaded at this time."
+                )))
+                .await
+                .unwrap();
+            false
+        }
+    }
+}
+
 struct Upload {
     path: PathBuf,
     size: u64,
@@ -29,6 +55,8 @@ pub(crate) fn upload(
     rules: Vec<super::WorkerPingOutputRule>,
 ) -> mpsc::Receiver<Activity> {
     let (tx, rx) = mpsc::channel::<Activity>(64);
+
+    let upl = Uploader { cw, tx, rules };
 
     tokio::spawn(async move {
         let mut seen = HashSet::new();
@@ -42,16 +70,17 @@ pub(crate) fn upload(
         let mut ignore = Vec::new();
         let mut required = Vec::new();
         let mut relaxed = Vec::new();
-        for r in rules.iter() {
+        for r in upl.rules.iter() {
             let pat = match glob::Pattern::new(&r.rule) {
                 Ok(pat) => pat,
                 Err(e) => {
-                    tx.send(Activity::Error(format!(
-                        "glob {:?} error: {:?}",
-                        r.rule, e,
-                    )))
-                    .await
-                    .unwrap();
+                    upl.tx
+                        .send(Activity::Error(format!(
+                            "glob {:?} error: {:?}",
+                            r.rule, e,
+                        )))
+                        .await
+                        .unwrap();
                     continue;
                 }
             };
@@ -102,7 +131,7 @@ pub(crate) fn upload(
         /*
          * Enumerate all of the files we expect to upload.
          */
-        for r in rules.iter().filter(|r| !r.ignore) {
+        for r in upl.rules.iter().filter(|r| !r.ignore) {
             /*
              * Walk the file system and locate output files to
              * upload.
@@ -138,46 +167,56 @@ pub(crate) fn upload(
                                         });
                                     }
                                     Err(e) => {
-                                        tx.send(Activity::Error(format!(
-                                            "glob {:?} stat error: {:?}",
-                                            r, e
-                                        )))
-                                        .await
-                                        .unwrap();
+                                        upl.tx
+                                            .send(Activity::Error(format!(
+                                                "glob {:?} stat error: {:?}",
+                                                r, e
+                                            )))
+                                            .await
+                                            .unwrap();
                                         continue;
                                     }
                                 }
                             }
                             Err(e) => {
-                                tx.send(Activity::Error(format!(
-                                    "glob {:?} path error: {:?}",
-                                    r, e
-                                )))
-                                .await
-                                .unwrap();
+                                upl.tx
+                                    .send(Activity::Error(format!(
+                                        "glob {:?} path error: {:?}",
+                                        r, e
+                                    )))
+                                    .await
+                                    .unwrap();
                                 break;
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    tx.send(Activity::Error(format!(
-                        "glob {:?} error: {:?}",
-                        r, e
-                    )))
-                    .await
-                    .unwrap();
+                    upl.tx
+                        .send(Activity::Error(format!(
+                            "glob {:?} error: {:?}",
+                            r, e
+                        )))
+                        .await
+                        .unwrap();
                 }
             }
         }
 
-        tx.send(Activity::Scanned(uploads.len())).await.unwrap();
+        upl.tx.send(Activity::Scanned(uploads.len())).await.unwrap();
 
         /*
          * Upload each scanned file.
          */
         'outer: for u in uploads.iter() {
-            tx.send(Activity::Uploading(u.path.clone(), u.size)).await.unwrap();
+            upl.tx
+                .send(Activity::Uploading(u.path.clone(), u.size))
+                .await
+                .unwrap();
+
+            if !upl.quota_check(&u.path, u.size).await {
+                continue;
+            }
 
             /*
              * Determine whether we care about the file changing size during
@@ -188,12 +227,13 @@ pub(crate) fn upload(
             let mut f = match fs::File::open(&u.path) {
                 Ok(f) => f,
                 Err(e) => {
-                    tx.send(Activity::Error(format!(
-                        "open {:?} failed: {:?}",
-                        u.path, e
-                    )))
-                    .await
-                    .unwrap();
+                    upl.tx
+                        .send(Activity::Error(format!(
+                            "open {:?} failed: {:?}",
+                            u.path, e
+                        )))
+                        .await
+                        .unwrap();
                     continue;
                 }
             };
@@ -215,17 +255,18 @@ pub(crate) fn upload(
                         buf.freeze()
                     }
                     Err(e) => {
-                        tx.send(Activity::Error(format!(
-                            "read {:?} failed: {:?}",
-                            u.path, e
-                        )))
-                        .await
-                        .unwrap();
+                        upl.tx
+                            .send(Activity::Error(format!(
+                                "read {:?} failed: {:?}",
+                                u.path, e
+                            )))
+                            .await
+                            .unwrap();
                         continue 'outer;
                     }
                 };
 
-                chunks.push(cw.chunk(buf).await);
+                chunks.push(upl.cw.chunk(buf).await);
             }
 
             if total != u.size {
@@ -235,20 +276,29 @@ pub(crate) fn upload(
                 );
 
                 if change_ok {
-                    tx.send(Activity::Warning(msg)).await.unwrap();
+                    upl.tx.send(Activity::Warning(msg)).await.unwrap();
                 } else {
-                    tx.send(Activity::Error(msg)).await.unwrap();
+                    upl.tx.send(Activity::Error(msg)).await.unwrap();
+                    continue;
+                }
+
+                /*
+                 * If the sized has changed, we need to do another quota check
+                 * here so that we can report a useful error.
+                 */
+                if !upl.quota_check(&u.path, total).await {
                     continue;
                 }
             }
 
-            if let Some(e) = cw.output(&u.path, total, chunks.as_slice()).await
+            if let Some(e) =
+                upl.cw.output(&u.path, total, chunks.as_slice()).await
             {
-                tx.send(Activity::Error(e)).await.unwrap();
+                upl.tx.send(Activity::Error(e)).await.unwrap();
                 continue;
             }
 
-            tx.send(Activity::Uploaded(u.path.clone())).await.unwrap();
+            upl.tx.send(Activity::Uploaded(u.path.clone())).await.unwrap();
 
             /*
              * Mark as used any rule that requires a match and which matches
@@ -266,16 +316,17 @@ pub(crate) fn upload(
          */
         for (g, used) in required.iter() {
             if !used {
-                tx.send(Activity::Error(format!(
-                    "rule \"{}\" required a match, but was not used",
-                    g,
-                )))
-                .await
-                .unwrap();
+                upl.tx
+                    .send(Activity::Error(format!(
+                        "rule \"{}\" required a match, but was not used",
+                        g,
+                    )))
+                    .await
+                    .unwrap();
             }
         }
 
-        tx.send(Activity::Complete).await.unwrap();
+        upl.tx.send(Activity::Complete).await.unwrap();
     });
 
     rx

@@ -650,6 +650,7 @@ async fn main() -> Result<()> {
     ad.register(api::worker::worker_job_append).api_check()?;
     ad.register(api::worker::worker_job_complete).api_check()?;
     ad.register(api::worker::worker_job_upload_chunk).api_check()?;
+    ad.register(api::worker::worker_job_quota).api_check()?;
     ad.register(api::worker::worker_job_add_output).api_check()?;
     ad.register(api::worker::worker_job_add_output_sync).api_check()?;
     ad.register(api::worker::worker_job_input_download).api_check()?;
