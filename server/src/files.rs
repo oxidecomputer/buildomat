@@ -101,6 +101,12 @@ impl FileCommit {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct BackgroundId(JobId, Ulid);
 
+impl std::fmt::Display for BackgroundId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "job {} commit {}", self.0, self.1)
+    }
+}
+
 fn thread_file_commit(
     c: Arc<Central>,
     log: Logger,
@@ -131,12 +137,12 @@ fn thread_file_commit(
         };
 
         let start = Instant::now();
-        info!(log, "starting work on job {} commit {}", bgid.0, bgid.1);
+        info!(log, "starting work on {bgid}");
 
         let fid = match c.commit_file(bgid.0, &fc.chunks, fc.expected_size) {
             Ok(fid) => fid,
             Err(e) => {
-                error!(log, "job {} commit {} failed: {e}", bgid.0, bgid.1);
+                error!(log, "{bgid} failed: {e}");
 
                 fc.mark_failed(e.to_string());
                 continue;
@@ -158,19 +164,12 @@ fn thread_file_commit(
 
         let dur = Instant::now().saturating_duration_since(start).as_millis();
         if let Err(e) = res {
-            error!(
-                log,
-                "job {} commit {} failed: database: {e}", bgid.0, bgid.1;
-                "duration_msec" => dur,
-            );
+            error!(log, "{bgid} failed: database: {e}";
+                "duration_msec" => dur);
 
             fc.mark_failed(e.to_string());
         } else {
-            info!(
-                log,
-                "finished work on job {} commit {}", bgid.0, bgid.1;
-                "duration_msec" => dur
-            );
+            info!(log, "finished work on {bgid}"; "duration_msec" => dur);
 
             fc.mark_ok();
         }

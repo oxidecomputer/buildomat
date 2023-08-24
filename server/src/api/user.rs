@@ -642,6 +642,30 @@ fn parse_output_rule(input: &str) -> DSResult<db::CreateOutputRule> {
     Ok(db::CreateOutputRule { rule, ignore, require_match, size_change_ok })
 }
 
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct Quota {
+    max_bytes_per_input: u64,
+}
+
+#[endpoint {
+    method = GET,
+    path = "/0/quota",
+}]
+pub(crate) async fn quota(
+    rqctx: RequestContext<Arc<Central>>,
+) -> DSResult<HttpResponseOk<Quota>> {
+    let c = rqctx.context();
+
+    /*
+     * For now, this request just presents statically configured quota
+     * information.  These limits are enforced in requests, but we expose them
+     * here so that client tools can present better diagnostic information.
+     */
+    Ok(HttpResponseOk(Quota {
+        max_bytes_per_input: c.config.job.max_bytes_per_input(),
+    }))
+}
+
 #[endpoint {
     method = POST,
     path = "/0/jobs",

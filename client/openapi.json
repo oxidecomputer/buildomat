@@ -1195,6 +1195,29 @@
         }
       }
     },
+    "/0/quota": {
+      "get": {
+        "operationId": "quota",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Quota"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/0/users": {
       "get": {
         "operationId": "users_list",
@@ -2552,6 +2575,19 @@
         },
         "required": [
           "id"
+        ]
+      },
+      "Quota": {
+        "type": "object",
+        "properties": {
+          "max_bytes_per_input": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "max_bytes_per_input"
         ]
       },
       "Target": {

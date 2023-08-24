@@ -492,11 +492,7 @@ pub(crate) async fn worker_job_quota(
      * number of bytes that remain in the per-job output quota.
      */
     Ok(HttpResponseOk(WorkerJobQuota {
-        max_bytes_per_output: c
-            .config
-            .job
-            .max_size_per_output_mb
-            .saturating_mul(1024 * 1024),
+        max_bytes_per_output: c.config.job.max_bytes_per_output(),
     }))
 }
 

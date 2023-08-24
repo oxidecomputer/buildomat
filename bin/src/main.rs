@@ -227,6 +227,34 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
         })
         .collect::<Result<HashMap<String, DependSubmit>>>()?;
 
+    /*
+     * Check that the set of input files will fit within any quota requirements
+     * in place on the server.  The server will eventually reject our request if
+     * it exceeds the quota anyway, but we can fail quickly and with a helpful
+     * error message here.
+     */
+    if !inputs.is_empty() {
+        let q = l.context().user().quota().send().await?.into_inner();
+
+        for (_, p) in inputs.iter() {
+            let md =
+                p.metadata().map_err(|e| anyhow!("input file {p:?}: {e}"))?;
+
+            if !md.is_file() {
+                bail!("input file {p:?} is not a regular file");
+            }
+
+            if md.len() > q.max_bytes_per_input {
+                bail!(
+                    "input file {p:?} is {} bytes long, \
+                    but the maximum input file size is {} bytes",
+                    md.len(),
+                    q.max_bytes_per_input,
+                );
+            }
+        }
+    }
+
     let mut w = Stopwatch::start(a.opts().opt_present("v"));
 
     /*
