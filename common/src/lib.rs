@@ -1,8 +1,9 @@
 /*
- * Copyright 2022 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 use std::io::{IsTerminal, Read};
+use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -14,11 +15,11 @@ use rusty_ulid::Ulid;
 use serde::Deserialize;
 use slog::{o, Drain, Logger};
 
-pub fn read_toml<T>(n: &str) -> Result<T>
+pub fn read_toml<P: AsRef<Path>, T>(n: P) -> Result<T>
 where
     for<'de> T: Deserialize<'de>,
 {
-    let mut f = std::fs::File::open(n)?;
+    let mut f = std::fs::File::open(n.as_ref())?;
     let mut buf: Vec<u8> = Vec::new();
     f.read_to_end(&mut buf)?;
     Ok(toml::from_slice(buf.as_slice())?)

@@ -35,6 +35,7 @@ use buildomat_common::*;
 mod api;
 mod archive;
 mod chunks;
+mod config;
 mod db;
 mod jobs;
 mod workers;
@@ -123,74 +124,13 @@ struct FilePresignedUrl {
     pub url: String,
 }
 
-#[derive(Deserialize, Debug)]
-struct ConfigFile {
-    pub admin: ConfigFileAdmin,
-    #[allow(dead_code)]
-    pub general: ConfigFileGeneral,
-    pub storage: ConfigFileStorage,
-    pub sqlite: ConfigFileSqlite,
-    pub job: ConfigFileJob,
-}
-
-#[derive(Deserialize, Debug)]
-struct ConfigFileGeneral {
-    #[allow(dead_code)]
-    pub baseurl: String,
-}
-
-#[derive(Deserialize, Debug)]
-struct ConfigFileJob {
-    pub max_runtime: u64,
-}
-
-#[derive(Deserialize, Debug)]
-struct ConfigFileSqlite {
-    #[serde(default)]
-    pub cache_kb: Option<u32>,
-}
-
-#[derive(Deserialize, Debug)]
-struct ConfigFileAdmin {
-    pub token: String,
-    /**
-     * Should we hold off on new VM creation by default at startup?
-     */
-    pub hold: bool,
-}
-
-#[derive(Deserialize, Debug)]
-struct ConfigFileStorage {
-    access_key_id: String,
-    secret_access_key: String,
-    bucket: String,
-    prefix: String,
-    region: String,
-}
-
-impl ConfigFileStorage {
-    fn creds(&self) -> aws_credential_types::Credentials {
-        aws_credential_types::Credentials::new(
-            &self.access_key_id,
-            &self.secret_access_key,
-            None,
-            None,
-            "buildomat",
-        )
-    }
-
-    fn region(&self) -> aws_types::region::Region {
-        aws_types::region::Region::new(self.region.to_string())
-    }
-}
-
 struct CentralInner {
     hold: bool,
     leases: jobs::Leases,
 }
 
 struct Central {
-    config: ConfigFile,
+    config: config::ConfigFile,
     db: db::Database,
     datadir: PathBuf,
     inner: Mutex<CentralInner>,
@@ -720,8 +660,8 @@ async fn main() -> Result<()> {
     let bind_address =
         p.opt_str("b").as_deref().unwrap_or("127.0.0.1:9979").parse()?;
 
-    let config: ConfigFile = if let Some(f) = p.opt_str("f").as_deref() {
-        read_toml(f)?
+    let config = if let Some(f) = p.opt_str("f").as_deref() {
+        config::load(f)?
     } else {
         bail!("must specify configuration file (-f)");
     };
