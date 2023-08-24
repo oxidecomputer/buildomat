@@ -296,13 +296,43 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
             w.lap(&format!("upload {} chunk {}", name, chunks.len()));
         }
 
-        l.context()
-            .user()
-            .job_add_input()
-            .job(&x.id)
-            .body_map(|body| body.chunks(chunks).name(name).size(total as i64))
-            .send()
-            .await?;
+        let commit_id = Ulid::generate();
+
+        loop {
+            match l
+                .context()
+                .user()
+                .job_add_input()
+                .job(&x.id)
+                .body_map(|body| {
+                    body.chunks(chunks.clone())
+                        .name(name)
+                        .size(total as i64)
+                        .commit_id(commit_id.to_string())
+                })
+                .send()
+                .await
+            {
+                Ok(jair) => {
+                    if !jair.complete {
+                        /*
+                         * XXX For now, we poll on completion.  It would
+                         * obviously better to be notified, e.g., through long
+                         * polling.
+                         */
+                        sleep_ms(1000).await;
+                        continue;
+                    }
+
+                    if let Some(e) = &jair.error {
+                        bail!("input file error: {e}");
+                    }
+
+                    break;
+                }
+                Err(e) => bail!("input file error: {e}"),
+            }
+        }
         w.lap(&format!("add input {}", name));
     }
 

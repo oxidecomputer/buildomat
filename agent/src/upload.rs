@@ -180,20 +180,6 @@ pub(crate) fn upload(
             tx.send(Activity::Uploading(u.path.clone(), u.size)).await.unwrap();
 
             /*
-             * XXX For now, individual upload size is capped at 1GB.
-             */
-            if u.size > 1024 * 1024 * 1024 {
-                tx.send(Activity::Error(format!(
-                    "file {:?} is {} bytes in size, which is larger than 1GiB \
-                    and cannot be uploaded at this time.",
-                    u.path, u.size,
-                )))
-                .await
-                .unwrap();
-                continue;
-            }
-
-            /*
              * Determine whether we care about the file changing size during
              * upload.
              */
@@ -254,23 +240,13 @@ pub(crate) fn upload(
                     tx.send(Activity::Error(msg)).await.unwrap();
                     continue;
                 }
-
-                /*
-                 * XXX For now, individual upload size is capped at 1GB.
-                 */
-                if total > 1024 * 1024 * 1024 {
-                    tx.send(Activity::Error(format!(
-                        "file {:?} is {} bytes in size, which is larger \
-                        than 1GiB and cannot be uploaded at this time.",
-                        u.path, total,
-                    )))
-                    .await
-                    .unwrap();
-                    continue;
-                }
             }
 
-            cw.output(&u.path, total, chunks.as_slice()).await;
+            if let Some(e) = cw.output(&u.path, total, chunks.as_slice()).await
+            {
+                tx.send(Activity::Error(e)).await.unwrap();
+                continue;
+            }
 
             tx.send(Activity::Uploaded(u.path.clone())).await.unwrap();
 

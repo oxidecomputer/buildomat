@@ -99,7 +99,7 @@ async fn job_assignment_one(log: &Logger, c: &Central) -> Result<()> {
                  */
                 info!(log, "failing job {}, cancelled before assignment", j.id);
             }
-            c.db.job_complete(j.id, true)?;
+            c.complete_job(log, j.id, true)?;
             continue;
         }
 
@@ -123,7 +123,7 @@ async fn job_assignment_one(log: &Logger, c: &Central) -> Result<()> {
                     None,
                     "worker failed without completing job",
                 )?;
-                c.db.job_complete(j.id, true)?;
+                c.complete_job(log, j.id, true)?;
             }
             continue;
         }
@@ -158,7 +158,7 @@ async fn job_waiters_one(log: &Logger, c: &Central) -> Result<()> {
              * This job was cancelled before it was ready to run.
              */
             info!(log, "failing job {}, cancelled while waiting", j.id);
-            c.db.job_complete(j.id, true)?;
+            c.complete_job(log, j.id, true)?;
             continue 'job;
         }
 
@@ -229,7 +229,7 @@ async fn job_waiters_one(log: &Logger, c: &Central) -> Result<()> {
                 None,
                 &failmsg,
             )?;
-            c.db.job_complete(j.id, true)?;
+            c.complete_job(log, j.id, true)?;
             continue 'job;
         }
 

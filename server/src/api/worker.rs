@@ -422,8 +422,16 @@ pub(crate) async fn worker_job_complete(
     let j = c.db.job_by_str(&p.job).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
+    if let Err(e) = c.complete_job(log, j.id, b.failed) {
+        error!(log, "worker {} cannot complete job {}: {e}", w.id, j.id);
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::CONFLICT,
+            format!("cannot complete job: {e}"),
+        ));
+    }
+
     info!(log, "worker {} complete job {}", w.id, j.id);
-    c.db.job_complete(j.id, b.failed).or_500()?;
 
     Ok(HttpResponseUpdatedNoContent())
 }
@@ -465,6 +473,96 @@ pub(crate) async fn worker_job_upload_chunk(
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct WorkerAddOutput {
     path: String,
+    size: u64,
+    chunks: Vec<String>,
+    commit_id: String,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct WorkerAddOutputResult {
+    complete: bool,
+    error: Option<String>,
+}
+
+#[endpoint {
+    method = POST,
+    path = "/1/worker/job/{job}/output",
+}]
+pub(crate) async fn worker_job_add_output(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<JobPath>,
+    add: TypedBody<WorkerAddOutput>,
+) -> DSResult<HttpResponseOk<WorkerAddOutputResult>> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let w = c.require_worker(log, &rqctx.request).await?;
+    let j = c.db.job_by_str(&path.into_inner().job).or_500()?; /* XXX */
+    w.owns(log, &j)?;
+
+    let add = add.into_inner();
+    let chunks = add
+        .chunks
+        .iter()
+        .map(|f| Ok(Ulid::from_str(f.as_str())?))
+        .collect::<Result<Vec<_>>>()
+        .or_500()?;
+    let commit_id = Ulid::from_str(add.commit_id.as_str()).or_500()?;
+
+    let res = c.files.commit_file(
+        j.id,
+        commit_id,
+        crate::files::FileKind::Output { path: add.path.to_string() },
+        add.size,
+        chunks,
+    );
+
+    match res {
+        Ok(Some(Ok(()))) => Ok(HttpResponseOk(WorkerAddOutputResult {
+            complete: true,
+            error: None,
+        })),
+        Ok(Some(Err(msg))) => Ok(HttpResponseOk(WorkerAddOutputResult {
+            complete: true,
+            error: Some(msg.to_string()),
+        })),
+        Ok(None) => {
+            /*
+             * This job is either queued or active, but not yet complete.
+             */
+            Ok(HttpResponseOk(WorkerAddOutputResult {
+                complete: false,
+                error: None,
+            }))
+        }
+        Err(e) => {
+            /*
+             * This is a failure to _submit_ the job; e.g., invalid arguments,
+             * or arguments inconsistent with a prior call using the same commit
+             * ID.
+             */
+            warn!(
+                log,
+                "worker {} job {} upload {} commit {} size {}: {:?}",
+                w.id,
+                j.id,
+                add.path,
+                add.commit_id,
+                add.size,
+                e,
+            );
+            Err(HttpError::for_client_error(
+                Some("invalid".to_string()),
+                StatusCode::BAD_REQUEST,
+                format!("{}", e),
+            ))
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct WorkerAddOutputSync {
+    path: String,
     size: i64,
     chunks: Vec<String>,
 }
@@ -472,11 +570,12 @@ pub(crate) struct WorkerAddOutput {
 #[endpoint {
     method = POST,
     path = "/0/worker/job/{job}/output",
+    unpublished = true,
 }]
-pub(crate) async fn worker_job_add_output(
+pub(crate) async fn worker_job_add_output_sync(
     rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobPath>,
-    add: TypedBody<WorkerAddOutput>,
+    add: TypedBody<WorkerAddOutputSync>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let log = &rqctx.log;

@@ -843,6 +843,130 @@ pub(crate) async fn job_upload_chunk(
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct JobAddInput {
     name: String,
+    size: u64,
+    chunks: Vec<String>,
+    commit_id: String,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct JobAddInputResult {
+    complete: bool,
+    error: Option<String>,
+}
+
+#[endpoint {
+    method = POST,
+    path = "/1/jobs/{job}/input",
+}]
+pub(crate) async fn job_add_input(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<JobsPath>,
+    add: TypedBody<JobAddInput>,
+) -> DSResult<HttpResponseOk<JobAddInputResult>> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let owner = c.require_user(log, &rqctx.request).await?;
+
+    let p = path.into_inner();
+
+    let add = add.into_inner();
+    if add.name.contains('/') {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::BAD_REQUEST,
+            "name must not be a path".into(),
+        ));
+    }
+
+    let chunks = add
+        .chunks
+        .iter()
+        .map(|f| Ok(Ulid::from_str(f.as_str())?))
+        .collect::<Result<Vec<_>>>()
+        .or_500()?;
+    let commit_id = Ulid::from_str(add.commit_id.as_str()).or_500()?;
+
+    let job = c.db.job_by_str(&p.job).or_500()?;
+    if job.owner != owner.id {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::FORBIDDEN,
+            "not your job".into(),
+        ));
+    }
+
+    /*
+     * The transition from waiting to queued occurs as soon as the last input is
+     * committed.  Clients still need to be able to confirm that previously
+     * uploaded inputs have finished committing after this transition occurs.
+     *
+     * Though this may perhaps seem like a race condition waiting to happen, it
+     * is not: a final check is made within a database transaction prior to file
+     * commit; this merely allows for a faster failure and better error message.
+     */
+    if !job.waiting && !c.files.commit_file_exists(job.id, commit_id) {
+        return Err(HttpError::for_client_error(
+            None,
+            StatusCode::CONFLICT,
+            "cannot add inputs to a job that is not waiting".into(),
+        ));
+    }
+
+    let res = c.files.commit_file(
+        job.id,
+        commit_id,
+        crate::files::FileKind::Input { name: add.name.to_string() },
+        add.size,
+        chunks,
+    );
+
+    match res {
+        Ok(Some(Ok(()))) => Ok(HttpResponseOk(JobAddInputResult {
+            complete: true,
+            error: None,
+        })),
+        Ok(Some(Err(msg))) => Ok(HttpResponseOk(JobAddInputResult {
+            complete: true,
+            error: Some(msg.to_string()),
+        })),
+        Ok(None) => {
+            /*
+             * This job is either queued or active, but not yet complete.
+             */
+            Ok(HttpResponseOk(JobAddInputResult {
+                complete: false,
+                error: None,
+            }))
+        }
+        Err(e) => {
+            /*
+             * This is a failure to _submit_ the job; e.g., invalid arguments,
+             * or arguments inconsistent with a prior call using the same commit
+             * ID.
+             */
+            warn!(
+                log,
+                "user {} job {} upload {} commit {} size {}: {:?}",
+                owner.id,
+                job.id,
+                add.name,
+                add.commit_id,
+                add.size,
+                e,
+            );
+            Err(HttpError::for_client_error(
+                Some("invalid".to_string()),
+                StatusCode::BAD_REQUEST,
+                format!("{}", e),
+            ))
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JobAddInputSync {
+    name: String,
     size: i64,
     chunks: Vec<String>,
 }
@@ -850,11 +974,12 @@ pub(crate) struct JobAddInput {
 #[endpoint {
     method = POST,
     path = "/0/jobs/{job}/input",
+    unpublished = true,
 }]
-pub(crate) async fn job_add_input(
+pub(crate) async fn job_add_input_sync(
     rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobsPath>,
-    add: TypedBody<JobAddInput>,
+    add: TypedBody<JobAddInputSync>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let log = &rqctx.log;

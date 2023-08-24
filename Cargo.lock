@@ -598,6 +598,7 @@ dependencies = [
  "hiercmd",
  "ipnet",
  "openssl",
+ "rusty_ulid",
  "serde",
  "serde_json",
  "tokio",
