@@ -114,7 +114,7 @@ fn thread_file_commit(
     inner: Arc<Mutex<Inner>>,
 ) {
     loop {
-        let (bgid, fc) = {
+        let (bgid, fc, rem) = {
             let mut g = inner.lock().unwrap();
             loop {
                 /*
@@ -126,18 +126,27 @@ fn thread_file_commit(
                 };
 
                 /*
+                 * Note the current queue depth so we can include it in the log
+                 * message.
+                 */
+                let rem = g.queue.len();
+
+                /*
                  * Mark the commit we pulled off the queue as active before we
                  * drop the global lock:
                  */
                 let fc = Arc::clone(&g.commits.get(&bgid).unwrap());
                 fc.mark_active();
 
-                break (bgid, fc);
+                break (bgid, fc, rem);
             }
         };
 
         let start = Instant::now();
-        info!(log, "starting work on {bgid}");
+        info!(log, "starting work on {bgid}";
+            "queue_depth" => rem,
+            "chunks" => fc.chunks.len(),
+            "expected_size" => fc.expected_size);
 
         let fid = match c.commit_file(bgid.0, &fc.chunks, fc.expected_size) {
             Ok(fid) => fid,

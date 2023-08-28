@@ -726,7 +726,7 @@ async fn main() -> Result<()> {
     c.files.start(&c, 4);
 
     let c0 = Arc::clone(&c);
-    let log0 = log.clone();
+    let log0 = log.new(o!("component" => "job_assignment"));
     let t_assign = tokio::task::spawn(async move {
         jobs::job_assignment(log0, c0)
             .await
@@ -734,7 +734,7 @@ async fn main() -> Result<()> {
     });
 
     let c0 = Arc::clone(&c);
-    let log0 = log.clone();
+    let log0 = log.new(o!("component" => "chunk_cleanup"));
     let t_chunks = tokio::task::spawn(async move {
         chunks::chunk_cleanup(log0, c0)
             .await
@@ -742,13 +742,13 @@ async fn main() -> Result<()> {
     });
 
     let c0 = Arc::clone(&c);
-    let log0 = log.clone();
+    let log0 = log.new(o!("component" => "archive_files"));
     let t_archive = tokio::task::spawn(async move {
         archive::archive_files(log0, c0).await.context("archive task failure")
     });
 
     let c0 = Arc::clone(&c);
-    let log0 = log.clone();
+    let log0 = log.new(o!("component" => "worker_cleanup"));
     let t_workers = tokio::task::spawn(async move {
         workers::worker_cleanup(log0, c0)
             .await
