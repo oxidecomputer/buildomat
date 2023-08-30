@@ -5,12 +5,13 @@
 #![allow(clippy::many_single_char_names)]
 #![allow(clippy::too_many_arguments)]
 
+use std::collections::VecDeque;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::exit;
 use std::result::Result as SResult;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use dropshot::{
@@ -41,7 +42,7 @@ mod files;
 mod jobs;
 mod workers;
 
-use db::{JobFileId, JobId};
+use db::{AuthUser, Job, JobEvent, JobFile, JobFileId, JobId, JobOutput};
 
 pub(crate) trait MakeInternalError<T> {
     fn or_500(self) -> SResult<T, HttpError>;
@@ -128,6 +129,7 @@ struct FilePresignedUrl {
 struct CentralInner {
     hold: bool,
     leases: jobs::Leases,
+    archive_queue: VecDeque<JobId>,
 }
 
 struct Central {
@@ -244,7 +246,7 @@ impl Central {
         &self,
         log: &Logger,
         req: &RequestInfo,
-    ) -> SResult<db::AuthUser, HttpError> {
+    ) -> SResult<AuthUser, HttpError> {
         /*
          * First, use the bearer token to authenticate the user making the
          * request:
@@ -320,6 +322,135 @@ impl Central {
         }
     }
 
+    fn archive_dir(&self) -> Result<PathBuf> {
+        let mut p = self.datadir.clone();
+        p.push("archive");
+        std::fs::create_dir_all(&p)?;
+        Ok(p)
+    }
+
+    fn archive_path(&self, job: JobId) -> Result<PathBuf> {
+        let mut p = self.archive_dir()?;
+        p.push(format!("{job}.json"));
+        Ok(p)
+    }
+
+    fn object_key(&self, collection: &str, suffix: &str) -> String {
+        /*
+         * Object keys begin with a prefix string so that we can have more than
+         * one scheme, or more than one buildomat, using the same bucket without
+         * conflicts.
+         */
+        format!("{}/{collection}/{suffix}", self.config.storage.prefix)
+    }
+
+    fn archive_object_key(
+        &self,
+        job: JobId,
+        archive: &archive::jobs::ArchivedJob,
+    ) -> String {
+        self.archive_object_key_with_version(job, archive.version())
+    }
+
+    fn archive_object_key_with_version(
+        &self,
+        job: JobId,
+        version: &str,
+    ) -> String {
+        self.object_key("job", &format!("{version}/{job}.json"))
+    }
+
+    async fn archive_store(
+        &self,
+        log: &Logger,
+        job: JobId,
+        archive: archive::jobs::ArchivedJob,
+    ) -> Result<()> {
+        let start = Instant::now();
+        let akey = self.archive_object_key(job, &archive);
+        let bucket = &self.config.storage.bucket;
+        let body = serde_json::to_vec_pretty(&archive)?;
+
+        self.s3
+            .put_object()
+            .bucket(bucket)
+            .key(&akey)
+            .content_length(body.len().try_into().unwrap())
+            .body(body.into())
+            .send()
+            .await?;
+
+        let dur = Instant::now().saturating_duration_since(start);
+        info!(log, "uploaded job archive from job {job} at {bucket}:{akey}";
+            "duration_msec" => dur.as_millis());
+
+        Ok(())
+    }
+
+    async fn archive_load(
+        &self,
+        log: &Logger,
+        job: JobId,
+    ) -> Result<archive::jobs::ArchivedJob> {
+        /*
+         * First, check for the archive locally.  If we have already retrieved
+         * it from the object store we do not need to do so again.
+         */
+        let apath = self.archive_path(job)?;
+        match std::fs::File::open(&apath) {
+            Ok(f) => {
+                let br = std::io::BufReader::new(f);
+                let aj: archive::jobs::ArchivedJob =
+                    serde_json::from_reader(br)?;
+                if aj.is_valid() {
+                    info!(log, "loaded archive of job {job} from {apath:?}");
+                    return Ok(aj);
+                }
+                error!(
+                    log,
+                    "archive of job {job} at {apath:?} is invalid; unlinking"
+                );
+                std::fs::remove_file(&apath)?;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                /*
+                 * The file does not exist locally; we need to fetch it from the
+                 * object store.
+                 */
+            }
+            Err(e) => bail!("archived job {job} path {apath:?} error: {e}"),
+        };
+
+        let start = Instant::now();
+        let akey = self.archive_object_key_with_version(job, "1");
+        let bucket = &self.config.storage.bucket;
+
+        let res = self.s3.get_object().bucket(bucket).key(&akey).send().await?;
+        let body = res.body.collect().await?.to_vec();
+
+        /*
+         * First, make sure the data we read from S3 is valid:
+         */
+        let aj: archive::jobs::ArchivedJob = serde_json::from_slice(&body)?;
+        if !aj.is_valid() {
+            bail!("archive of job {job} at {bucket}:{akey} is invalid");
+        }
+        let dur = Instant::now().saturating_duration_since(start);
+        info!(log, "loaded archive of job {job} from {bucket}:{akey}";
+            "duration_msec" => dur.as_millis());
+
+        /*
+         * Cache the loaded data in the local file system:
+         */
+        let mut tf = tempfile::NamedTempFile::new_in(self.archive_dir()?)?;
+        tf.write_all(&body)?;
+        tf.flush()?;
+        tf.as_file_mut().sync_all()?;
+        tf.persist(self.archive_path(job)?)?;
+
+        Ok(aj)
+    }
+
     fn chunk_dir(&self) -> Result<PathBuf> {
         let mut p = self.datadir.clone();
         p.push("chunk");
@@ -356,7 +487,7 @@ impl Central {
          * one scheme, or more than one buildomat, using the same bucket without
          * conflicts.
          */
-        format!("{}/output/{}/{}", self.config.storage.prefix, job, file)
+        self.object_key("output", &format!("{job}/{file}"))
     }
 
     fn write_chunk(&self, job: JobId, chunk: &[u8]) -> Result<Ulid> {
@@ -546,6 +677,111 @@ impl Central {
 
         Ok(res)
     }
+
+    /**
+     * Load a job record on behalf of an authenticated user.  If the user does
+     * not have the right to see the record, we'll return an appropriate HTTP
+     * error that should be passed back as the response to the request.
+     */
+    async fn load_job_for_user(
+        &self,
+        log: &Logger,
+        user: &AuthUser,
+        id: JobId,
+    ) -> SResult<Job, HttpError> {
+        /*
+         * Job records are either resident in the database or unknown to the
+         * system.  If the database is damaged, job records will need to be
+         * repopulated by importing from the archive.
+         */
+        let job = self.db.job_by_id(id).or_500()?;
+
+        let readpriv = "admin.job.read";
+        if job.owner == user.id {
+            /*
+             * Users are always allowed to see their own job records.
+             */
+            Ok(job)
+        } else if user.has_privilege("admin.job.read") {
+            /*
+             * Users may be granted the right to view all jobs in the system,
+             * regardless of who owns them.
+             */
+            info!(
+                log,
+                "user {} used delegated admin privilege {readpriv}", user.name,
+            );
+            Ok(job)
+        } else {
+            Err(HttpError::for_client_error(
+                None,
+                StatusCode::FORBIDDEN,
+                "not your job".into(),
+            ))
+        }
+    }
+
+    /**
+     * Load a job output record, either from the live database or the
+     * archive.
+     */
+    async fn load_job_output(
+        &self,
+        log: &Logger,
+        job: &Job,
+        output: JobFileId,
+    ) -> Result<JobOutput> {
+        if job.is_archived() {
+            let aj = self.archive_load(log, job.id).await?;
+
+            aj.job_output(output)
+        } else {
+            self.db.job_output(job.id, output)
+        }
+    }
+
+    /**
+     * Load all job output records for a particular job, either from the live
+     * database or the archive.
+     */
+    async fn load_job_outputs(
+        &self,
+        log: &Logger,
+        job: &Job,
+    ) -> Result<Vec<(JobOutput, JobFile)>> {
+        if job.is_archived() {
+            let aj = self.archive_load(log, job.id).await?;
+
+            aj.job_outputs()
+        } else {
+            self.db.job_outputs(job.id)
+        }
+    }
+
+    /**
+     * Load job event records for a particular job, either from the live
+     * database or the archive.  Records are sorted by sequence number in
+     * ascending order.
+     *
+     * The minseq argument determines the sequence number of the first event to
+     * be returned.  Event sequence numbers begin at 0 and increase
+     * monotonically without holes.  If a number higher than that of the most
+     * recently stored event is specified, an empty list is returned.
+     */
+    async fn load_job_events(
+        &self,
+        log: &Logger,
+        job: &Job,
+        minseq: usize,
+    ) -> Result<Vec<JobEvent>> {
+        if job.is_archived() {
+            let aj = self.archive_load(log, job.id).await?;
+
+            aj.job_events(minseq)
+        } else {
+            self.db.job_events(job.id, minseq)
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -622,6 +858,7 @@ async fn main() -> Result<()> {
     ad.register(api::admin::workers_recycle).api_check()?;
     ad.register(api::admin::worker_recycle).api_check()?;
     ad.register(api::admin::admin_job_get).api_check()?;
+    ad.register(api::admin::admin_job_archive_request).api_check()?;
     ad.register(api::admin::admin_jobs_get).api_check()?;
     ad.register(api::admin::factory_create).api_check()?;
     ad.register(api::admin::target_create).api_check()?;
@@ -715,6 +952,7 @@ async fn main() -> Result<()> {
         inner: Mutex::new(CentralInner {
             hold: config.admin.hold,
             leases: Default::default(),
+            archive_queue: Default::default(),
         }),
         config,
         datadir,
@@ -743,8 +981,18 @@ async fn main() -> Result<()> {
 
     let c0 = Arc::clone(&c);
     let log0 = log.new(o!("component" => "archive_files"));
-    let t_archive = tokio::task::spawn(async move {
-        archive::archive_files(log0, c0).await.context("archive task failure")
+    let t_archive_files = tokio::task::spawn(async move {
+        archive::files::archive_files(log0, c0)
+            .await
+            .context("archive files task failure")
+    });
+
+    let c0 = Arc::clone(&c);
+    let log0 = log.new(o!("component" => "archive_jobs"));
+    let t_archive_jobs = tokio::task::spawn(async move {
+        archive::jobs::archive_jobs(log0, c0)
+            .await
+            .context("archive jobs task failure")
     });
 
     let c0 = Arc::clone(&c);
@@ -774,7 +1022,8 @@ async fn main() -> Result<()> {
         tokio::select! {
             _ = t_assign => bail!("task assignment task stopped early"),
             _ = t_chunks => bail!("chunk cleanup task stopped early"),
-            _ = t_archive => bail!("archive task stopped early"),
+            _ = t_archive_files => bail!("archive files task stopped early"),
+            _ = t_archive_jobs => bail!("archive jobs task stopped early"),
             _ = t_workers => bail!("worker cleanup task stopped early"),
             _ = server_task => bail!("server stopped early"),
         }

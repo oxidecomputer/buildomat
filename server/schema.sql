@@ -275,3 +275,7 @@ CREATE INDEX jobs_for_worker ON job (worker) WHERE worker IS NOT NULL;
 -- v 42
 ALTER TABLE worker ADD COLUMN
     factory_metadata TEXT;
+
+-- v 43
+ALTER TABLE job ADD COLUMN
+    time_archived   TEXT;

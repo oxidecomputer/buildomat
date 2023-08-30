@@ -24,8 +24,14 @@ pub(crate) struct JobOutput {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub(crate) struct JobsPath {
+pub(crate) struct JobPath {
     job: String,
+}
+
+impl JobPath {
+    fn job(&self) -> DSResult<db::JobId> {
+        self.job.parse::<db::JobId>().or_500()
+    }
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -34,10 +40,26 @@ pub(crate) struct JobStorePath {
     name: String,
 }
 
+impl JobStorePath {
+    fn job(&self) -> DSResult<db::JobId> {
+        self.job.parse::<db::JobId>().or_500()
+    }
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct JobsOutputsPath {
     job: String,
     output: String,
+}
+
+impl JobsOutputsPath {
+    fn job(&self) -> DSResult<db::JobId> {
+        self.job.parse::<db::JobId>().or_500()
+    }
+
+    fn output(&self) -> DSResult<db::JobFileId> {
+        self.output.parse::<db::JobFileId>().or_500()
+    }
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -51,7 +73,7 @@ pub(crate) struct JobsEventsQuery {
 }]
 pub(crate) async fn job_events_get(
     rqctx: RequestContext<Arc<Central>>,
-    path: TypedPath<JobsPath>,
+    path: TypedPath<JobPath>,
     query: TypedQuery<JobsEventsQuery>,
 ) -> DSResult<HttpResponseOk<Vec<JobEvent>>> {
     let c = rqctx.context();
@@ -61,17 +83,10 @@ pub(crate) async fn job_events_get(
     let q = query.into_inner();
 
     let owner = c.require_user(log, &rqctx.request).await?;
+    let j = c.load_job_for_user(log, &owner, p.job()?).await?;
 
-    let j = c.db.job_by_str(&p.job).or_500()?;
-    if j.owner != owner.id {
-        return Err(HttpError::for_client_error(
-            None,
-            StatusCode::FORBIDDEN,
-            "not your job".into(),
-        ));
-    }
-
-    let jevs = c.db.job_events(j.id, q.minseq.unwrap_or(0)).or_500()?;
+    let jevs =
+        c.load_job_events(log, &j, q.minseq.unwrap_or(0)).await.or_500()?;
 
     Ok(HttpResponseOk(
         jevs.iter()
@@ -93,7 +108,7 @@ pub(crate) async fn job_events_get(
 }]
 pub(crate) async fn job_outputs_get(
     rqctx: RequestContext<Arc<Central>>,
-    path: TypedPath<JobsPath>,
+    path: TypedPath<JobPath>,
 ) -> DSResult<HttpResponseOk<Vec<JobOutput>>> {
     let c = rqctx.context();
     let log = &rqctx.log;
@@ -101,17 +116,9 @@ pub(crate) async fn job_outputs_get(
     let p = path.into_inner();
 
     let owner = c.require_user(log, &rqctx.request).await?;
+    let j = c.load_job_for_user(log, &owner, p.job()?).await?;
 
-    let j = c.db.job_by_str(&p.job).or_500()?;
-    if j.owner != owner.id {
-        return Err(HttpError::for_client_error(
-            None,
-            StatusCode::FORBIDDEN,
-            "not your job".into(),
-        ));
-    }
-
-    let jops = c.db.job_outputs(j.id).or_500()?;
+    let jops = c.load_job_outputs(log, &j).await.or_500()?;
 
     Ok(HttpResponseOk(
         jops.iter()
@@ -138,17 +145,9 @@ pub(crate) async fn job_output_download(
     let p = path.into_inner();
 
     let owner = c.require_user(log, &rqctx.request).await?;
+    let t = c.load_job_for_user(log, &owner, p.job()?).await?;
 
-    let t = c.db.job_by_str(&p.job).or_500()?;
-    if t.owner != owner.id {
-        return Err(HttpError::for_client_error(
-            None,
-            StatusCode::FORBIDDEN,
-            "not your job".into(),
-        ));
-    }
-
-    let o = c.db.job_output_by_str(&p.job, &p.output).or_500()?;
+    let o = c.load_job_output(log, &t, p.output()?).await.or_500()?;
 
     let mut res = Response::builder();
     res = res.header(CONTENT_TYPE, "application/octet-stream");
@@ -199,17 +198,9 @@ pub(crate) async fn job_output_signed_url(
     }
 
     let owner = c.require_user(log, &rqctx.request).await?;
+    let t = c.load_job_for_user(log, &owner, p.job()?).await?;
 
-    let t = c.db.job_by_str(&p.job).or_500()?;
-    if t.owner != owner.id {
-        return Err(HttpError::for_client_error(
-            None,
-            StatusCode::FORBIDDEN,
-            "not your job".into(),
-        ));
-    }
-
-    let o = c.db.job_output_by_str(&p.job, &p.output).or_500()?;
+    let o = c.load_job_output(log, &t, p.output()?).await.or_500()?;
     let psu = c
         .file_presigned_url(
             t.id,
@@ -285,17 +276,9 @@ pub(crate) async fn job_output_publish(
     b.safe()?;
 
     let owner = c.require_user(log, &rqctx.request).await?;
+    let t = c.load_job_for_user(log, &owner, p.job()?).await?;
 
-    let t = c.db.job_by_str(&p.job).or_500()?;
-    if t.owner != owner.id {
-        return Err(HttpError::for_client_error(
-            None,
-            StatusCode::FORBIDDEN,
-            "not your job".into(),
-        ));
-    }
-
-    let o = c.db.job_output_by_str(&p.job, &p.output).or_500()?;
+    let o = c.load_job_output(log, &t, p.output()?).await.or_500()?;
 
     info!(
         log,
@@ -397,45 +380,22 @@ pub(crate) fn format_job(
     }
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub(crate) struct JobGetPath {
-    job: String,
-}
-
 #[endpoint {
     method = GET,
     path = "/0/job/{job}",
 }]
 pub(crate) async fn job_get(
     rqctx: RequestContext<Arc<Central>>,
-    path: TypedPath<JobGetPath>,
+    path: TypedPath<JobPath>,
 ) -> DSResult<HttpResponseOk<Job>> {
     let c = rqctx.context();
     let log = &rqctx.log;
-
-    let owner = c.require_user(log, &rqctx.request).await?;
-
     let p = path.into_inner();
 
-    let job = c.db.job_by_str(&p.job).or_500()?;
-    if job.owner != owner.id {
-        return Err(HttpError::for_client_error(
-            None,
-            StatusCode::FORBIDDEN,
-            "not your job".into(),
-        ));
-    }
+    let owner = c.require_user(log, &rqctx.request).await?;
+    let job = c.load_job_for_user(log, &owner, p.job()?).await?;
 
-    let tasks = c.db.job_tasks(job.id).or_500()?;
-
-    Ok(HttpResponseOk(format_job(
-        &job,
-        &tasks,
-        c.db.job_output_rules(job.id).or_500()?,
-        c.db.job_tags(job.id).or_500()?,
-        &c.db.target_get(job.target()).or_500()?,
-        c.db.job_times(job.id).or_500()?,
-    )))
+    Ok(HttpResponseOk(Job::load(log, &c, &job).await.or_500()?))
 }
 
 #[endpoint {
@@ -450,22 +410,14 @@ pub(crate) async fn jobs_get(
 
     let owner = c.require_user(log, &rqctx.request).await?;
 
-    let jobs =
-        c.db.user_jobs(owner.id)
-            .or_500()?
-            .iter()
-            .map(|j| {
-                let output_rules = c.db.job_output_rules(j.id)?;
-                let tasks = c.db.job_tasks(j.id)?;
-                let tags = c.db.job_tags(j.id)?;
-                let target = c.db.target_get(j.target())?;
-                let times = c.db.job_times(j.id)?;
-                Ok(format_job(j, &tasks, output_rules, tags, &target, times))
-            })
-            .collect::<Result<Vec<_>>>()
-            .or_500()?;
+    let jobs = c.db.user_jobs(owner.id).or_500()?;
 
-    Ok(HttpResponseOk(jobs))
+    let mut out = Vec::new();
+    for job in jobs {
+        out.push(super::user::Job::load(log, &c, &job).await.or_500()?);
+    }
+
+    Ok(HttpResponseOk(out))
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -482,6 +434,36 @@ pub(crate) struct Job {
     cancelled: bool,
     #[serde(default)]
     times: HashMap<String, DateTime<Utc>>,
+}
+
+impl Job {
+    pub(crate) async fn load(
+        log: &Logger,
+        c: &Central,
+        job: &db::Job,
+    ) -> Result<Job> {
+        let (tasks, output_rules, tags, target, times) = if job.is_archived() {
+            let aj = c.archive_load(log, job.id).await.or_500()?;
+
+            (
+                aj.tasks().or_500()?,
+                aj.output_rules().or_500()?,
+                aj.tags().or_500()?,
+                c.db.target_get(job.target()).or_500()?,
+                aj.times().or_500()?,
+            )
+        } else {
+            (
+                c.db.job_tasks(job.id).or_500()?,
+                c.db.job_output_rules(job.id).or_500()?,
+                c.db.job_tags(job.id).or_500()?,
+                c.db.target_get(job.target()).or_500()?,
+                c.db.job_times(job.id).or_500()?,
+            )
+        };
+
+        Ok(format_job(&job, &tasks, output_rules, tags, &target, times))
+    }
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -832,24 +814,15 @@ pub(crate) async fn job_submit(
 }]
 pub(crate) async fn job_upload_chunk(
     rqctx: RequestContext<Arc<Central>>,
-    path: TypedPath<JobsPath>,
+    path: TypedPath<JobPath>,
     chunk: UntypedBody,
 ) -> DSResult<HttpResponseCreated<UploadedChunk>> {
     let c = rqctx.context();
     let log = &rqctx.log;
-
-    let owner = c.require_user(log, &rqctx.request).await?;
-
     let p = path.into_inner();
 
-    let job = c.db.job_by_str(&p.job).or_500()?;
-    if job.owner != owner.id {
-        return Err(HttpError::for_client_error(
-            None,
-            StatusCode::FORBIDDEN,
-            "not your job".into(),
-        ));
-    }
+    let owner = c.require_user(log, &rqctx.request).await?;
+    let job = c.load_job_for_user(log, &owner, p.job()?).await?;
 
     if !job.waiting {
         return Err(HttpError::for_client_error(
@@ -892,7 +865,7 @@ pub(crate) struct JobAddInputResult {
 }]
 pub(crate) async fn job_add_input(
     rqctx: RequestContext<Arc<Central>>,
-    path: TypedPath<JobsPath>,
+    path: TypedPath<JobPath>,
     add: TypedBody<JobAddInput>,
 ) -> DSResult<HttpResponseOk<JobAddInputResult>> {
     let c = rqctx.context();
@@ -931,14 +904,7 @@ pub(crate) async fn job_add_input(
         .or_500()?;
     let commit_id = Ulid::from_str(add.commit_id.as_str()).or_500()?;
 
-    let job = c.db.job_by_str(&p.job).or_500()?;
-    if job.owner != owner.id {
-        return Err(HttpError::for_client_error(
-            None,
-            StatusCode::FORBIDDEN,
-            "not your job".into(),
-        ));
-    }
+    let job = c.load_job_for_user(log, &owner, p.job()?).await?;
 
     /*
      * The transition from waiting to queued occurs as soon as the last input is
@@ -1022,24 +988,15 @@ pub(crate) struct JobAddInputSync {
 }]
 pub(crate) async fn job_add_input_sync(
     rqctx: RequestContext<Arc<Central>>,
-    path: TypedPath<JobsPath>,
+    path: TypedPath<JobPath>,
     add: TypedBody<JobAddInputSync>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let log = &rqctx.log;
-
-    let owner = c.require_user(log, &rqctx.request).await?;
-
     let p = path.into_inner();
 
-    let job = c.db.job_by_str(&p.job).or_500()?;
-    if job.owner != owner.id {
-        return Err(HttpError::for_client_error(
-            None,
-            StatusCode::FORBIDDEN,
-            "not your job".into(),
-        ));
-    }
+    let owner = c.require_user(log, &rqctx.request).await?;
+    let job = c.load_job_for_user(log, &owner, p.job()?).await?;
 
     if !job.waiting {
         return Err(HttpError::for_client_error(
@@ -1113,23 +1070,14 @@ pub(crate) async fn job_add_input_sync(
 }]
 pub(crate) async fn job_cancel(
     rqctx: RequestContext<Arc<Central>>,
-    path: TypedPath<JobsPath>,
+    path: TypedPath<JobPath>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let log = &rqctx.log;
-
-    let owner = c.require_user(log, &rqctx.request).await?;
-
     let p = path.into_inner();
 
-    let job = c.db.job_by_str(&p.job).or_500()?;
-    if job.owner != owner.id {
-        return Err(HttpError::for_client_error(
-            None,
-            StatusCode::FORBIDDEN,
-            "not your job".into(),
-        ));
-    }
+    let owner = c.require_user(log, &rqctx.request).await?;
+    let job = c.load_job_for_user(log, &owner, p.job()?).await?;
 
     if job.complete {
         return Err(HttpError::for_client_error(
@@ -1162,20 +1110,11 @@ pub(crate) async fn job_store_put(
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let log = &rqctx.log;
-
-    let owner = c.require_user(log, &rqctx.request).await?;
-
     let p = path.into_inner();
     let b = body.into_inner();
 
-    let job = c.db.job_by_str(&p.job).or_500()?;
-    if job.owner != owner.id {
-        return Err(HttpError::for_client_error(
-            None,
-            StatusCode::FORBIDDEN,
-            "not your job".into(),
-        ));
-    }
+    let owner = c.require_user(log, &rqctx.request).await?;
+    let job = c.load_job_for_user(log, &owner, p.job()?).await?;
 
     if job.complete {
         return Err(HttpError::for_client_error(
@@ -1208,27 +1147,43 @@ pub(crate) struct JobStoreValueInfo {
 }]
 pub(crate) async fn job_store_get_all(
     rqctx: RequestContext<Arc<Central>>,
-    path: TypedPath<JobsPath>,
+    path: TypedPath<JobPath>,
 ) -> DSResult<HttpResponseOk<HashMap<String, JobStoreValueInfo>>> {
     let c = rqctx.context();
     let log = &rqctx.log;
-
-    let owner = c.require_user(log, &rqctx.request).await?;
-
     let p = path.into_inner();
 
-    let job = c.db.job_by_str(&p.job).or_500()?;
-    if job.owner != owner.id {
-        return Err(HttpError::for_client_error(
-            None,
-            StatusCode::FORBIDDEN,
-            "not your job".into(),
-        ));
-    }
+    let owner = c.require_user(log, &rqctx.request).await?;
+    let job = c.load_job_for_user(log, &owner, p.job()?).await?;
 
     info!(log, "user {} fetch job {} store, all values", owner.id, job.id);
 
-    Ok(HttpResponseOk(
+    let store = if job.is_archived() {
+        let aj = c.archive_load(log, job.id).await.or_500()?;
+
+        aj.store()
+            .iter()
+            .map(|(k, v)| {
+                Ok((
+                    k.to_string(),
+                    JobStoreValueInfo {
+                        /*
+                         * Do not pass secret values back to the user:
+                         */
+                        value: if v.secret() {
+                            None
+                        } else {
+                            v.value().map(str::to_string)
+                        },
+                        secret: v.secret(),
+                        time_update: v.time_update()?.0,
+                        source: v.source().to_string(),
+                    },
+                ))
+            })
+            .collect::<Result<_>>()
+            .or_500()?
+    } else {
         c.db.job_store(job.id)
             .or_500()?
             .into_iter()
@@ -1246,8 +1201,10 @@ pub(crate) async fn job_store_get_all(
                     },
                 )
             })
-            .collect(),
-    ))
+            .collect()
+    };
+
+    Ok(HttpResponseOk(store))
 }
 
 #[derive(Serialize, JsonSchema)]

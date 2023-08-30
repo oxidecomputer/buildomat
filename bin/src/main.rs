@@ -1699,6 +1699,36 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_admin_job_archive(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("JOB..."));
+
+    let a = args!(l);
+    if a.args().is_empty() {
+        bad_args!(l, "specify a job to archive");
+    }
+
+    for arg in a.args() {
+        if let Err(e) = l
+            .context()
+            .admin()
+            .admin_job_archive_request()
+            .job(arg)
+            .send()
+            .await
+        {
+            bail!("ERROR: archiving {}: {:?}", arg, e);
+        }
+    }
+
+    Ok(())
+}
+
+async fn do_admin_job(mut l: Level<Stuff>) -> Result<()> {
+    l.cmd("archive", "request archive of a job", cmd!(do_admin_job_archive))?;
+
+    sel!(l).run().await
+}
+
 async fn do_admin(mut l: Level<Stuff>) -> Result<()> {
     l.cmd("user", "user management", cmd!(do_user))?;
     l.cmd("factory", "factory management", cmd!(do_factory))?;
@@ -1706,6 +1736,7 @@ async fn do_admin(mut l: Level<Stuff>) -> Result<()> {
     l.cmda("dashboard", "dash", "summarise system state", cmd!(do_dash))?;
     l.cmd("control", "server control functions", cmd!(do_control))?;
     l.cmd("worker", "worker management", cmd!(do_worker))?;
+    l.cmd("job", "job management", cmd!(do_admin_job))?;
 
     sel!(l).run().await
 }

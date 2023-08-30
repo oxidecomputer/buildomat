@@ -11,7 +11,7 @@ use chrono::prelude::*;
 #[allow(unused_imports)]
 use slog::{debug, error, info, warn, Logger};
 
-use super::{db, Central};
+use crate::{db, Central};
 
 async fn archive_files_one(
     log: &Logger,

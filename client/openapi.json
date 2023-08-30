@@ -117,6 +117,32 @@
         }
       }
     },
+    "/0/admin/jobs/{job}/archive": {
+      "post": {
+        "operationId": "admin_job_archive_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/0/admin/target": {
       "post": {
         "operationId": "target_create",
