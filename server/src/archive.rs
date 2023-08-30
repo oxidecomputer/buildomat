@@ -168,11 +168,19 @@ async fn clean_files_one(log: &Logger, c: &Central) -> Result<()> {
                 }
                 file
             } else {
+                /*
+                 * If the server is interrupted during commit of a file, then
+                 * that partial file will continue to exist in the output
+                 * directory after restart.  There will be no record of the file
+                 * in the database, though, so we can safely remove it:
+                 */
                 warn!(
                     log,
-                    "file not found in database for job: {:?}",
+                    "removing file not found in database for job {}: {:?}",
+                    job.id,
                     ent.path(),
                 );
+                std::fs::remove_file(ent.path())?;
                 continue;
             };
 
