@@ -1963,7 +1963,40 @@ impl Database {
         Ok(f)
     }
 
+    pub fn factory_get(&self, id: FactoryId) -> Result<Factory> {
+        use schema::factory::dsl;
+
+        if id == Worker::legacy_default_factory_id() {
+            /*
+             * Factory records for workers that were created prior to the
+             * existence of factories do not exist.  Return a fake record.
+             */
+            return Ok(Factory {
+                id,
+                name: "legacy".into(),
+                /*
+                 * Authentication checks are done below in factory_auth() where
+                 * we need to guard against accidentally accepting this value:
+                 */
+                token: "".into(),
+                lastping: None,
+            });
+        }
+
+        let c = &mut self.1.lock().unwrap().conn;
+        Ok(dsl::factory.find(id).get_result(c)?)
+    }
+
     pub fn factory_auth(&self, token: &str) -> Result<Factory> {
+        if token == "" {
+            /*
+             * Make sure this trivially invalid value used in the legacy
+             * sentinel record is never accepted, even if it somehow ends up in
+             * the database by accident.
+             */
+            bail!("auth failure");
+        }
+
         use schema::factory;
 
         let c = &mut self.1.lock().unwrap().conn;

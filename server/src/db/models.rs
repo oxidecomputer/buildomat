@@ -172,6 +172,13 @@ pub struct JobInput {
     pub job: JobId,
     pub name: String,
     pub id: Option<JobFileId>,
+    /**
+     * Files are identified by a (job ID, file ID) tuple.  In the case of an
+     * output that is copied to another job as an input, this field contains the
+     * job ID of the job which actually holds the file.  If this is not set, the
+     * file is an input that was uploaded directly by the user creating the job
+     * and is stored with the job that owns the input record.
+     */
     pub other_job: Option<JobId>,
 }
 
@@ -224,6 +231,15 @@ pub struct Worker {
 }
 
 impl Worker {
+    pub fn legacy_default_factory_id() -> FactoryId {
+        /*
+         * XXX No new workers will be created without a factory, but old records
+         * might not have had one.  This is the ID of a made up factory that
+         * does not otherwise exist:
+         */
+        FactoryId::from_str("00E82MSW0000000000000FF000").unwrap()
+    }
+
     pub fn agent_ok(&self) -> bool {
         /*
          * Until we have a token from the worker, the agent hasn't started up
@@ -240,14 +256,7 @@ impl Worker {
     }
 
     pub fn factory(&self) -> FactoryId {
-        self.factory.unwrap_or_else(|| {
-            /*
-             * XXX No new workers will be created without a factory, but old
-             * records might not have had one.  This is the ID of a made up
-             * factory that does not otherwise exist:
-             */
-            FactoryId::from_str("00E82MSW0000000000000FF000").unwrap()
-        })
+        self.factory.unwrap_or_else(|| Worker::legacy_default_factory_id())
     }
 
     pub fn target(&self) -> TargetId {
@@ -278,11 +287,18 @@ pub struct Job {
     pub id: JobId,
     pub owner: UserId,
     pub name: String,
+    /**
+     * The original target name specified by the user, prior to resolution.
+     */
     pub target: String,
     pub complete: bool,
     pub failed: bool,
     pub worker: Option<WorkerId>,
     pub waiting: bool,
+    /**
+     * The resolved target ID.  This field should be accessed through the
+     * target() method to account for old records where this ID was optional.
+     */
     pub target_id: Option<TargetId>,
     pub cancelled: bool,
     /**

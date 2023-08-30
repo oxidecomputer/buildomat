@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 use super::prelude::*;
@@ -274,24 +274,12 @@ pub(crate) async fn admin_jobs_get(
         c.db.jobs_all().or_500()?
     };
 
-    /*
-     * XXX FIX THIS ONE
-     */
-    Ok(HttpResponseOk(
-        jobs.iter()
-            .map(|job| {
-                Ok(super::user::format_job(
-                    job,
-                    &c.db.job_tasks(job.id)?,
-                    c.db.job_output_rules(job.id)?,
-                    c.db.job_tags(job.id)?,
-                    &c.db.target_get(job.target())?,
-                    c.db.job_times(job.id)?,
-                ))
-            })
-            .collect::<Result<Vec<_>>>()
-            .or_500()?,
-    ))
+    let mut out = Vec::new();
+    for job in jobs {
+        out.push(super::user::Job::load(&c, &job).await.or_500()?);
+    }
+
+    Ok(HttpResponseOk(out))
 }
 
 #[endpoint {
@@ -310,18 +298,9 @@ pub(crate) async fn admin_job_get(
     let id = path.into_inner().job.parse::<db::JobId>().or_500()?;
     let job = c.db.job_by_id(id).or_500()?;
 
-    /*
-     * XXX FIX THIS ONE
-     */
-    Ok(HttpResponseOk(super::user::format_job(
-        &job,
-        &c.db.job_tasks(job.id).or_500()?,
-        c.db.job_output_rules(job.id).or_500()?,
-        c.db.job_tags(job.id).or_500()?,
-        &c.db.target_get(job.target()).or_500()?,
-        c.db.job_times(job.id).or_500()?,
-    )))
+    Ok(HttpResponseOk(super::user::Job::load(&c, &job).await.or_500()?))
 }
+
 #[endpoint {
     method = POST,
     path = "/0/control/hold",

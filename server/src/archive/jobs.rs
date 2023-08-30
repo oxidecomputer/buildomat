@@ -59,6 +59,13 @@ impl From<db::Task> for ArchivedTask {
     fn from(input: db::Task) -> Self {
         let db::Task {
             job: _,
+            /*
+             * For most records with a seq column the actual value is not
+             * relevant, merely the sorted order of those records.  In the case
+             * of tasks, seq is used in the task ID field of job events that
+             * were emitted by a particular task.  We want to make sure they
+             * always line up.
+             */
             seq,
             name,
             script,
@@ -90,7 +97,16 @@ impl From<db::Task> for ArchivedTask {
 struct ArchivedEvent {
     pub task: Option<u32>,
     pub stream: String,
+    /**
+     * The time at which the core API server received or generated this event.
+     */
     pub time: String,
+    /**
+     * If this event was received from a remote system, such as a worker, this
+     * time reflects the time on that remote system when the event was
+     * generated.  Due to issues with NTP, etc, it might not align exactly with
+     * the time field.
+     */
     pub time_remote: Option<String>,
     pub payload: String,
 }
@@ -100,6 +116,12 @@ impl From<db::JobEvent> for ArchivedEvent {
         let db::JobEvent {
             job: _,
             task,
+            /*
+             * Job events in the database have a "seq" column that reflects the
+             * order that they were recorded by the system.  job_events()
+             * returns them in ascending order.  We store the records in that
+             * same order in the archived file, but elide the "seq" column.
+             */
             seq: _,
             stream,
             time,
@@ -207,6 +229,13 @@ impl From<db::JobOutputRule> for ArchivedOutputRule {
     fn from(input: db::JobOutputRule) -> Self {
         let db::JobOutputRule {
             job: _,
+            /*
+             * Output rules in the database have a "seq" column that reflects
+             * the order that they were specified in the job specification, and
+             * job_output_rules() returns them in ascending order.  We store the
+             * records in that same order in the archived file, but elide the
+             * "seq" column.
+             */
             seq: _,
             rule,
             ignore,
@@ -218,6 +247,12 @@ impl From<db::JobOutputRule> for ArchivedOutputRule {
     }
 }
 
+/*
+ * We don't expect to read published files from the archive record in the hot
+ * path, but we archive this data with the job so that we can recover it later
+ * if the database is destroyed and we need to reconstitute records from the
+ * archive.
+ */
 #[derive(Debug, Serialize, Deserialize)]
 struct ArchivedPublishedFile {
     pub series: String,
@@ -243,21 +278,169 @@ impl From<db::PublishedFile> for ArchivedPublishedFile {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct ArchivedStoreEntry {
+    name: String,
+    value: Option<String>,
+    secret: bool,
+    source: String,
+    time_update: String,
+}
+
+impl ArchivedStoreEntry {
+    pub fn value(&self) -> Option<&str> {
+        self.value.as_deref()
+    }
+
+    pub fn secret(&self) -> bool {
+        self.secret
+    }
+
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    pub fn time_update(&self) -> Result<db::IsoDate> {
+        Ok(self.time_update.from_archive()?)
+    }
+}
+
+impl From<db::JobStore> for ArchivedStoreEntry {
+    fn from(input: db::JobStore) -> Self {
+        let db::JobStore { job: _, name, value, secret, source, time_update } =
+            input;
+
+        ArchivedStoreEntry {
+            name,
+            /*
+             * Elide secret values from the archive:
+             */
+            value: if secret { Some(value) } else { None },
+            secret,
+            source,
+            time_update: time_update.to_archive(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ArchivedDepend {
+    prior_job: String,
+    copy_outputs: bool,
+    on_failed: bool,
+    on_completed: bool,
+    satisfied: bool,
+}
+
+impl From<db::JobDepend> for ArchivedDepend {
+    fn from(input: db::JobDepend) -> Self {
+        let db::JobDepend {
+            job: _,
+            name: _,
+            prior_job,
+            copy_outputs,
+            on_failed,
+            on_completed,
+            satisfied,
+        } = input;
+
+        ArchivedDepend {
+            prior_job: prior_job.to_string(),
+            copy_outputs,
+            on_failed,
+            on_completed,
+            satisfied,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ArchivedFactoryInfo {
+    id: String,
+    name: String,
+}
+
+impl From<db::Factory> for ArchivedFactoryInfo {
+    fn from(input: db::Factory) -> Self {
+        let db::Factory { id, name, token: _, lastping: _ } = input;
+
+        ArchivedFactoryInfo { id: id.to_string(), name }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ArchivedWorkerInfo {
+    id: String,
+    target: String,
+    factory: ArchivedFactoryInfo,
+    factory_private: Option<String>,
+    factory_metadata: Option<serde_json::Value>,
+}
+
+impl From<(db::Worker, db::Factory)> for ArchivedWorkerInfo {
+    fn from(input: (db::Worker, db::Factory)) -> Self {
+        let target = input.0.target().to_string();
+        let db::Worker {
+            id,
+            factory_private,
+            factory_metadata,
+
+            target: _,
+            bootstrap: _,
+            token: _,
+            deleted: _,
+            recycle: _,
+            lastping: _,
+            factory: _,
+            wait_for_flush: _,
+        } = input.0;
+        let factory = ArchivedFactoryInfo::from(input.1);
+
+        ArchivedWorkerInfo {
+            id: id.to_string(),
+            target,
+            factory,
+            factory_private,
+            factory_metadata: factory_metadata.map(|v| v.0),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ArchivedJob {
     v: String,
 
     id: String,
     name: String,
+
+    /*
+     * We store the failed and cancelled bits here, but not the completed or
+     * waiting bits; a job can only be archived once it is complete, and when it
+     * is complete it can no longer be waiting.
+     */
     failed: bool,
     cancelled: bool,
 
+    /*
+     * Store both the user ID and the login name for the user at the time the
+     * job was archived.  If the user has been deleted since the job was
+     * archived, we can at least have some idea of who they were.  The
+     * owner_name field is only for diagnostic purposes.
+     */
     owner_id: String,
     owner_name: String,
 
+    /*
+     * Store both the original input target name (from the user) and the
+     * ultimately resolved target ID.  We also store, for diagnostic purposes,
+     * the final resolved target name at the time the job was archived.
+     */
     target_name: String,
     target_id: String,
+    target_resolved_name: String,
+    target_resolved_desc: String,
 
     worker_id: Option<String>,
+    worker_info: Option<ArchivedWorkerInfo>,
 
     tasks: Vec<ArchivedTask>,
     output_rules: Vec<ArchivedOutputRule>,
@@ -267,6 +450,8 @@ pub struct ArchivedJob {
     times: HashMap<String, String>,
     published_files: Vec<ArchivedPublishedFile>,
     events: Vec<ArchivedEvent>,
+    store: HashMap<String, ArchivedStoreEntry>,
+    depends: HashMap<String, ArchivedDepend>,
 }
 
 impl ArchivedJob {
@@ -386,10 +571,9 @@ impl ArchivedJob {
         Ok(self
             .tasks
             .iter()
-            .enumerate()
-            .map(|(seq, t)| {
+            .map(|t| {
                 let ArchivedTask {
-                    seq: _,
+                    seq,
                     name,
                     script,
                     env_clear,
@@ -403,7 +587,7 @@ impl ArchivedJob {
 
                 Ok(db::Task {
                     job,
-                    seq: seq.try_into().unwrap(),
+                    seq: (*seq).try_into().unwrap(),
                     name: name.clone(),
                     script: script.clone(),
                     env_clear: *env_clear,
@@ -416,6 +600,10 @@ impl ArchivedJob {
                 })
             })
             .collect::<Result<Vec<_>>>()?)
+    }
+
+    pub fn store(&self) -> &HashMap<String, ArchivedStoreEntry> {
+        &self.store
     }
 }
 
@@ -470,6 +658,28 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<()> {
             .map(ArchivedPublishedFile::from)
             .collect::<Vec<_>>();
     let target_id = job.target().to_string();
+    let (target_resolved_name, target_resolved_desc) = {
+        let t = c.db.target_get(job.target())?;
+        (t.name, t.desc)
+    };
+    let store =
+        c.db.job_store(job.id)?
+            .into_iter()
+            .map(|(k, v)| (k, ArchivedStoreEntry::from(v)))
+            .collect();
+    let depends =
+        c.db.job_depends(job.id)?
+            .into_iter()
+            .map(|d| (d.name.to_string(), ArchivedDepend::from(d)))
+            .collect();
+    let worker_info = job
+        .worker
+        .map(|id| {
+            let w = c.db.worker_get(id)?;
+            let f = c.db.factory_get(w.factory())?;
+            Ok::<_, anyhow::Error>(ArchivedWorkerInfo::from((w, f)))
+        })
+        .transpose()?;
 
     let db::Job {
         id,
@@ -479,10 +689,15 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<()> {
         failed,
         worker,
         cancelled,
-        target_id: _,
         complete: _,
         waiting: _,
         time_archived: _,
+
+        /*
+         * We use the target_id value we already fetched above, so ignore it
+         * here:
+         */
+        target_id: _,
     } = job;
 
     let Some(owner) = c.db.user_get_by_id(owner)? else {
@@ -501,8 +716,11 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<()> {
 
         target_name: target,
         target_id,
+        target_resolved_name,
+        target_resolved_desc,
 
         worker_id: worker.map(|i| i.to_string()),
+        worker_info,
 
         events,
         tasks,
@@ -512,6 +730,8 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<()> {
         outputs,
         times,
         published_files,
+        store,
+        depends,
     };
 
     let apath = c.archive_path(id)?;

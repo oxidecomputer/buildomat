@@ -236,7 +236,7 @@ pub(crate) async fn job_output_signed_url(
         ));
     }
 
-    let o = c.db.job_output_by_str(&p.job, &p.output).or_500()?;
+    let o = c.db.job_output(t.id, p.output()?).or_500()?;
     let psu = c
         .file_presigned_url(
             t.id,
@@ -461,32 +461,7 @@ pub(crate) async fn job_get(
         ));
     }
 
-    let (tasks, output_rules, tags, times) = if job.is_archived() {
-        let aj = c.archive_load(job.id).await.or_500()?;
-
-        (
-            aj.tasks().or_500()?,
-            aj.output_rules().or_500()?,
-            aj.tags().or_500()?,
-            aj.times().or_500()?,
-        )
-    } else {
-        (
-            c.db.job_tasks(job.id).or_500()?,
-            c.db.job_output_rules(job.id).or_500()?,
-            c.db.job_tags(job.id).or_500()?,
-            c.db.job_times(job.id).or_500()?,
-        )
-    };
-
-    Ok(HttpResponseOk(format_job(
-        &job,
-        &tasks,
-        output_rules,
-        tags,
-        &c.db.target_get(job.target()).or_500()?,
-        times,
-    )))
+    Ok(HttpResponseOk(Job::load(&c, &job).await.or_500()?))
 }
 
 #[endpoint {
@@ -502,28 +477,10 @@ pub(crate) async fn jobs_get(
     let owner = c.require_user(log, &rqctx.request).await?;
 
     let jobs = c.db.user_jobs(owner.id).or_500()?;
+
     let mut out = Vec::new();
-    for j in jobs {
-        let (tasks, output_rules, tags, times) = if j.is_archived() {
-            let aj = c.archive_load(j.id).await.or_500()?;
-
-            (
-                aj.tasks().or_500()?,
-                aj.output_rules().or_500()?,
-                aj.tags().or_500()?,
-                aj.times().or_500()?,
-            )
-        } else {
-            (
-                c.db.job_tasks(j.id).or_500()?,
-                c.db.job_output_rules(j.id).or_500()?,
-                c.db.job_tags(j.id).or_500()?,
-                c.db.job_times(j.id).or_500()?,
-            )
-        };
-        let target = c.db.target_get(j.target()).or_500()?;
-
-        out.push(format_job(&j, &tasks, output_rules, tags, &target, times));
+    for job in jobs {
+        out.push(super::user::Job::load(&c, &job).await.or_500()?);
     }
 
     Ok(HttpResponseOk(out))
@@ -543,6 +500,32 @@ pub(crate) struct Job {
     cancelled: bool,
     #[serde(default)]
     times: HashMap<String, DateTime<Utc>>,
+}
+
+impl Job {
+    pub(crate) async fn load(c: &Central, job: &db::Job) -> Result<Job> {
+        let (tasks, output_rules, tags, target, times) = if job.is_archived() {
+            let aj = c.archive_load(job.id).await.or_500()?;
+
+            (
+                aj.tasks().or_500()?,
+                aj.output_rules().or_500()?,
+                aj.tags().or_500()?,
+                c.db.target_get(job.target()).or_500()?,
+                aj.times().or_500()?,
+            )
+        } else {
+            (
+                c.db.job_tasks(job.id).or_500()?,
+                c.db.job_output_rules(job.id).or_500()?,
+                c.db.job_tags(job.id).or_500()?,
+                c.db.target_get(job.target()).or_500()?,
+                c.db.job_times(job.id).or_500()?,
+            )
+        };
+
+        Ok(format_job(&job, &tasks, output_rules, tags, &target, times))
+    }
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -1313,7 +1296,32 @@ pub(crate) async fn job_store_get_all(
 
     info!(log, "user {} fetch job {} store, all values", owner.id, job.id);
 
-    Ok(HttpResponseOk(
+    let store = if job.is_archived() {
+        let aj = c.archive_load(job.id).await.or_500()?;
+
+        aj.store()
+            .iter()
+            .map(|(k, v)| {
+                Ok((
+                    k.to_string(),
+                    JobStoreValueInfo {
+                        /*
+                         * Do not pass secret values back to the user:
+                         */
+                        value: if v.secret() {
+                            None
+                        } else {
+                            v.value().map(str::to_string)
+                        },
+                        secret: v.secret(),
+                        time_update: v.time_update()?.0,
+                        source: v.source().to_string(),
+                    },
+                ))
+            })
+            .collect::<Result<_>>()
+            .or_500()?
+    } else {
         c.db.job_store(job.id)
             .or_500()?
             .into_iter()
@@ -1331,8 +1339,10 @@ pub(crate) async fn job_store_get_all(
                     },
                 )
             })
-            .collect(),
-    ))
+            .collect()
+    };
+
+    Ok(HttpResponseOk(store))
 }
 
 #[derive(Serialize, JsonSchema)]
