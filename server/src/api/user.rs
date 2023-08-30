@@ -82,7 +82,7 @@ pub(crate) async fn job_events_get(
     }
 
     let jevs = if j.is_archived() {
-        c.archive_load(j.id)
+        c.archive_load(log, j.id)
             .await
             .or_500()?
             .job_events(q.minseq.unwrap_or(0))
@@ -130,7 +130,7 @@ pub(crate) async fn job_outputs_get(
     }
 
     let jops = if j.is_archived() {
-        c.archive_load(j.id).await.or_500()?.job_outputs().or_500()?
+        c.archive_load(log, j.id).await.or_500()?.job_outputs().or_500()?
     } else {
         c.db.job_outputs(j.id).or_500()?
     };
@@ -172,7 +172,7 @@ pub(crate) async fn job_output_download(
 
     let oid = p.output()?;
     let o = if t.is_archived() {
-        c.archive_load(t.id).await.or_500()?.job_output(oid).or_500()?
+        c.archive_load(log, t.id).await.or_500()?.job_output(oid).or_500()?
     } else {
         c.db.job_output(t.id, oid).or_500()?
     };
@@ -461,7 +461,7 @@ pub(crate) async fn job_get(
         ));
     }
 
-    Ok(HttpResponseOk(Job::load(&c, &job).await.or_500()?))
+    Ok(HttpResponseOk(Job::load(log, &c, &job).await.or_500()?))
 }
 
 #[endpoint {
@@ -480,7 +480,7 @@ pub(crate) async fn jobs_get(
 
     let mut out = Vec::new();
     for job in jobs {
-        out.push(super::user::Job::load(&c, &job).await.or_500()?);
+        out.push(super::user::Job::load(log, &c, &job).await.or_500()?);
     }
 
     Ok(HttpResponseOk(out))
@@ -503,9 +503,13 @@ pub(crate) struct Job {
 }
 
 impl Job {
-    pub(crate) async fn load(c: &Central, job: &db::Job) -> Result<Job> {
+    pub(crate) async fn load(
+        log: &Logger,
+        c: &Central,
+        job: &db::Job,
+    ) -> Result<Job> {
         let (tasks, output_rules, tags, target, times) = if job.is_archived() {
-            let aj = c.archive_load(job.id).await.or_500()?;
+            let aj = c.archive_load(log, job.id).await.or_500()?;
 
             (
                 aj.tasks().or_500()?,
@@ -1297,7 +1301,7 @@ pub(crate) async fn job_store_get_all(
     info!(log, "user {} fetch job {} store, all values", owner.id, job.id);
 
     let store = if job.is_archived() {
-        let aj = c.archive_load(job.id).await.or_500()?;
+        let aj = c.archive_load(log, job.id).await.or_500()?;
 
         aj.store()
             .iter()

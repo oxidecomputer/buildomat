@@ -276,7 +276,7 @@ pub(crate) async fn admin_jobs_get(
 
     let mut out = Vec::new();
     for job in jobs {
-        out.push(super::user::Job::load(&c, &job).await.or_500()?);
+        out.push(super::user::Job::load(log, &c, &job).await.or_500()?);
     }
 
     Ok(HttpResponseOk(out))
@@ -298,7 +298,36 @@ pub(crate) async fn admin_job_get(
     let id = path.into_inner().job.parse::<db::JobId>().or_500()?;
     let job = c.db.job_by_id(id).or_500()?;
 
-    Ok(HttpResponseOk(super::user::Job::load(&c, &job).await.or_500()?))
+    Ok(HttpResponseOk(super::user::Job::load(log, &c, &job).await.or_500()?))
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/admin/jobs/{job}/archive",
+}]
+pub(crate) async fn admin_job_archive_request(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<JobPath>,
+) -> DSResult<HttpResponseUpdatedNoContent> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    c.require_admin(log, &rqctx.request, "job.archive").await?;
+
+    let id = path.into_inner().job.parse::<db::JobId>().or_500()?;
+    let job = c.db.job_by_id(id).or_500()?;
+
+    if !job.complete {
+        return Err(HttpError::for_bad_request(
+            None,
+            "job cannot be archived until complete".into(),
+        ));
+    }
+
+    info!(log, "admin: requested archive of job {}", job.id);
+    c.inner.lock().unwrap().archive_queue.push_back(job.id);
+
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 #[endpoint {

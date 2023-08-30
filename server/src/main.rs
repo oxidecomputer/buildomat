@@ -5,12 +5,13 @@
 #![allow(clippy::many_single_char_names)]
 #![allow(clippy::too_many_arguments)]
 
+use std::collections::VecDeque;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::exit;
 use std::result::Result as SResult;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use dropshot::{
@@ -128,6 +129,7 @@ struct FilePresignedUrl {
 struct CentralInner {
     hold: bool,
     leases: jobs::Leases,
+    archive_queue: VecDeque<JobId>,
 }
 
 struct Central {
@@ -333,17 +335,119 @@ impl Central {
         Ok(p)
     }
 
-    async fn archive_load(
+    fn object_key(&self, collection: &str, suffix: &str) -> String {
+        /*
+         * Object keys begin with a prefix string so that we can have more than
+         * one scheme, or more than one buildomat, using the same bucket without
+         * conflicts.
+         */
+        format!("{}/{collection}/{suffix}", self.config.storage.prefix)
+    }
+
+    fn archive_object_key(
         &self,
         job: JobId,
+        archive: &archive::jobs::ArchivedJob,
+    ) -> String {
+        self.archive_object_key_with_version(job, archive.version())
+    }
+
+    fn archive_object_key_with_version(
+        &self,
+        job: JobId,
+        version: &str,
+    ) -> String {
+        self.object_key("job", &format!("{version}/{job}.json"))
+    }
+
+    async fn archive_store(
+        &self,
+        log: &Logger,
+        job: JobId,
+        archive: archive::jobs::ArchivedJob,
+    ) -> Result<()> {
+        let start = Instant::now();
+        let akey = self.archive_object_key(job, &archive);
+        let bucket = &self.config.storage.bucket;
+        let body = serde_json::to_vec_pretty(&archive)?;
+
+        self.s3
+            .put_object()
+            .bucket(bucket)
+            .key(&akey)
+            .content_length(body.len().try_into().unwrap())
+            .body(body.into())
+            .send()
+            .await?;
+
+        let dur = Instant::now().saturating_duration_since(start);
+        info!(log, "uploaded job archive from job {job} at {bucket}:{akey}";
+            "duration_msec" => dur.as_millis());
+
+        Ok(())
+    }
+
+    async fn archive_load(
+        &self,
+        log: &Logger,
+        job: JobId,
     ) -> Result<archive::jobs::ArchivedJob> {
+        /*
+         * First, check for the archive locally.  If we have already retrieved
+         * it from the object store we do not need to do so again.
+         */
         let apath = self.archive_path(job)?;
-        let f = std::fs::File::open(&apath)?;
-        let br = std::io::BufReader::new(f);
-        let aj: archive::jobs::ArchivedJob = serde_json::from_reader(br)?;
+        match std::fs::File::open(&apath) {
+            Ok(f) => {
+                let br = std::io::BufReader::new(f);
+                let aj: archive::jobs::ArchivedJob =
+                    serde_json::from_reader(br)?;
+                if aj.is_valid() {
+                    info!(log, "loaded archive of job {job} from {apath:?}");
+                    return Ok(aj);
+                }
+                error!(
+                    log,
+                    "archive of job {job} at {apath:?} is invalid; unlinking"
+                );
+                std::fs::remove_file(&apath)?;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                /*
+                 * The file does not exist locally; we need to fetch it from the
+                 * object store.
+                 */
+            }
+            Err(e) => bail!("archived job {job} path {apath:?} error: {e}"),
+        };
+
+        let start = Instant::now();
+        let akey = self.archive_object_key_with_version(job, "1");
+        let bucket = &self.config.storage.bucket;
+
+        let res = self.s3.get_object().bucket(bucket).key(&akey).send().await?;
+        let body = res.body.collect().await?.to_vec();
+
+        /*
+         * First, make sure the data we read from S3 is valid:
+         */
+        let aj: archive::jobs::ArchivedJob = serde_json::from_slice(&body)?;
         if !aj.is_valid() {
-            bail!("archived job at {apath:?} is not valid");
+            bail!("archive of job {job} at {bucket}:{akey} is invalid");
         }
+        let dur = Instant::now().saturating_duration_since(start);
+        info!(log, "loaded archive of job {job} from {bucket}:{akey}";
+            "duration_msec" => dur.as_millis());
+
+        /*
+         * Cache the loaded data in the local file system:
+         */
+        let mut tf = tempfile::NamedTempFile::new_in(self.archive_dir()?)?;
+        tf.write_all(&body)?;
+        tf.flush()?;
+        tf.as_file_mut().sync_all()?;
+        tf.persist(self.archive_path(job)?)?;
+
         Ok(aj)
     }
 
@@ -383,7 +487,7 @@ impl Central {
          * one scheme, or more than one buildomat, using the same bucket without
          * conflicts.
          */
-        format!("{}/output/{}/{}", self.config.storage.prefix, job, file)
+        self.object_key("output", &format!("{job}/{file}"))
     }
 
     fn write_chunk(&self, job: JobId, chunk: &[u8]) -> Result<Ulid> {
@@ -649,6 +753,7 @@ async fn main() -> Result<()> {
     ad.register(api::admin::workers_recycle).api_check()?;
     ad.register(api::admin::worker_recycle).api_check()?;
     ad.register(api::admin::admin_job_get).api_check()?;
+    ad.register(api::admin::admin_job_archive_request).api_check()?;
     ad.register(api::admin::admin_jobs_get).api_check()?;
     ad.register(api::admin::factory_create).api_check()?;
     ad.register(api::admin::target_create).api_check()?;
@@ -742,6 +847,7 @@ async fn main() -> Result<()> {
         inner: Mutex::new(CentralInner {
             hold: config.admin.hold,
             leases: Default::default(),
+            archive_queue: Default::default(),
         }),
         config,
         datadir,

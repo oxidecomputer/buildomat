@@ -31,6 +31,8 @@ pub struct ConfigFileJob {
     pub max_runtime: u64,
     #[serde(default = "default_max_size_per_file_mb")]
     pub max_size_per_file_mb: u64,
+    #[serde(default)]
+    pub auto_archive: bool,
 }
 
 impl ConfigFileJob {

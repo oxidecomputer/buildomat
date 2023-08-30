@@ -3,7 +3,6 @@
  */
 
 use std::collections::HashMap;
-use std::io::Write;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -439,6 +438,10 @@ pub struct ArchivedJob {
     target_resolved_name: String,
     target_resolved_desc: String,
 
+    /*
+     * Store both the worker ID and some purely diagnostic information about the
+     * worker and factory at the point of job archival.
+     */
     worker_id: Option<String>,
     worker_info: Option<ArchivedWorkerInfo>,
 
@@ -457,6 +460,10 @@ pub struct ArchivedJob {
 impl ArchivedJob {
     pub fn is_valid(&self) -> bool {
         self.v == "1"
+    }
+
+    pub fn version(&self) -> &str {
+        &self.v
     }
 
     pub fn job_events(&self, minseq: usize) -> Result<Vec<db::JobEvent>> {
@@ -609,13 +616,42 @@ impl ArchivedJob {
 
 async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<()> {
     let start = Instant::now();
-    let Some(job) = c.db.job_next_unarchived()? else {
+
+    let (reason, job) = if let Some(job) =
+        c.inner.lock().unwrap().archive_queue.pop_front()
+    {
+        /*
+         * Service explicit requests from the operator to archive a job
+         * first.
+         */
+        let job = c.db.job_by_id(job)?;
+        if !job.complete {
+            warn!(log, "job {} not complete; cannot archive yet", job.id);
+            return Ok(());
+        }
+        if job.is_archived() {
+            warn!(log, "job {} was already archived; ignoring request", job.id);
+            return Ok(());
+        }
+        ("operator request", job)
+    } else if c.config.job.auto_archive {
+        /*
+         * Otherwise, if auto-archiving is enabled, archive the next as-yet
+         * unarchived job.
+         */
+        if let Some(job) = c.db.job_next_unarchived()? {
+            ("automatic", job)
+        } else {
+            return Ok(());
+        }
+    } else {
         return Ok(());
     };
+
     assert!(job.complete);
     assert!(job.time_archived.is_none());
 
-    info!(log, "archiving job {}...", job.id);
+    info!(log, "archiving job {} [{reason}]...", job.id);
 
     /*
      * We need to collect a variety of materials together in order to create the
@@ -734,15 +770,7 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<()> {
         depends,
     };
 
-    let apath = c.archive_path(id)?;
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(&apath)?;
-
-    serde_json::to_writer_pretty(&mut f, &aj)?;
-    f.flush()?;
+    c.archive_store(log, id, aj).await?;
 
     c.db.job_mark_archived(id, Utc::now())?;
 
