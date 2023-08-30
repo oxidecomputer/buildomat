@@ -583,7 +583,7 @@ impl ArchivedJob {
     }
 }
 
-async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<()> {
+async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<bool> {
     let start = Instant::now();
 
     let (reason, job) = if let Some(job) =
@@ -596,11 +596,11 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<()> {
         let job = c.db.job_by_id(job)?;
         if !job.complete {
             warn!(log, "job {} not complete; cannot archive yet", job.id);
-            return Ok(());
+            return Ok(false);
         }
         if job.is_archived() {
             warn!(log, "job {} was already archived; ignoring request", job.id);
-            return Ok(());
+            return Ok(false);
         }
         ("operator request", job)
     } else if c.config.job.auto_archive {
@@ -611,10 +611,10 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<()> {
         if let Some(job) = c.db.job_next_unarchived()? {
             ("automatic", job)
         } else {
-            return Ok(());
+            return Ok(false);
         }
     } else {
-        return Ok(());
+        return Ok(false);
     };
 
     assert!(job.complete);
@@ -740,7 +740,7 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<()> {
     let dur = Instant::now().saturating_duration_since(start);
     info!(log, "job {id} archived"; "duration_ms" => dur.as_millis());
 
-    Ok(())
+    Ok(true)
 }
 
 pub(crate) async fn archive_jobs(log: Logger, c: Arc<Central>) -> Result<()> {
@@ -749,8 +749,10 @@ pub(crate) async fn archive_jobs(log: Logger, c: Arc<Central>) -> Result<()> {
     info!(log, "start job archive task");
 
     loop {
-        if let Err(e) = archive_jobs_one(&log, &c).await {
-            error!(log, "job archive task error: {:?}", e);
+        match archive_jobs_one(&log, &c).await {
+            Ok(true) => continue,
+            Ok(false) => (),
+            Err(e) => error!(log, "job archive task error: {:?}", e),
         }
 
         tokio::time::sleep(delay).await;
