@@ -1008,6 +1008,7 @@ async fn main() -> Result<()> {
         &ConfigDropshot {
             request_body_max_bytes: 10 * 1024 * 1024,
             bind_address,
+            log_headers: vec!["X-Forwarded-For".into()],
             ..Default::default()
         },
         ad,

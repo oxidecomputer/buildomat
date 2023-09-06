@@ -93,9 +93,9 @@ dependencies = [
 
 [[package]]
 name = "async-trait"
-version = "0.1.72"
+version = "0.1.73"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc6dde6e4ed435a4c1ee4e73592f5ba9da2151af10076cc04858746af9352d09"
+checksum = "bc00ceb34980c03614e35a3a4e218276a0a824e911d07651cd0d858a51e8c0f0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1232,7 +1232,7 @@ checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot#8ef2bd2ed815ec3ce505ff1f006cdf2ac8ad30c7"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=x-forwarded-for#34c4c43a7404a586b0a536dfe91bff4508d27cd7"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1276,7 +1276,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot#8ef2bd2ed815ec3ce505ff1f006cdf2ac8ad30c7"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=x-forwarded-for#34c4c43a7404a586b0a536dfe91bff4508d27cd7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3434,9 +3434,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.30.0"
+version = "1.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d3ce25f50619af8b0aec2eb23deebe84249e19e2ddd393a6e16e3300a6dadfd"
+checksum = "17ed6077ed6cd6c74735e21f37eb16dc3935f96878b1fe961074089cc80893f9"
 dependencies = [
  "backtrace",
  "bytes",

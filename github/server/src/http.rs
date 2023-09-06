@@ -767,6 +767,7 @@ pub(crate) async fn server(
     let cd = ConfigDropshot {
         bind_address,
         request_body_max_bytes: 1024 * 1024,
+        log_headers: vec!["X-Forwarded-For".into()],
         ..Default::default()
     };
 
