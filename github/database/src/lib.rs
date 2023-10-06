@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 use anyhow::{bail, Result};
@@ -319,6 +319,21 @@ impl Database {
         let c = &mut self.1.lock().unwrap().conn;
 
         Ok(check_suite::dsl::check_suite.find(id).get_result(c)?)
+    }
+
+    pub fn load_check_suite_by_github_id(
+        &self,
+        repo: i64,
+        github_id: i64,
+    ) -> Result<CheckSuite> {
+        use schema::check_suite;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        Ok(check_suite::dsl::check_suite
+            .filter(check_suite::dsl::repo.eq(repo))
+            .filter(check_suite::dsl::github_id.eq(github_id))
+            .get_result(c)?)
     }
 
     pub fn load_delivery(&self, seq: DeliverySeq) -> Result<Delivery> {

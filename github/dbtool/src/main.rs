@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -346,8 +346,35 @@ async fn do_check_suite_list(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_check_suite_find(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("OWNER REPO CHECKSUITE"));
+
+    let a = args!(l);
+    if a.args().len() != 3 {
+        bad_args!(l, "specify a GitHub owner, repository, and check suite ID");
+    }
+
+    let owner = a.args()[0].to_string();
+    let repo = a.args()[1].to_string();
+    let csid = a.args()[2].to_string().parse::<i64>()?;
+
+    let Some(r) = l.context().db().lookup_repository(&owner, &repo)? else {
+        bail!("could not locate repository {owner}/{repo}");
+    };
+
+    let cs = l.context().db().load_check_suite_by_github_id(r.id, csid)?;
+
+    println!("check suite: {cs:#?}");
+    Ok(())
+}
+
 async fn do_check_suite(mut l: Level<Stuff>) -> Result<()> {
     l.cmda("list", "ls", "list check suites", cmd!(do_check_suite_list))?;
+    l.cmd(
+        "find",
+        "locate a particular check suite",
+        cmd!(do_check_suite_find),
+    )?;
 
     sel!(l).run().await
 }
