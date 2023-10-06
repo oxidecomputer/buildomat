@@ -534,6 +534,42 @@ impl Database {
             .get_results(c)?)
     }
 
+    pub fn find_check_runs_from_github_id(
+        &self,
+        repo: i64,
+        github_id: i64,
+    ) -> Result<Vec<(CheckSuite, CheckRun)>> {
+        use schema::check_run;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        /*
+         * First, locate any check runs that have this GitHub ID:
+         */
+        let runs: Vec<CheckRun> = check_run::dsl::check_run
+            .filter(check_run::dsl::github_id.eq(github_id))
+            .get_results(c)?;
+
+        Ok(runs
+            .into_iter()
+            .filter_map(|run| {
+                use schema::check_suite;
+
+                let res = check_suite::dsl::check_suite
+                    .find(run.check_suite)
+                    .get_result::<CheckSuite>(c);
+
+                if let Ok(cs) = res {
+                    if cs.repo == repo {
+                        return Some((cs, run));
+                    }
+                }
+
+                None
+            })
+            .collect())
+    }
+
     pub fn load_check_run_for_suite_by_name(
         &self,
         check_suite: &CheckSuiteId,

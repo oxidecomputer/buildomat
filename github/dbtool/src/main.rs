@@ -4,6 +4,7 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use buildomat_github_common::hooktypes;
+use buildomat_github_database::types::CheckRunVariety;
 use buildomat_github_database::Database;
 use chrono::prelude::*;
 use hiercmd::prelude::*;
@@ -368,6 +369,61 @@ async fn do_check_suite_find(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_check_run_find(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("OWNER REPO CHECKRUN"));
+
+    let a = args!(l);
+    if a.args().len() != 3 {
+        bad_args!(l, "specify a GitHub owner, repository, and check run ID");
+    }
+
+    let owner = a.args()[0].to_string();
+    let repo = a.args()[1].to_string();
+    let crid = a.args()[2].to_string().parse::<i64>()?;
+
+    let Some(r) = l.context().db().lookup_repository(&owner, &repo)? else {
+        bail!("could not locate repository {owner}/{repo}");
+    };
+
+    let crs = l.context().db().find_check_runs_from_github_id(r.id, crid)?;
+    if crs.is_empty() {
+        bail!("could not locate that check run");
+    }
+
+    for (i, (cs, cr)) in crs.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+
+        println!("SUITE {} RUN {}", cs.id, cr.id);
+        println!("    NAME {:?}", cr.name);
+        println!("    HEAD {}", cs.head_sha);
+        if let Some(plan) = cs.plan_sha.as_deref() {
+            println!("    PLAN {}", plan);
+        }
+
+        match cr.variety {
+            CheckRunVariety::Basic => {
+                if let Some(pj) = &cr.private {
+                    if let Some(o) = pj.as_object() {
+                        if let Some(bmid) = o.get("buildomat_id") {
+                            if let Some(bmid) = bmid.as_str() {
+                                println!(
+                                    "    BUILDOMAT JOB {bmid} (gong-{})",
+                                    r.id,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            _ => (),
+        }
+    }
+
+    Ok(())
+}
+
 async fn do_check_suite(mut l: Level<Stuff>) -> Result<()> {
     l.cmda("list", "ls", "list check suites", cmd!(do_check_suite_list))?;
     l.cmd(
@@ -381,6 +437,7 @@ async fn do_check_suite(mut l: Level<Stuff>) -> Result<()> {
 
 async fn do_check_run(mut l: Level<Stuff>) -> Result<()> {
     l.cmda("list", "ls", "list check runs", cmd!(do_check_run_list))?;
+    l.cmd("find", "locate a particular check run", cmd!(do_check_run_find))?;
 
     sel!(l).run().await
 }
