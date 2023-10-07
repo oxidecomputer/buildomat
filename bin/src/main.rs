@@ -1699,6 +1699,24 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_admin_job_dump(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("JOB..."));
+
+    let a = args!(l);
+
+    let c = l.context().admin();
+
+    for id in a.args() {
+        let job = c.admin_job_get().job(id).send().await?.into_inner();
+
+        println!("{:<26} {:<15} {}", job.id, job.state, job.name);
+        println!("{:#?}", job);
+        println!();
+    }
+
+    Ok(())
+}
+
 async fn do_admin_job_archive(mut l: Level<Stuff>) -> Result<()> {
     l.usage_args(Some("JOB..."));
 
@@ -1725,6 +1743,7 @@ async fn do_admin_job_archive(mut l: Level<Stuff>) -> Result<()> {
 
 async fn do_admin_job(mut l: Level<Stuff>) -> Result<()> {
     l.cmd("archive", "request archive of a job", cmd!(do_admin_job_archive))?;
+    l.cmd("dump", "dump information about jobs", cmd!(do_admin_job_dump))?;
 
     sel!(l).run().await
 }
