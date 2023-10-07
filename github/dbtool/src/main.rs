@@ -4,7 +4,7 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use buildomat_github_common::hooktypes;
-use buildomat_github_database::types::CheckRunVariety;
+use buildomat_github_database::types::{CheckRunVariety, CheckSuiteId};
 use buildomat_github_database::Database;
 use chrono::prelude::*;
 use hiercmd::prelude::*;
@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 const SHORT_SHA_LEN: usize = 16;
@@ -347,6 +348,22 @@ async fn do_check_suite_list(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_check_suite_dump(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("CHECKSUITE"));
+
+    let a = args!(l);
+    if a.args().len() != 1 {
+        bad_args!(l, "specify a buildomat check suite ULID");
+    }
+
+    let csid = CheckSuiteId::from_str(&a.args()[0])?;
+
+    let cs = l.context().db().load_check_suite(&csid)?;
+
+    println!("check suite: {cs:#?}");
+    Ok(())
+}
+
 async fn do_check_suite_find(mut l: Level<Stuff>) -> Result<()> {
     l.usage_args(Some("OWNER REPO CHECKSUITE"));
 
@@ -431,6 +448,7 @@ async fn do_check_suite(mut l: Level<Stuff>) -> Result<()> {
         "locate a particular check suite",
         cmd!(do_check_suite_find),
     )?;
+    l.cmd("dump", "dump a particular check suite", cmd!(do_check_suite_dump))?;
 
     sel!(l).run().await
 }
