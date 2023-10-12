@@ -1161,6 +1161,24 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                     continue;
                 };
 
+                /*
+                 * GitHub will gleefully fling check suite requests at us for
+                 * random other GitHub applications that happen to be working
+                 * within the same repositories as us.  This can cause duplicate
+                 * jobs, overlapping published files, and other confusion, so we
+                 * must be very careful to correctly ignore such deliveries.
+                 */
+                if suite.app.id != app.config.id as i64 {
+                    warn!(
+                        log,
+                        "delivery {} from foreign GitHub Application: {:?}",
+                        del.seq,
+                        suite.app,
+                    );
+                    app.db.delivery_ack(del.seq, ack)?;
+                    continue;
+                }
+
                 let mut cs = app.db.ensure_check_suite(
                     repo.id,
                     instid,

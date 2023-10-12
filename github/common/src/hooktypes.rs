@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 use serde::Deserialize;
@@ -29,6 +29,14 @@ pub struct User {
     pub site_admin: bool,
 }
 
+#[derive(Deserialize, Debug)]
+pub struct App {
+    pub id: i64,
+    pub name: String,
+    pub slug: String,
+    pub description: Option<String>,
+}
+
 #[derive(Deserialize, Debug, Clone, Copy)]
 pub enum UserType {
     Bot,
@@ -51,6 +59,7 @@ pub struct CheckSuite {
     pub head_branch: Option<String>,
     pub head_sha: String,
     pub status: CheckSuiteStatus,
+    pub app: App,
 }
 
 #[derive(Deserialize, Debug)]
