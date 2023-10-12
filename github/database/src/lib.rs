@@ -507,6 +507,17 @@ impl Database {
             .get_results(c)?)
     }
 
+    pub fn list_check_suite_ids(&self) -> Result<Vec<CheckSuiteId>> {
+        use schema::check_suite;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        Ok(check_suite::dsl::check_suite
+            .select(check_suite::dsl::id)
+            .order_by(check_suite::dsl::id.asc())
+            .get_results(c)?)
+    }
+
     pub fn list_check_suites_active(&self) -> Result<Vec<CheckSuite>> {
         use schema::check_suite;
 

@@ -9,7 +9,7 @@ use buildomat_github_database::Database;
 use chrono::prelude::*;
 use hiercmd::prelude::*;
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::Write;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
@@ -441,6 +441,109 @@ async fn do_check_run_find(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_duplicates(mut l: Level<Stuff>) -> Result<()> {
+    no_args!(l);
+
+    let ids = l.context().db().list_check_suite_ids()?;
+    let mut suites_for_commit: HashMap<String, Vec<CheckSuiteId>> =
+        Default::default();
+
+    for id in ids {
+        let cs = l.context().db().load_check_suite(&id)?;
+
+        let v = suites_for_commit.entry(cs.head_sha).or_default();
+
+        if !v.contains(&id) {
+            v.push(id);
+        }
+    }
+
+    let mut dups = suites_for_commit
+        .into_iter()
+        .filter(|(_, csids)| csids.len() > 1)
+        .collect::<Vec<_>>();
+
+    dups.sort_by(|a, b| a.1[0].cmp(&b.1[0]));
+
+    let mut count_per_month: BTreeMap<String, u32> = Default::default();
+    let mut year_min = 9999;
+    let mut year_max = 0;
+    let mut spread_min = None;
+    let mut spread_max = None;
+
+    for (sha, ids) in dups {
+        assert!(ids.len() > 1);
+
+        /*
+         * Determine the interval of time between the creation of the first
+         * check suite and the creation of the last one:
+         */
+        let dts = ids.iter().map(|id| id.datetime()).collect::<BTreeSet<_>>();
+        let dur = dts
+            .iter()
+            .max()
+            .unwrap()
+            .signed_duration_since(*dts.iter().min().unwrap())
+            .to_std()
+            .unwrap();
+
+        if let Some(old) = spread_min {
+            if dur < old {
+                spread_min = Some(dur);
+            }
+        } else {
+            spread_min = Some(dur)
+        }
+        if let Some(old) = spread_max {
+            if dur > old {
+                spread_max = Some(dur);
+            }
+        } else {
+            spread_max = Some(dur)
+        }
+
+        println!("SHA {sha} [{} msec spread]", dur.as_millis());
+
+        for id in ids {
+            let dt = id.datetime();
+
+            println!("    {dt} {id}");
+
+            if year_min > dt.year() {
+                year_min = dt.year();
+            }
+            if year_max < dt.year() {
+                year_max = dt.year();
+            }
+
+            let bkt = dt.format("%Y-%m").to_string();
+            let c = count_per_month.entry(bkt).or_default();
+            *c += 1;
+        }
+    }
+
+    println!();
+
+    for y in year_min..=year_max {
+        for m in 1..=12 {
+            let bkt = format!("{y:04}-{m:02}");
+            let c = count_per_month.get(&bkt).unwrap_or(&0);
+            println!("{bkt} {c}");
+        }
+
+        println!();
+    }
+
+    if let Some(val) = spread_min {
+        println!("min. spread = {} msec", val.as_millis());
+    }
+    if let Some(val) = spread_max {
+        println!("max. spread = {} msec", val.as_millis());
+    }
+
+    Ok(())
+}
+
 async fn do_check_suite(mut l: Level<Stuff>) -> Result<()> {
     l.cmda("list", "ls", "list check suites", cmd!(do_check_suite_list))?;
     l.cmd(
@@ -449,6 +552,11 @@ async fn do_check_suite(mut l: Level<Stuff>) -> Result<()> {
         cmd!(do_check_suite_find),
     )?;
     l.cmd("dump", "dump a particular check suite", cmd!(do_check_suite_dump))?;
+    l.cmd(
+        "duplicates",
+        "look for commits that had more than one check suite",
+        cmd!(do_duplicates),
+    )?;
 
     sel!(l).run().await
 }
