@@ -10,6 +10,7 @@ mod config;
 #[derive(Default)]
 struct Stuff {
     jwt: Option<octorust::auth::JWTCredentials>,
+    app_id: i64,
 }
 
 impl Stuff {
@@ -38,6 +39,10 @@ impl Stuff {
             octorust::auth::Credentials::InstallationToken(iat),
             reqwest::Client::builder().build().unwrap(),
         )
+    }
+
+    fn app_id(&self) -> i64 {
+        self.app_id
     }
 }
 
@@ -251,6 +256,93 @@ async fn do_user(mut l: Level<Stuff>) -> Result<()> {
     sel!(l).run().await
 }
 
+async fn do_check_suite_for_commit(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("OWNER REPO COMMIT"));
+
+    l.optopt("i", "", "install ID", "INSTALL");
+
+    let a = args!(l);
+
+    if a.args().len() != 3 {
+        bad_args!(l, "specify owner, repo, and commit");
+    }
+
+    let owner = a.args()[0].as_str();
+    let repo = a.args()[1].as_str();
+    let commit = a.args()[2].as_str();
+
+    let c = if let Some(i) = a.opts().opt_str("i") {
+        l.context().install_client(i.parse()?)
+    } else {
+        l.context().app_client()
+    };
+
+    /*
+     * /repos/{owner}/{repo}/commits/{ref}/check-suites
+     */
+    let res = c
+        .checks()
+        .list_suites_for_ref(
+            owner,
+            repo,
+            commit,
+            l.context().app_id(),
+            "",
+            100,
+            0,
+        )
+        .await?;
+
+    println!("{:#?}", res);
+
+    Ok(())
+}
+
+async fn do_check_suite_info(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("OWNER REPO CHECKSUITE"));
+
+    l.optopt("i", "", "install ID", "INSTALL");
+
+    let a = args!(l);
+
+    if a.args().len() != 3 {
+        bad_args!(l, "specify owner, repo, and commit");
+    }
+
+    let owner = a.args()[0].as_str();
+    let repo = a.args()[1].as_str();
+    let suite: i64 = a.args()[2].as_str().parse()?;
+
+    let c = if let Some(i) = a.opts().opt_str("i") {
+        l.context().install_client(i.parse()?)
+    } else {
+        l.context().app_client()
+    };
+
+    let res = c.checks().get_suite(owner, repo, suite).await?;
+
+    println!("{:#?}", res);
+
+    Ok(())
+}
+
+async fn do_check_suite(mut l: Level<Stuff>) -> Result<()> {
+    l.cmd("info", "check suite by GitHub ID", cmd!(do_check_suite_info))?;
+    l.cmd(
+        "commit",
+        "check suite for a commit",
+        cmd!(do_check_suite_for_commit),
+    )?;
+
+    sel!(l).run().await
+}
+
+async fn do_check(mut l: Level<Stuff>) -> Result<()> {
+    l.cmd("suite", "check suite commands", cmd!(do_check_suite))?;
+
+    sel!(l).run().await
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let mut l = Level::new("buildomat-github-ghtool", Stuff::default());
@@ -262,6 +354,7 @@ async fn main() -> Result<()> {
     l.cmd("user", "user commands", cmd!(do_user))?;
     l.cmd("webhooks", "webhook deliveries", cmd!(do_webhooks))?;
     l.cmd("again", "webhook redelivery?", cmd!(do_again))?;
+    l.cmd("check", "checks commands", cmd!(do_check))?;
 
     let mut s = sel!(l);
 
@@ -272,6 +365,8 @@ async fn main() -> Result<()> {
     let key =
         pem::parse(&key).map_err(|e| anyhow!("parse privkey: {:?}", e))?;
     let config = config::load_config("etc/app.toml")?;
+
+    s.context_mut().app_id = config.id as i64;
 
     s.context_mut().jwt = Some(octorust::auth::JWTCredentials::new(
         config.id,

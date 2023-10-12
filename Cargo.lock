@@ -767,6 +767,7 @@ dependencies = [
  "hyper",
  "jsonwebtoken",
  "octorust",
+ "openssl",
  "pem 2.0.1",
  "reqwest",
  "rusty_ulid",
