@@ -344,7 +344,11 @@ async fn aws_worker_one(
             continue;
         };
 
-        if destroy && (&i.state == "running" || &i.state == "stopped") {
+        if destroy
+            && (&i.state == "running"
+                || &i.state == "stopped"
+                || &i.state == "pending")
+        {
             destroy_instance(log, ec2, &i.id).await?;
         }
     }
