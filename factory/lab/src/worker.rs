@@ -337,7 +337,16 @@ pub(crate) async fn lab_worker(c: Arc<Central>) -> Result<()> {
 
 async fn upload_worker_one(log: &Logger, c: &Central) -> Result<()> {
     'outer: for i in c.db.active_instances()? {
+        debug!(log, "upload worker processing {}...", i.id());
+
         while let Some(ie) = c.db.instance_next_event_to_upload(&i)? {
+            debug!(
+                log,
+                "upload worker processing {} event #{}...",
+                i.id(),
+                ie.seq,
+            );
+
             let res = c
                 .client
                 .factory_worker_append()
@@ -353,6 +362,12 @@ async fn upload_worker_one(log: &Logger, c: &Central) -> Result<()> {
                  * The factory is not yet ready to receive this event record,
                  * and has asked us to hold onto it and try again soon.
                  */
+                debug!(
+                    log,
+                    "not ready to process {} event #{}",
+                    i.id(),
+                    ie.seq,
+                );
                 continue 'outer;
             }
 

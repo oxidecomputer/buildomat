@@ -241,6 +241,12 @@ pub(crate) fn thread_manager(
                                      * If we are tearing down, we are just
                                      * waiting for the dialtone.
                                      */
+                                    debug!(
+                                        log,
+                                        "dialtone from host {} while tearing \
+                                        down",
+                                        a.nodename,
+                                    );
                                     continue;
                                 }
 
@@ -349,12 +355,18 @@ pub(crate) fn thread_manager(
                 crate::db::InstanceState::Preboot => {}
                 crate::db::InstanceState::Booted => {}
                 crate::db::InstanceState::Destroying => {
+                    debug!(log, "host {} is destroying...", i.nodename);
+
                     if c.db.instance_next_event_to_upload(&i)?.is_some() {
                         /*
                          * If we still have events to upload, we need to wait
                          * for that to complete before marking the instance as
                          * destroyed.
                          */
+                        debug!(
+                            log,
+                            "host {} still has events to upload", i.nodename,
+                        );
                         continue;
                     }
 
