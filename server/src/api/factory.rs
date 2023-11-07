@@ -216,10 +216,10 @@ pub(crate) async fn factory_worker_append(
             );
             false
         }
-    } else if w.recycle {
+    } else if w.recycle || w.deleted {
         /*
-         * This worker has been recycled without having been assigned a job.
-         * Ignore any console output that arrives.
+         * This worker has been recycled or deleted without having been assigned
+         * a job.  Ignore any console output that arrives.
          */
         false
     } else {
