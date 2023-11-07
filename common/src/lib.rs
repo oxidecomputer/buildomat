@@ -26,6 +26,14 @@ where
 }
 
 pub fn make_log(name: &'static str) -> Logger {
+    let filter_level = match std::env::var("BUILDOMAT_DEBUG")
+        .map(|v| v.to_ascii_lowercase())
+        .as_deref()
+    {
+        Ok("yes") | Ok("1") | Ok("true") => slog::Level::Debug,
+        _ => slog::Level::Info,
+    };
+
     if std::io::stdout().is_terminal() {
         /*
          * Use a terminal-formatted logger for interactive processes.
@@ -34,22 +42,21 @@ pub fn make_log(name: &'static str) -> Logger {
         let dr = Mutex::new(
             slog_term::FullFormat::new(dec).use_original_order().build(),
         )
-        .filter_level(slog::Level::Debug)
+        .filter_level(filter_level)
         .fuse();
         Logger::root(dr, o!("name" => name))
     } else {
         /*
          * Otherwise, emit bunyan-formatted records:
          */
-        slog::Logger::root(
-            Mutex::new(
-                slog_bunyan::with_name(name, std::io::stdout())
-                    .set_flush(true)
-                    .build(),
-            )
-            .fuse(),
-            o!(),
+        let dr = Mutex::new(
+            slog_bunyan::with_name(name, std::io::stdout())
+                .set_flush(true)
+                .build(),
         )
+        .filter_level(filter_level)
+        .fuse();
+        Logger::root(dr, o!())
     }
 }
 

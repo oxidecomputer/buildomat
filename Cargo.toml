@@ -62,7 +62,7 @@ serde_json = "1"
 serde_repr = "0.1"
 serde_urlencoded = "0.7"
 serde_with = "1.10"
-slog = "2.7"
+slog = { version = "2.7", features = [ "release_max_level_debug" ] }
 slog-bunyan = "2.4"
 slog-term = "2.7"
 tempfile = "3.3"
