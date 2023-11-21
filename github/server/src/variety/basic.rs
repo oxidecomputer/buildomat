@@ -409,6 +409,7 @@ pub(crate) async fn run(
                 let stdio = ev.stream == "stdout" || ev.stream == "stderr";
                 let console = ev.stream == "console";
                 let worker = ev.stream == "worker";
+                let bgproc = ev.stream.starts_with("bg.");
 
                 if stdio || console {
                     /*
@@ -452,7 +453,7 @@ pub(crate) async fn run(
                      */
                     let line = format!("|W| {}", ev.payload);
                     p.events_tail.push_back((None, line));
-                } else {
+                } else if !bgproc {
                     p.events_tail.push_back((
                         Some(format!("{}/{:?}", ev.stream, ev.task)),
                         format!("{}: {}", ev.stream, ev.payload),
@@ -1308,6 +1309,7 @@ pub(crate) async fn details(
                 "worker" => "#fafad2",
                 "control" => "#90ee90",
                 "console" => "#e7d1ff",
+                s if s.starts_with("bg.") => "#f79d65",
                 _ => "#dddddd",
             };
             out += &format!("<tr style=\"background-color: {};\">", colour);
@@ -1367,13 +1369,20 @@ pub(crate) async fn details(
             /*
              * The final column is the message payload for the event.
              */
+            let pfx = ev
+                .stream
+                .strip_prefix("bg.")
+                .and_then(|s| s.split_once('.'))
+                .filter(|(_, s)| *s == "stdout" || *s == "stderr")
+                .map(|(n, _)| format!("[{}] ", html_escape::encode_safe(n)));
             out += &format!(
                 "<td style=\"vertical-align: top;\">\
                     <span style=\"white-space: pre-wrap; \
                     white-space: -moz-pre-wrap !important; \
                     font-family: monospace; \
-                    \">{}</span>\
+                    \">{}{}</span>\
                 </td>",
+                pfx.as_deref().unwrap_or(""),
                 html_escape::encode_safe(&ev.payload),
             );
 

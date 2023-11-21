@@ -78,6 +78,7 @@ pub async fn main() -> Result<()> {
 
     l.cmd("store", "access the job store", cmd!(cmd_store))?;
     l.cmd("address", "manage IP addresses for this job", cmd!(cmd_address))?;
+    l.cmd("process", "manage background processes", cmd!(cmd_process))?;
     l.hcmd("eng", "for working on and testing buildomat", cmd!(cmd_eng))?;
 
     sel!(l).run().await
@@ -412,6 +413,73 @@ async fn cmd_store_put(mut l: Level<Stuff>) -> Result<()> {
                         );
                         tokio::time::sleep(Duration::from_secs(2)).await;
                         continue;
+                    }
+                    Payload::Ack => break Ok(()),
+                    other => bail!("unexpected response: {other:?}"),
+                }
+            }
+            Err(e) => {
+                /*
+                 * Requests to the agent are relatively simple and over a UNIX
+                 * socket; they should not fail.  This implies something has
+                 * gone seriously wrong and it is unlikely that it will be fixed
+                 * without intervention.  Don't retry.
+                 */
+                bail!("could not talk to the agent: {e}");
+            }
+        }
+    }
+}
+
+async fn cmd_process(mut l: Level<Stuff>) -> Result<()> {
+    l.context_mut().connect().await?;
+
+    l.cmd("start", "start a background process", cmd!(cmd_process_start))?;
+
+    sel!(l).run().await
+}
+
+async fn cmd_process_start(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("NAME COMMAND [ARGS...]"));
+
+    let a = args!(l);
+
+    if a.args().len() < 2 {
+        bad_args!(l, "specify at least a process name and a command to run");
+    }
+
+    loop {
+        let mout = Message {
+            id: l.context_mut().ids.next().unwrap(),
+            payload: Payload::ProcessStart {
+                name: a.args()[0].to_string(),
+                cmd: a.args()[1].to_string(),
+                args: a.args().iter().skip(2).cloned().collect::<Vec<_>>(),
+
+                /*
+                 * The process will actually be spawned by the agent, which is
+                 * running under service management.  To aid the user, we want
+                 * to forward the environment and current directory so that the
+                 * process can be started as if it were run from the job program
+                 * itself.
+                 */
+                env: std::env::vars_os().collect::<Vec<_>>(),
+                pwd: std::env::current_dir()?.to_str().unwrap().to_string(),
+
+                uid: unsafe { libc::geteuid() },
+                gid: unsafe { libc::getegid() },
+            },
+        };
+
+        match l.context_mut().send_and_recv(&mout).await {
+            Ok(min) => {
+                match min.payload {
+                    Payload::Error(e) => {
+                        /*
+                         * This request is purely local to the agent, so an
+                         * error is not something we should retry indefinitely.
+                         */
+                        bail!("could not start process: {e}");
                     }
                     Payload::Ack => break Ok(()),
                     other => bail!("unexpected response: {other:?}"),

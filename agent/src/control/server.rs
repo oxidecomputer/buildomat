@@ -205,7 +205,8 @@ async fn handle_client_turn(
             ClientState::Running => match &msg.payload {
                 Payload::StoreGet(..)
                 | Payload::StorePut(..)
-                | Payload::MetadataAddresses => {
+                | Payload::MetadataAddresses
+                | Payload::ProcessStart { .. } => {
                     /*
                      * These are requests from the control program.  Pass them
                      * on to the main loop.

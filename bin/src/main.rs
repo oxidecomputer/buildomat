@@ -435,6 +435,17 @@ async fn poll_job(l: &Level<Stuff>, id: &str, json: bool) -> Result<()> {
                         println!("|T| {}", e.payload);
                     } else if e.stream == "console" {
                         println!("|C| {}", e.payload);
+                    } else if e.stream.starts_with("bg.") {
+                        let t = e.stream.split('.').collect::<Vec<_>>();
+                        if t.len() == 3 {
+                            if t[2] == "stdout" || t[2] == "stderr" {
+                                println!("[{}] {}", t[1], e.payload);
+                            } else {
+                                println!("{:?}", e);
+                            }
+                        } else {
+                            println!("{:?}", e);
+                        }
                     } else {
                         println!("{:?}", e);
                     }

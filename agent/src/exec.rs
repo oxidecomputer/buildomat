@@ -2,26 +2,27 @@
  * Copyright 2023 Oxide Computer Company
  */
 
+use std::collections::HashMap;
+use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Read};
-use std::os::unix::process::ExitStatusExt;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 use chrono::prelude::*;
 
 use super::OutputRecord;
 
 fn spawn_reader<T>(
     tx: Sender<Activity>,
-    name: &str,
+    name: String,
     stream: Option<T>,
 ) -> Option<std::thread::JoinHandle<()>>
 where
     T: Read + Send + 'static,
 {
-    let name = name.to_string();
     let stream = match stream {
         Some(stream) => stream,
         None => return None,
@@ -78,9 +79,27 @@ where
 
 #[derive(Debug)]
 pub struct ExitDetails {
-    pub duration_ms: u64,
-    pub when: DateTime<Utc>,
-    pub code: i32,
+    stream: String,
+    duration_ms: u64,
+    when: DateTime<Utc>,
+    code: i32,
+}
+
+impl ExitDetails {
+    pub(crate) fn to_record(&self) -> OutputRecord {
+        OutputRecord {
+            stream: self.stream.to_string(),
+            msg: format!(
+                "process exited: duration {} ms, exit code {}",
+                self.duration_ms, self.code
+            ),
+            time: self.when,
+        }
+    }
+
+    pub fn failed(&self) -> bool {
+        self.code != 0
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -107,35 +126,70 @@ pub enum Activity {
     Complete,
 }
 
-impl Activity {
-    fn exit(start: &Instant, end: &Instant, code: i32) -> Activity {
+struct ActivityBuilder {
+    error_stream: String,
+    exit_stream: String,
+    bgproc: Option<String>,
+}
+
+impl ActivityBuilder {
+    fn exit(&self, start: &Instant, end: &Instant, code: i32) -> Activity {
         Activity::Exit(ExitDetails {
+            stream: self.exit_stream.to_string(),
             duration_ms: end.duration_since(*start).as_millis() as u64,
             when: Utc::now(),
             code,
         })
     }
 
+    fn stdout_stream(&self) -> String {
+        if let Some(n) = &self.bgproc {
+            format!("bg.{n}.stdout")
+        } else {
+            "stdout".to_string()
+        }
+    }
+
+    fn stderr_stream(&self) -> String {
+        if let Some(n) = &self.bgproc {
+            format!("bg.{n}.stderr")
+        } else {
+            "stderr".to_string()
+        }
+    }
+
+    fn errmsg(&self, pfx: &str, msg: &str) -> String {
+        let mut s = format!("{pfx}: ");
+        if let Some(bg) = &self.bgproc {
+            s += &format!("background process {bg:?}: ");
+        }
+        s += ": ";
+        s += msg;
+        s
+    }
+
+    fn err(&self, msg: &str) -> Activity {
+        Activity::Output(OutputDetails {
+            stream: self.error_stream.to_string(),
+            msg: self.errmsg("exec error", msg),
+            time: Utc::now(),
+        })
+    }
+
+    fn warn(&self, msg: &str) -> Activity {
+        Activity::Output(OutputDetails {
+            stream: self.error_stream.to_string(),
+            msg: self.errmsg("exec warning", msg),
+            time: Utc::now(),
+        })
+    }
+}
+
+impl Activity {
     fn msg(stream: &str, msg: &str) -> Activity {
         Activity::Output(OutputDetails {
             stream: stream.to_string(),
             msg: msg.to_string(),
-            time: Utc::now(),
-        })
-    }
-
-    fn err(msg: &str) -> Activity {
-        Activity::Output(OutputDetails {
-            stream: "worker".to_string(),
-            msg: format!("exec error: {}", msg),
-            time: Utc::now(),
-        })
-    }
-
-    fn warn(msg: &str) -> Activity {
-        Activity::Output(OutputDetails {
-            stream: "worker".to_string(),
-            msg: format!("exec warning: {}", msg),
             time: Utc::now(),
         })
     }
@@ -175,31 +229,59 @@ pub fn thread_done(
     }
 }
 
-pub fn run(mut cmd: Command) -> Result<Receiver<Activity>> {
+pub fn run(cmd: Command) -> Result<Receiver<Activity>> {
     let (tx, rx) = channel::<Activity>(64);
 
+    run_common(
+        cmd,
+        ActivityBuilder {
+            error_stream: "worker".to_string(),
+            exit_stream: "task".to_string(),
+            bgproc: None,
+        },
+        tx,
+    )?;
+
+    Ok(rx)
+}
+
+fn run_common(
+    mut cmd: Command,
+    ab: ActivityBuilder,
+    tx: Sender<Activity>,
+) -> Result<u32> {
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
     let start = Instant::now();
     let mut child = cmd.spawn()?;
+    let pid = child.id();
 
-    let mut readout = spawn_reader(tx.clone(), "stdout", child.stdout.take());
-    let mut readerr = spawn_reader(tx.clone(), "stderr", child.stderr.take());
+    let mut readout =
+        spawn_reader(tx.clone(), ab.stdout_stream(), child.stdout.take());
+    let mut readerr =
+        spawn_reader(tx.clone(), ab.stderr_stream(), child.stderr.take());
 
     std::thread::spawn(move || {
         let wait = child.wait();
         let end = Instant::now();
         let stdio_warning = match wait {
             Err(e) => {
-                tx.blocking_send(Activity::err(&format!(
-                    "child wait failed: {:?}",
-                    e
-                )))
+                tx.blocking_send(
+                    ab.err(&format!("child wait failed: {:?}", e)),
+                )
                 .unwrap();
-                tx.blocking_send(Activity::exit(&start, &end, std::i32::MAX))
-                    .unwrap();
+
+                /*
+                 * Only send an exit notification if this is the primary task
+                 * process.
+                 */
+                if ab.bgproc.is_none() {
+                    tx.blocking_send(ab.exit(&start, &end, std::i32::MAX))
+                        .unwrap();
+                }
+
                 false
             }
             Ok(es) => {
@@ -215,11 +297,17 @@ pub fn run(mut cmd: Command) -> Result<Receiver<Activity>> {
                 let stdio_warning = !thread_done(&mut readout, "stdout", until)
                     | !thread_done(&mut readerr, "stderr", until);
 
+                if ab.bgproc.is_some() {
+                    /*
+                     * No further notifications are required for background
+                     * processes.
+                     */
+                }
+
                 if let Some(sig) = es.signal() {
-                    tx.blocking_send(Activity::warn(&format!(
-                        "child terminated by signal {}",
-                        sig
-                    )))
+                    tx.blocking_send(
+                        ab.warn(&format!("child terminated by signal {}", sig)),
+                    )
                     .unwrap();
                 }
                 let code = if let Some(code) = es.code() {
@@ -227,13 +315,15 @@ pub fn run(mut cmd: Command) -> Result<Receiver<Activity>> {
                 } else {
                     std::i32::MAX
                 };
-                tx.blocking_send(Activity::exit(&start, &end, code)).unwrap();
+                tx.blocking_send(ab.exit(&start, &end, code)).unwrap();
                 stdio_warning
             }
         };
 
+        assert!(ab.bgproc.is_none());
+
         if stdio_warning {
-            tx.blocking_send(Activity::warn(&format!(
+            tx.blocking_send(ab.warn(&format!(
                 "stdio descriptors remain open after task exit; \
                 waiting 60 seconds for them to close",
             )))
@@ -243,14 +333,14 @@ pub fn run(mut cmd: Command) -> Result<Receiver<Activity>> {
         let until =
             Instant::now().checked_add(Duration::from_secs(60)).unwrap();
         if !thread_done(&mut readout, "stdout", until) {
-            tx.blocking_send(Activity::warn(
+            tx.blocking_send(ab.warn(
                 "stdout descriptor may be held open by a background process; \
                 giving up!",
             ))
             .unwrap();
         }
         if !thread_done(&mut readerr, "stderr", until) {
-            tx.blocking_send(Activity::warn(
+            tx.blocking_send(ab.warn(
                 "stderr descriptor may be held open by a background process; \
                 giving up!",
             ))
@@ -260,5 +350,175 @@ pub fn run(mut cmd: Command) -> Result<Receiver<Activity>> {
         tx.blocking_send(Activity::Complete).unwrap();
     });
 
-    Ok(rx)
+    Ok(pid)
+}
+
+pub struct BackgroundProcesses {
+    rx: Receiver<Activity>,
+    tx: Sender<Activity>,
+    procs: HashMap<String, Proc>,
+}
+
+struct Proc {
+    pid: u32,
+}
+
+impl BackgroundProcesses {
+    pub fn new() -> Self {
+        let (tx, rx) = channel::<Activity>(64);
+
+        BackgroundProcesses { rx, tx, procs: Default::default() }
+    }
+
+    pub fn start(
+        &mut self,
+        name: &str,
+        cmd: &str,
+        args: &Vec<String>,
+        env: &Vec<(OsString, OsString)>,
+        pwd: &str,
+        uid: u32,
+        gid: u32,
+    ) -> Result<u32> {
+        /*
+         * Process name must be unique within the task.
+         */
+        if self.procs.contains_key(name) {
+            bail!("background process {name:?} is already running");
+        }
+
+        #[cfg(target_os = "illumos")]
+        let mut c = {
+            /*
+             * Run the process under a new contract using ctrun(1).
+             */
+            let mut c = Command::new("/usr/bin/ctrun");
+            /*
+             * The contract is marked noorphan so that when we kill the ctrun
+             * child, the whole contract is torn down:
+             */
+            c.arg("-o").arg("noorphan");
+            /*
+             * Set the lifetime to child, so that ctrun exits when its immediate
+             * child terminates, tearing down the rest of the children:
+             */
+            c.arg("-l").arg("child");
+            c.arg(cmd);
+            c
+        };
+
+        #[cfg(not(target_os = "illumos"))]
+        let mut c = {
+            /*
+             * Regrettably other operating systems do not have contracts.  For
+             * now, just start the program.
+             */
+            Command::new(cmd)
+        };
+
+        for a in args.iter() {
+            c.arg(a);
+        }
+
+        /*
+         * Use the environment, working directory, and credentials passed to us
+         * by the control program, not our own:
+         */
+        c.current_dir(pwd);
+        c.env_clear();
+        for (k, v) in env.iter() {
+            c.env(k, v);
+        }
+        c.uid(uid);
+        c.gid(gid);
+
+        let pid = run_common(
+            c,
+            ActivityBuilder {
+                error_stream: format!("bg.{name}"),
+                exit_stream: format!("bg.{name}"),
+                bgproc: Some(name.to_string()),
+            },
+            self.tx.clone(),
+        )
+        .map_err(|e| anyhow!("starting background process {name:?}: {e}"))?;
+
+        self.procs.insert(name.to_string(), Proc { pid });
+
+        Ok(pid)
+    }
+
+    pub async fn recv(&mut self) -> Option<Activity> {
+        self.rx.recv().await
+    }
+
+    pub async fn killall(&mut self) -> Vec<Activity> {
+        if self.procs.is_empty() {
+            return Default::default();
+        }
+
+        /*
+         * Allow a short grace period for background tasks to emit a few final
+         * messages prior to sending the shutdown signals.
+         */
+        std::thread::sleep(Duration::from_secs(2));
+
+        for (_, p) in self.procs.drain() {
+            let pid = p.pid.try_into().unwrap();
+
+            /*
+             * Ask the child process to exit.
+             */
+            unsafe { libc::kill(pid, libc::SIGTERM) };
+
+            /*
+             * Give each process ten seconds to exit after SIGTERM hits.
+             */
+            let deadline =
+                Instant::now().checked_add(Duration::from_secs(10)).unwrap();
+            loop {
+                if unsafe { libc::kill(pid, 0) } != 0 {
+                    break;
+                }
+
+                if deadline < Instant::now() {
+                    /*
+                     * I'm afraid we really must ask you to leave:
+                     */
+                    unsafe { libc::kill(pid, libc::SIGKILL) };
+                    break;
+                }
+
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+
+        assert!(self.procs.is_empty());
+
+        /*
+         * One last sleep to let the stdio threads push data into the event
+         * append queue.
+         */
+        std::thread::sleep(Duration::from_secs(2));
+
+        let mut lastwords = Vec::new();
+        self.rx.close();
+        while let Some(a) = self.rx.recv().await {
+            if let Activity::Output(o) = &a {
+                if o.stream.ends_with("stdout") || o.stream.ends_with("stderr")
+                {
+                    lastwords.push(a);
+                }
+            }
+        }
+
+        /*
+         * Replace the channels with new channels for the next task.
+         */
+        let (tx, rx) = channel::<Activity>(100);
+        self.rx = rx;
+        self.tx = tx;
+
+        lastwords
+    }
 }

@@ -637,6 +637,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
 
     let mut control = control::server::listen()?;
     let mut creq: Option<control::server::Request> = None;
+    let mut bgprocs = exec::BackgroundProcesses::new();
 
     let mut metadata: Option<metadata::FactoryMetadata> = None;
 
@@ -748,6 +749,20 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                         _ => Default::default(),
                     })
                 }
+                Payload::ProcessStart {
+                    name,
+                    cmd,
+                    args,
+                    env,
+                    pwd,
+                    uid,
+                    gid,
+                } => {
+                    match bgprocs.start(name, cmd, args, env, pwd, *uid, *gid) {
+                        Ok(_) => Payload::Ack,
+                        Err(e) => Payload::Error(e.to_string()),
+                    }
+                }
                 _ => Payload::Error(format!("unexpected message type")),
             };
 
@@ -773,7 +788,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                  * still attempt to upload output files before we complete
                  * the job.
                  */
-                let failures = exit_details.iter().any(|ex| ex.code != 0);
+                let failures = exit_details.iter().any(|ex| ex.failed());
                 if failures {
                     println!("aborting after failed task");
                 }
@@ -887,6 +902,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                         continue;
                     }
                     a = ch.recv() => a,
+                    a = bgprocs.recv() => a,
                 };
 
                 match a {
@@ -894,38 +910,45 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                         cw.append_task(t, &o.to_record()).await;
                     }
                     Some(exec::Activity::Exit(ex)) => {
-                        let msg = format!(
-                            "process exited: \
-                                    duration {} ms, exit code {}",
-                            ex.duration_ms, ex.code
-                        );
-                        let rec = OutputRecord {
-                            stream: "task".to_string(),
-                            msg,
-                            time: ex.when,
-                        };
-                        cw.append_task(t, &rec).await;
+                        cw.append_task(t, &ex.to_record()).await;
 
                         /*
                          * Preserve the exit status for when we record task
                          * completion, and so that we can determine whether
                          * to execute any subsequent tasks.
                          */
-                        *failed = Some(ex.code != 0);
+                        *failed = Some(ex.failed());
                         exit_details.push(ex);
                     }
                     Some(exec::Activity::Complete) => {
                         /*
+                         * Bring down any background processes started by this
+                         * task before we mark it as completed.
+                         */
+                        for a in bgprocs.killall().await {
+                            if let exec::Activity::Output(o) = a {
+                                cw.append_task(t, o.to_record()).await;
+                            }
+                        }
+
+                        /*
                          * Record completion of this task within the job.
                          */
                         cw.task_complete(t, failed.unwrap()).await;
+
                         stage = Stage::NextTask;
                     }
                     None => {
-                        stage = Stage::Complete;
-                        cw.append_msg("channel disconnected").await;
+                        for a in bgprocs.killall().await {
+                            if let exec::Activity::Output(o) = a {
+                                cw.append_task(t, o.to_record()).await;
+                            }
+                        }
 
+                        cw.append_msg("channel disconnected").await;
                         cw.job_complete(true).await;
+
+                        stage = Stage::Complete;
                     }
                 }
             }
@@ -991,7 +1014,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                     }
                     Some(upload::Activity::Complete) => {
                         let failed = upload_errors
-                            || exit_details.iter().any(|ex| ex.code != 0);
+                            || exit_details.iter().any(|ex| ex.failed());
                         cw.job_complete(failed).await;
                         stage = Stage::Complete;
                     }
