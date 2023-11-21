@@ -926,6 +926,7 @@ async fn main() -> Result<()> {
     ad.register(api::worker::worker_bootstrap).api_check()?;
     ad.register(api::worker::worker_ping).api_check()?;
     ad.register(api::worker::worker_job_append).api_check()?;
+    ad.register(api::worker::worker_job_append_one).api_check()?;
     ad.register(api::worker::worker_job_complete).api_check()?;
     ad.register(api::worker::worker_job_upload_chunk).api_check()?;
     ad.register(api::worker::worker_job_quota).api_check()?;
