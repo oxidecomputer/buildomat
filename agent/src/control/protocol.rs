@@ -2,6 +2,8 @@
  * Copyright 2023 Oxide Computer Company
  */
 
+use std::ffi::OsString;
+
 use anyhow::{bail, Result};
 use buildomat_types::metadata;
 use bytes::{Buf, BufMut, BytesMut};
@@ -26,6 +28,16 @@ pub enum Payload {
 
     MetadataAddresses,
     MetadataAddressesResult(Vec<metadata::FactoryAddresses>),
+
+    ProcessStart {
+        name: String,
+        cmd: String,
+        args: Vec<String>,
+        env: Vec<(OsString, OsString)>,
+        pwd: String,
+        uid: u32,
+        gid: u32,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

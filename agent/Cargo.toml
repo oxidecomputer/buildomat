@@ -19,6 +19,7 @@ futures = { workspace = true }
 glob = { workspace = true }
 hiercmd = { workspace = true }
 ipnet = { workspace = true }
+libc = { workspace = true }
 rusty_ulid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
