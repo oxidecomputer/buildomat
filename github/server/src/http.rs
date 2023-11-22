@@ -724,8 +724,8 @@ async fn branch_to_commit(
      * up.
      */
     let Some(repo) =
-        app.db.lookup_repository(&path.owner, &path.repo).to_500()? else
-    {
+        app.db.lookup_repository(&path.owner, &path.repo).to_500()?
+    else {
         let out = "<html><head><title>404 Not Found</title>\
             <body>Not found!</body></html>";
 

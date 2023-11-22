@@ -805,6 +805,42 @@ impl FileAgentQuery {
     }
 }
 
+async fn file_agent_common(
+    log: &Logger,
+    q: &FileAgentQuery,
+    gzip: bool,
+) -> SResult<Response<Body>, HttpError> {
+    let pfx = if gzip { "compressed " } else { "" };
+    info!(log, "{pfx}agent request; query = {:?}", q);
+
+    let filename = {
+        let mut p = PathBuf::from(if q.is_linux() {
+            "buildomat-agent-linux"
+        } else {
+            "buildomat-agent"
+        });
+        if gzip {
+            assert!(p.set_extension("gz"));
+        }
+        p
+    };
+
+    if !filename.is_file() {
+        error!(log, "missing agent file {filename:?}");
+        return Err(HttpError::for_not_found(
+            None,
+            "missing agent file".into(),
+        ));
+    }
+
+    info!(log, "using agent file {filename:?}");
+
+    let f = tokio::fs::File::open(filename).await.or_500()?;
+    let fbs = FileBytesStream::new(f);
+
+    Ok(Response::builder().body(fbs.into_body())?)
+}
+
 #[endpoint {
     method = GET,
     path = "/file/agent",
@@ -815,18 +851,22 @@ async fn file_agent(
     query: TypedQuery<FileAgentQuery>,
 ) -> SResult<Response<Body>, HttpError> {
     let log = &rqctx.log;
-    let q = query.into_inner();
 
-    info!(log, "agent request; query = {:?}", q);
+    file_agent_common(log, &query.into_inner(), false).await
+}
 
-    let filename =
-        if q.is_linux() { "buildomat-agent-linux" } else { "buildomat-agent" };
-    info!(log, "using agent file {:?}", filename);
+#[endpoint {
+    method = GET,
+    path = "/file/agent.gz",
+    unpublished = true,
+}]
+async fn file_agent_gz(
+    rqctx: RequestContext<Arc<Central>>,
+    query: TypedQuery<FileAgentQuery>,
+) -> SResult<Response<Body>, HttpError> {
+    let log = &rqctx.log;
 
-    let f = tokio::fs::File::open(filename).await.or_500()?;
-    let fbs = FileBytesStream::new(f);
-
-    Ok(Response::builder().body(fbs.into_body())?)
+    file_agent_common(log, &query.into_inner(), true).await
 }
 
 #[tokio::main]
@@ -908,6 +948,7 @@ async fn main() -> Result<()> {
     ad.register(api::factory::factory_lease_renew).api_check()?;
     ad.register(api::public::public_file_download).api_check()?;
     ad.register(file_agent).api_check()?;
+    ad.register(file_agent_gz).api_check()?;
 
     if let Some(s) = p.opt_str("S") {
         let mut f = std::fs::OpenOptions::new()
