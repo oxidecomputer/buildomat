@@ -535,7 +535,7 @@ pub(crate) async fn run(
         let mut depends: HashMap<_, _> = Default::default();
         for (name, crd) in cr.get_dependencies()? {
             if let Some(ocr) =
-                db.load_check_run_for_suite_by_name(&cs.id, &crd.job())?
+                db.load_check_run_for_suite_by_name(&cs.id, crd.job())?
             {
                 if !matches!(ocr.variety, CheckRunVariety::Basic) {
                     p.complete = true;
@@ -626,7 +626,7 @@ pub(crate) async fn run(
             let gh = app.install_client(cs.install);
 
             for dep in &c.access_repos {
-                let msg = if let Some((owner, name)) = dep.split_once("/") {
+                let msg = if let Some((owner, name)) = dep.split_once('/') {
                     match gh.repos().get(owner, name).await {
                         Ok(fr) => {
                             if !p.extra_repo_ids.contains(&fr.id) {
@@ -1084,7 +1084,7 @@ async fn bunyan_to_html(
 
         out += "</tr>\n";
 
-        f.write_all(&out.as_bytes()).await?;
+        f.write_all(out.as_bytes()).await?;
     }
     Ok(())
 }

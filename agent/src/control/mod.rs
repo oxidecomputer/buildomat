@@ -72,7 +72,7 @@ impl Stuff {
 }
 
 pub async fn main() -> Result<()> {
-    let s = Stuff { us: None, dec: None, ids: (1u64..u64::MAX).into_iter() };
+    let s = Stuff { us: None, dec: None, ids: (1u64..u64::MAX) };
 
     let mut l = Level::new("bmat", s);
 
@@ -110,7 +110,7 @@ async fn cmd_address_list(mut l: Level<Stuff>) -> Result<()> {
 
     let filter = a.opts().opt_str("f");
 
-    let addrs = loop {
+    let addrs = {
         let mout = Message {
             id: l.context_mut().ids.next().unwrap(),
             payload: Payload::MetadataAddresses,
@@ -121,9 +121,7 @@ async fn cmd_address_list(mut l: Level<Stuff>) -> Result<()> {
                 Payload::Error(e) => {
                     bail!("WARNING: control request failure: {e}");
                 }
-                Payload::MetadataAddressesResult(addrs) => {
-                    break addrs;
-                }
+                Payload::MetadataAddressesResult(addrs) => addrs,
                 other => bail!("unexpected response: {other:?}"),
             },
             Err(e) => {
@@ -232,32 +230,30 @@ async fn cmd_eng(mut l: Level<Stuff>) -> Result<()> {
 async fn cmd_eng_metadata(mut l: Level<Stuff>) -> Result<()> {
     let _ = no_args!(l);
 
-    loop {
-        let mout = Message {
-            id: l.context_mut().ids.next().unwrap(),
-            payload: Payload::MetadataAddresses,
-        };
+    let mout = Message {
+        id: l.context_mut().ids.next().unwrap(),
+        payload: Payload::MetadataAddresses,
+    };
 
-        match l.context_mut().send_and_recv(&mout).await {
-            Ok(min) => match min.payload {
-                Payload::Error(e) => {
-                    bail!("WARNING: control request failure: {e}");
-                }
-                Payload::MetadataAddressesResult(addrs) => {
-                    println!("addrs = {addrs:#?}");
-                    break Ok(());
-                }
-                other => bail!("unexpected response: {other:?}"),
-            },
-            Err(e) => {
-                /*
-                 * Requests to the agent are relatively simple and over a UNIX
-                 * socket; they should not fail.  This implies something has
-                 * gone seriously wrong and it is unlikely that it will be fixed
-                 * without intervention.  Don't retry.
-                 */
-                bail!("could not talk to the agent: {e}");
+    match l.context_mut().send_and_recv(&mout).await {
+        Ok(min) => match min.payload {
+            Payload::Error(e) => {
+                bail!("WARNING: control request failure: {e}");
             }
+            Payload::MetadataAddressesResult(addrs) => {
+                println!("addrs = {addrs:#?}");
+                Ok(())
+            }
+            other => bail!("unexpected response: {other:?}"),
+        },
+        Err(e) => {
+            /*
+             * Requests to the agent are relatively simple and over a UNIX
+             * socket; they should not fail.  This implies something has
+             * gone seriously wrong and it is unlikely that it will be fixed
+             * without intervention.  Don't retry.
+             */
+            bail!("could not talk to the agent: {e}");
         }
     }
 }
@@ -313,7 +309,7 @@ async fn cmd_store_get(mut l: Level<Stuff>) -> Result<()> {
                          * what "buildomat job store get" does outside a job;
                          * see the "buildomat" crate.
                          */
-                        if ent.value.ends_with("\n") {
+                        if ent.value.ends_with('\n') {
                             print!("{}", ent.value);
                         } else {
                             println!("{}", ent.value);
@@ -448,52 +444,50 @@ async fn cmd_process_start(mut l: Level<Stuff>) -> Result<()> {
         bad_args!(l, "specify at least a process name and a command to run");
     }
 
-    loop {
-        let mout = Message {
-            id: l.context_mut().ids.next().unwrap(),
-            payload: Payload::ProcessStart {
-                name: a.args()[0].to_string(),
-                cmd: a.args()[1].to_string(),
-                args: a.args().iter().skip(2).cloned().collect::<Vec<_>>(),
+    let mout = Message {
+        id: l.context_mut().ids.next().unwrap(),
+        payload: Payload::ProcessStart {
+            name: a.args()[0].to_string(),
+            cmd: a.args()[1].to_string(),
+            args: a.args().iter().skip(2).cloned().collect::<Vec<_>>(),
 
-                /*
-                 * The process will actually be spawned by the agent, which is
-                 * running under service management.  To aid the user, we want
-                 * to forward the environment and current directory so that the
-                 * process can be started as if it were run from the job program
-                 * itself.
-                 */
-                env: std::env::vars_os().collect::<Vec<_>>(),
-                pwd: std::env::current_dir()?.to_str().unwrap().to_string(),
+            /*
+             * The process will actually be spawned by the agent, which is
+             * running under service management.  To aid the user, we want
+             * to forward the environment and current directory so that the
+             * process can be started as if it were run from the job program
+             * itself.
+             */
+            env: std::env::vars_os().collect::<Vec<_>>(),
+            pwd: std::env::current_dir()?.to_str().unwrap().to_string(),
 
-                uid: unsafe { libc::geteuid() },
-                gid: unsafe { libc::getegid() },
-            },
-        };
+            uid: unsafe { libc::geteuid() },
+            gid: unsafe { libc::getegid() },
+        },
+    };
 
-        match l.context_mut().send_and_recv(&mout).await {
-            Ok(min) => {
-                match min.payload {
-                    Payload::Error(e) => {
-                        /*
-                         * This request is purely local to the agent, so an
-                         * error is not something we should retry indefinitely.
-                         */
-                        bail!("could not start process: {e}");
-                    }
-                    Payload::Ack => break Ok(()),
-                    other => bail!("unexpected response: {other:?}"),
+    match l.context_mut().send_and_recv(&mout).await {
+        Ok(min) => {
+            match min.payload {
+                Payload::Error(e) => {
+                    /*
+                     * This request is purely local to the agent, so an
+                     * error is not something we should retry indefinitely.
+                     */
+                    bail!("could not start process: {e}");
                 }
+                Payload::Ack => Ok(()),
+                other => bail!("unexpected response: {other:?}"),
             }
-            Err(e) => {
-                /*
-                 * Requests to the agent are relatively simple and over a UNIX
-                 * socket; they should not fail.  This implies something has
-                 * gone seriously wrong and it is unlikely that it will be fixed
-                 * without intervention.  Don't retry.
-                 */
-                bail!("could not talk to the agent: {e}");
-            }
+        }
+        Err(e) => {
+            /*
+             * Requests to the agent are relatively simple and over a UNIX
+             * socket; they should not fail.  This implies something has
+             * gone seriously wrong and it is unlikely that it will be fixed
+             * without intervention.  Don't retry.
+             */
+            bail!("could not talk to the agent: {e}");
         }
     }
 }

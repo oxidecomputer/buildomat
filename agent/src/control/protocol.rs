@@ -172,7 +172,7 @@ impl Decoder {
         if self.fin {
             bail!("abrupt end of stream");
         } else {
-            return Ok(None);
+            Ok(None)
         }
     }
 

@@ -276,7 +276,7 @@ pub(crate) async fn admin_jobs_get(
 
     let mut out = Vec::new();
     for job in jobs {
-        out.push(super::user::Job::load(log, &c, &job).await.or_500()?);
+        out.push(super::user::Job::load(log, c, &job).await.or_500()?);
     }
 
     Ok(HttpResponseOk(out))
@@ -298,7 +298,7 @@ pub(crate) async fn admin_job_get(
     let id = path.into_inner().job.parse::<db::JobId>().or_500()?;
     let job = c.db.job_by_id(id).or_500()?;
 
-    Ok(HttpResponseOk(super::user::Job::load(log, &c, &job).await.or_500()?))
+    Ok(HttpResponseOk(super::user::Job::load(log, c, &job).await.or_500()?))
 }
 
 #[endpoint {

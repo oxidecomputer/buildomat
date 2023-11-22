@@ -434,7 +434,14 @@ async fn do_check_run_find(mut l: Level<Stuff>) -> Result<()> {
                     }
                 }
             }
-            _ => (),
+            CheckRunVariety::Control
+            | CheckRunVariety::AlwaysPass
+            | CheckRunVariety::FailFirst => {
+                /*
+                 * Other varieties do have extra information like buildomat jobs
+                 * that we want to expose here.
+                 */
+            }
         }
     }
 

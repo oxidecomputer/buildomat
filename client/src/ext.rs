@@ -8,16 +8,8 @@ pub trait ClientJobExt {
 
 impl ClientJobExt for crate::types::Job {
     fn duration(&self, from: &str, until: &str) -> Option<Duration> {
-        let from = if let Some(from) = self.times.get(from) {
-            from
-        } else {
-            return None;
-        };
-        let until = if let Some(until) = self.times.get(until) {
-            until
-        } else {
-            return None;
-        };
+        let from = self.times.get(from)?;
+        let until = self.times.get(until)?;
 
         if let Ok(dur) = until.signed_duration_since(*from).to_std() {
             if dur.is_zero() {

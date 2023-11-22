@@ -67,7 +67,7 @@ where
                      */
                     tx.blocking_send(Activity::msg(
                         "error",
-                        &format!("failed to read {}: {:?}", name, e),
+                        &format!("failed to read {name}: {e:?}"),
                     ))
                     .ok();
                     return;
@@ -224,7 +224,10 @@ pub fn thread_done(
             continue;
         }
 
-        t.take().unwrap().join().expect(&format!("join {} thread", name));
+        t.take()
+            .unwrap()
+            .join()
+            .unwrap_or_else(|_| panic!("join {name} thread"));
         return true;
     }
 }
@@ -306,7 +309,7 @@ fn run_common(
 
                 if let Some(sig) = es.signal() {
                     tx.blocking_send(
-                        ab.warn(&format!("child terminated by signal {}", sig)),
+                        ab.warn(&format!("child terminated by signal {sig}")),
                     )
                     .unwrap();
                 }
@@ -323,10 +326,10 @@ fn run_common(
         assert!(ab.bgproc.is_none());
 
         if stdio_warning {
-            tx.blocking_send(ab.warn(&format!(
+            tx.blocking_send(ab.warn(
                 "stdio descriptors remain open after task exit; \
                 waiting 60 seconds for them to close",
-            )))
+            ))
             .unwrap();
         }
 
@@ -370,16 +373,21 @@ impl BackgroundProcesses {
         BackgroundProcesses { rx, tx, procs: Default::default() }
     }
 
-    pub fn start(
+    #[allow(clippy::too_many_arguments)]
+    pub fn start<'a, A, E>(
         &mut self,
         name: &str,
         cmd: &str,
-        args: &Vec<String>,
-        env: &Vec<(OsString, OsString)>,
+        args: A,
+        env: E,
         pwd: &str,
         uid: u32,
         gid: u32,
-    ) -> Result<u32> {
+    ) -> Result<u32>
+    where
+        A: IntoIterator<Item = &'a String>,
+        E: IntoIterator<Item = &'a (OsString, OsString)>,
+    {
         /*
          * Process name must be unique within the task.
          */
@@ -416,7 +424,7 @@ impl BackgroundProcesses {
             Command::new(cmd)
         };
 
-        for a in args.iter() {
+        for a in args {
             c.arg(a);
         }
 
@@ -426,7 +434,7 @@ impl BackgroundProcesses {
          */
         c.current_dir(pwd);
         c.env_clear();
-        for (k, v) in env.iter() {
+        for (k, v) in env {
             c.env(k, v);
         }
         c.uid(uid);

@@ -497,10 +497,8 @@ impl Central {
          */
         let cid = Ulid::generate();
         let p = self.chunk_path(job, cid)?;
-        let f = std::fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&p)?;
+        let f =
+            std::fs::OpenOptions::new().create_new(true).write(true).open(p)?;
         let mut bw = std::io::BufWriter::new(f);
         bw.write_all(chunk).or_500()?;
         bw.flush()?;
@@ -550,7 +548,7 @@ impl Central {
         {
             let mut bw = std::io::BufWriter::new(&mut fout);
             for (ip, _) in files.iter() {
-                let fin = std::fs::File::open(&ip).or_500()?;
+                let fin = std::fs::File::open(ip).or_500()?;
                 let mut br = std::io::BufReader::new(fin);
 
                 std::io::copy(&mut br, &mut bw).or_500()?;
@@ -952,10 +950,8 @@ async fn main() -> Result<()> {
     ad.register(file_agent_gz).api_check()?;
 
     if let Some(s) = p.opt_str("S") {
-        let mut f = std::fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&s)?;
+        let mut f =
+            std::fs::OpenOptions::new().create_new(true).write(true).open(s)?;
         ad.openapi("Buildomat", "1.0").write(&mut f)?;
         return Ok(());
     }

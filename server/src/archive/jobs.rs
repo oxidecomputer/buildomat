@@ -15,11 +15,11 @@ use slog::{debug, error, info, warn, Logger};
 use crate::{db, Central};
 
 trait FromArchiveDate {
-    fn from_archive(&self) -> Result<db::IsoDate>;
+    fn restore_from_archive(&self) -> Result<db::IsoDate>;
 }
 
 impl FromArchiveDate for String {
-    fn from_archive(&self) -> Result<db::IsoDate> {
+    fn restore_from_archive(&self) -> Result<db::IsoDate> {
         Ok(db::IsoDate(DateTime::from(DateTime::parse_from_rfc3339(self)?)))
     }
 }
@@ -193,7 +193,7 @@ impl ArchivedFile {
     }
 
     fn time_archived(&self) -> Result<db::IsoDate> {
-        Ok(self.time_archived.from_archive()?)
+        self.time_archived.restore_from_archive()
     }
 }
 
@@ -269,7 +269,7 @@ impl ArchivedStoreEntry {
     }
 
     pub fn time_update(&self) -> Result<db::IsoDate> {
-        Ok(self.time_update.from_archive()?)
+        self.time_update.restore_from_archive()
     }
 }
 
@@ -438,8 +438,7 @@ impl ArchivedJob {
     pub fn job_events(&self, minseq: usize) -> Result<Vec<db::JobEvent>> {
         let job: db::JobId = self.id.parse()?;
 
-        Ok(self
-            .events
+        self.events
             .iter()
             .enumerate()
             .filter(|(seq, _)| *seq >= minseq)
@@ -449,23 +448,22 @@ impl ArchivedJob {
                     task: ev.task.map(|t| t.try_into().unwrap()),
                     seq: seq.try_into().unwrap(),
                     stream: ev.stream.clone(),
-                    time: ev.time.from_archive()?,
+                    time: ev.time.restore_from_archive()?,
                     payload: ev.payload.clone(),
                     time_remote: ev
                         .time_remote
                         .as_ref()
-                        .map(|t| t.from_archive())
+                        .map(|t| t.restore_from_archive())
                         .transpose()?,
                 })
             })
-            .collect::<Result<Vec<_>>>()?)
+            .collect::<Result<Vec<_>>>()
     }
 
     pub fn job_outputs(&self) -> Result<Vec<(db::JobOutput, db::JobFile)>> {
         let job: db::JobId = self.id.parse()?;
 
-        Ok(self
-            .outputs
+        self.outputs
             .iter()
             .map(|f| {
                 let output = db::JobOutput {
@@ -483,7 +481,7 @@ impl ArchivedJob {
 
                 Ok((output, file))
             })
-            .collect::<Result<Vec<_>>>()?)
+            .collect::<Result<Vec<_>>>()
     }
 
     pub fn job_output(&self, id: db::JobFileId) -> Result<db::JobOutput> {
@@ -503,11 +501,12 @@ impl ArchivedJob {
     }
 
     pub fn times(&self) -> Result<HashMap<String, DateTime<Utc>>> {
-        Ok(self
-            .times
+        self.times
             .iter()
-            .map(|(name, time)| Ok((name.clone(), time.from_archive()?.0)))
-            .collect::<Result<HashMap<_, _>>>()?)
+            .map(|(name, time)| {
+                Ok((name.clone(), time.restore_from_archive()?.0))
+            })
+            .collect::<Result<HashMap<_, _>>>()
     }
 
     pub fn tags(&self) -> Result<HashMap<String, String>> {
@@ -517,8 +516,7 @@ impl ArchivedJob {
     pub fn output_rules(&self) -> Result<Vec<db::JobOutputRule>> {
         let job: db::JobId = self.id.parse()?;
 
-        Ok(self
-            .output_rules
+        self.output_rules
             .iter()
             .enumerate()
             .map(|(seq, r)| {
@@ -538,14 +536,13 @@ impl ArchivedJob {
                     require_match: *require_match,
                 })
             })
-            .collect::<Result<Vec<_>>>()?)
+            .collect::<Result<Vec<_>>>()
     }
 
     pub fn tasks(&self) -> Result<Vec<db::Task>> {
         let job: db::JobId = self.id.parse()?;
 
-        Ok(self
-            .tasks
+        self.tasks
             .iter()
             .map(|t| {
                 let ArchivedTask {
@@ -568,14 +565,14 @@ impl ArchivedJob {
                     script: script.clone(),
                     env_clear: *env_clear,
                     env: db::Dictionary(env.clone()),
-                    user_id: user_id.map(|n| db::UnixUid(n)),
-                    group_id: group_id.map(|n| db::UnixGid(n)),
+                    user_id: user_id.map(db::UnixUid),
+                    group_id: group_id.map(db::UnixGid),
                     workdir: workdir.clone(),
                     failed: *failed,
                     complete: *complete,
                 })
             })
-            .collect::<Result<Vec<_>>>()?)
+            .collect::<Result<Vec<_>>>()
     }
 
     pub fn store(&self) -> &HashMap<String, ArchivedStoreEntry> {

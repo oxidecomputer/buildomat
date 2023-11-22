@@ -52,12 +52,12 @@ pub(crate) async fn details(
     /*
      * Render a list of sets of runs:
      */
-    out += &format!("<h3>Check Runs:</h3>\n");
-    out += &format!("<ul>\n");
+    out += "<h3>Check Runs:</h3>\n";
+    out += "<ul>\n";
     for (set, runs) in &runs {
         out += &format!("<li>check run \"{set}\"\n");
 
-        out += &format!("<ul>\n");
+        out += "<ul>\n";
         for run in runs {
             out += "<li>";
             if run.active {
@@ -72,7 +72,7 @@ pub(crate) async fn details(
 
             out += &format!(
                 "{when} run <a href=\"{}\">{}</a> ",
-                app.make_details_url(cs, &run),
+                app.make_details_url(cs, run),
                 run.id,
             );
 
@@ -100,11 +100,11 @@ pub(crate) async fn details(
             }
             out += "\n";
         }
-        out += &format!("</ul>\n");
-        out += &format!("<br>\n");
-        out += &format!("<br>\n");
+        out += "</ul>\n";
+        out += "<br>\n";
+        out += "<br>\n";
     }
-    out += &format!("</ul>\n");
+    out += "</ul>\n";
 
     Ok(out)
 }

@@ -126,7 +126,7 @@ impl Database {
                 } = old;
 
                 assert_eq!(&olduuid, uuid);
-                if event != &oldevent || payload != &oldpayload.0 {
+                if event != oldevent || payload != &oldpayload.0 {
                     conflict!(
                         "delivery {seq} exists for {uuid} with different \
                         payload"

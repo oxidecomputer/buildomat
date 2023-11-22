@@ -135,7 +135,7 @@ fn thread_file_commit(
                  * Mark the commit we pulled off the queue as active before we
                  * drop the global lock:
                  */
-                let fc = Arc::clone(&g.commits.get(&bgid).unwrap());
+                let fc = Arc::clone(g.commits.get(&bgid).unwrap());
                 fc.mark_active();
 
                 break (bgid, fc, rem);
@@ -164,10 +164,10 @@ fn thread_file_commit(
          */
         let res = match &fc.kind {
             FileKind::Input { name } => {
-                c.db.job_add_input(bgid.0, &name, fid, fc.expected_size)
+                c.db.job_add_input(bgid.0, name, fid, fc.expected_size)
             }
             FileKind::Output { path } => {
-                c.db.job_add_output(bgid.0, &path, fid, fc.expected_size)
+                c.db.job_add_output(bgid.0, path, fid, fc.expected_size)
             }
         };
 

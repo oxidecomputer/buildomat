@@ -208,7 +208,7 @@ async fn os_file(
         c.target_os_dir(target.as_deref().unwrap())?
     };
     for component in path.file.iter() {
-        assert!(!component.contains("/"));
+        assert!(!component.contains('/'));
         if component == "." || component == ".." {
             return Err(HttpError::for_bad_request(
                 None,
@@ -318,9 +318,9 @@ async fn postboot_script(
          * load it from the file system now.  We still need to expand tokens
          * like %HOST% that appear in the script.
          */
-        FormatScript::new(&c.config, &hc)
+        FormatScript::new(&c.config, hc)
             .instance(i.as_ref())
-            .format(&std::fs::read_to_string(&path).or_500()?)
+            .format(&std::fs::read_to_string(path).or_500()?)
     } else if hc.debug_os_dir.is_some() {
         /*
          * Otherwise, if we are booting debug media, provide a blank postboot
@@ -328,9 +328,9 @@ async fn postboot_script(
          */
         "".to_string()
     } else {
-        FormatScript::new(&c.config, &hc)
+        FormatScript::new(&c.config, hc)
             .instance(i.as_ref())
-            .format(&include_str!("../scripts/postboot.sh"))
+            .format(include_str!("../scripts/postboot.sh"))
     };
 
     Ok(hyper::Response::builder().body(script.into())?)
@@ -356,7 +356,7 @@ async fn ipxe_script(
      * If we are in the Preboot state, pass the regular boot script that will
      * instruct iPXE to load the OS.  Otherwise, return the dialtone script.
      */
-    let script = FormatScript::new(&c.config, &hc)
+    let script = FormatScript::new(&c.config, hc)
         .instance(i.as_ref())
         .marker(if booting { MARKER_BOOT } else { MARKER_HOLD })
         .format(if hc.debug_os_dir.is_some() {
@@ -385,7 +385,7 @@ pub fn dump_api<P: AsRef<Path>>(p: P) -> Result<()> {
     let mut f =
         std::fs::OpenOptions::new().create_new(true).write(true).open(p)?;
     ad.openapi("Minder", "1.0").write(&mut f)?;
-    return Ok(());
+    Ok(())
 }
 
 pub(crate) async fn server(

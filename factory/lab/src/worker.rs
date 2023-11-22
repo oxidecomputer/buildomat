@@ -190,7 +190,7 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
      */
     let supported_targets = ready_hosts
         .iter()
-        .map(|nodename| {
+        .flat_map(|nodename| {
             c.config
                 .target
                 .iter()
@@ -198,7 +198,6 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
                 .map(|(id, _)| id.to_string())
                 .collect::<Vec<_>>()
         })
-        .flatten()
         .collect::<Vec<_>>();
 
     if !supported_targets.is_empty() {
@@ -226,8 +225,7 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
                  */
                 let ready_for_target = ready_hosts
                     .iter()
-                    .filter(|nodename| t.runs_on_node(nodename.as_str()))
-                    .next()
+                    .find(|nodename| t.runs_on_node(nodename.as_str()))
                     .cloned();
 
                 if let Some(nodename) = ready_for_target {

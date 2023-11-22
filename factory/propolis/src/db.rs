@@ -202,9 +202,8 @@ impl Handle<'_> {
     }
 
     pub fn slots_active(&self) -> Result<HashSet<u32>> {
-        let mut q = self
-            .guard
-            .prepare(&format!("SELECT slot FROM instance WHERE state <> ?"))?;
+        let mut q =
+            self.guard.prepare("SELECT slot FROM instance WHERE state <> ?")?;
 
         let res = q
             .query(params![InstanceState::Destroyed])?
@@ -343,8 +342,8 @@ pub mod types {
             value: rusqlite::types::ValueRef<'_>,
         ) -> FromSqlResult<Self> {
             let s = value.as_str()?;
-            Ok(InstanceState::from_str(s)
-                .map_err(|e| FromSqlError::Other(e.into()))?)
+            InstanceState::from_str(s)
+                .map_err(|e| FromSqlError::Other(e.into()))
         }
     }
 }

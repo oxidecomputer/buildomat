@@ -62,7 +62,7 @@ impl Stuff {
             /*
              * If this _looks_ like a ULID, make sure it actually _is_ one.
              */
-            match Ulid::from_str(&arg) {
+            match Ulid::from_str(arg) {
                 Ok(ulid) => Ok(ulid.to_string()),
                 Err(e) => bail!(
                     "argument {arg:?} looks like, but is not, a ULID: {e}"
@@ -298,7 +298,7 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
             buf.resize(5 * 1024 * 1024, 0);
 
             let buf = match f.read(&mut buf) {
-                Ok(sz) if sz == 0 => break,
+                Ok(0) => break,
                 Ok(sz) => {
                     buf.truncate(sz);
                     total += sz as u64;
@@ -532,7 +532,7 @@ async fn do_job_outputs(mut l: Level<Stuff>) -> Result<()> {
         let mut r = Row::default();
         r.add_str("id", &i.id);
         r.add_str("path", &i.path);
-        r.add_bytes("size", i.size as u64);
+        r.add_bytes("size", i.size);
         t.add_row(r);
     }
 
@@ -558,7 +558,7 @@ async fn do_job_list(mut l: Level<Stuff>) -> Result<()> {
         .map(|a| {
             a.split_once('=')
                 .ok_or_else(|| anyhow!("invalid tag filter"))
-                .and_then(|(k, v)| Ok((k.to_string(), v.to_string())))
+                .map(|(k, v)| (k.to_string(), v.to_string()))
         })
         .collect::<Result<Vec<_>>>()?;
     let fstate = a.opts().opt_str("F");
@@ -641,7 +641,7 @@ async fn do_job_timings(mut l: Level<Stuff>) -> Result<()> {
         .map(|a| {
             a.split_once(',')
                 .ok_or_else(|| anyhow!("invalid interval specification"))
-                .and_then(|(f, t)| Ok((f.to_string(), t.to_string())))
+                .map(|(f, t)| (f.to_string(), t.to_string()))
         })
         .transpose()?;
 
@@ -668,7 +668,7 @@ async fn do_job_timings(mut l: Level<Stuff>) -> Result<()> {
             }
         } else {
             let mut times = job.times.iter().collect::<Vec<_>>();
-            times.sort_by(|a, b| a.1.cmp(&b.1));
+            times.sort_by(|a, b| a.1.cmp(b.1));
 
             for time in times {
                 println!(
@@ -718,7 +718,7 @@ async fn do_job_copy(mut l: Level<Stuff>) -> Result<()> {
                 .create(true)
                 .truncate(true)
                 .write(true)
-                .open(&dst)?;
+                .open(dst)?;
 
             while let Some(ch) = res.next().await.transpose()? {
                 f.write_all(&ch)?;
@@ -904,7 +904,7 @@ async fn do_job_store_get(mut l: Level<Stuff>) -> Result<()> {
          * Output formatting here should be kept consistent with what "bmat
          * store get" does inside a job; see the "buildomat-agent" crate.
          */
-        if value.ends_with("\n") {
+        if value.ends_with('\n') {
             print!("{}", value);
         } else {
             println!("{}", value);
@@ -953,7 +953,7 @@ async fn do_job_store_list(mut l: Level<Stuff>) -> Result<()> {
         let flags = if ent.secret { "S" } else { "-" };
 
         r.add_str("name", &name);
-        r.add_str("flags", &flags);
+        r.add_str("flags", flags);
         r.add_str("value", ent.value.as_deref().unwrap_or("-"));
         r.add_str("source", &ent.source);
         r.add_age(
@@ -1664,11 +1664,11 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
                  * Completed jobs will be displayed later.
                  */
                 false
-            } else if let Some(state) = state.as_deref() {
+            } else if let Some(state) = state {
                 /*
                  * This round, we are displaying jobs of a particular status.
                  */
-                state == &job.state
+                state == job.state
             } else {
                 /*
                  * Catch all the stragglers.
@@ -1685,7 +1685,7 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
             let owner = users.get(&job.owner).unwrap_or(&job.owner);
 
             println!("~~ {} job {} (user {})", job.state, job.id, owner);
-            dump_info(&job);
+            dump_info(job);
             println!();
         }
     }
@@ -1702,7 +1702,7 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
         let owner = users.get(&job.owner).unwrap_or(&job.owner);
 
         println!("~~ recent completed job {} (user {})", job.id, owner);
-        dump_info(&job);
+        dump_info(job);
         println!();
     }
     w.lap("completed job display");
@@ -1795,7 +1795,7 @@ async fn main() -> Result<()> {
     if let Some(admin_token) = profile.admin_token.as_deref() {
         l.context_mut().client_admin = Some(
             ClientBuilder::new(&profile.url)
-                .bearer_token(&admin_token)
+                .bearer_token(admin_token)
                 .build()?,
         );
     };

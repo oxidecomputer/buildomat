@@ -163,8 +163,8 @@ fn monitor_thread(mi: Arc<Inner>) {
                 continue;
             };
             match local.get_service("milestone/multi-user-server") {
-                Ok(Some(mst)) => match mst.instances() {
-                    Ok(mut insts) => {
+                Ok(Some(mst)) => {
+                    if let Ok(mut insts) = mst.instances() {
                         if insts.any(|inst| {
                             inst.ok()
                                 .map(|i| {
@@ -174,7 +174,7 @@ fn monitor_thread(mi: Arc<Inner>) {
                                             matches!(
                                                 cur,
                                                 Some(smf::State::Online)
-                                            ) && matches!(next, None)
+                                            ) && next.is_none()
                                         })
                                         .unwrap_or(false)
                                 })
@@ -184,8 +184,7 @@ fn monitor_thread(mi: Arc<Inner>) {
                             mi.state.lock().unwrap().multiuser = true;
                         }
                     }
-                    Err(_) => (),
-                },
+                }
                 Ok(None) => {
                     warn!(log, "no multiuser milestone service?!");
                 }

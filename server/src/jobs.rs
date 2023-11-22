@@ -199,17 +199,15 @@ async fn job_waiters_one(log: &Logger, c: &Central) -> Result<()> {
                             d.prior_job, d.name,
                         )
                     }
+                } else if d.on_completed {
+                    c.db.job_depend_satisfy(j.id, d)?;
+                    continue;
                 } else {
-                    if d.on_completed {
-                        c.db.job_depend_satisfy(j.id, d)?;
-                        continue;
-                    } else {
-                        format!(
-                            "this job depends on job {} ({}) failing \
-                            but it has completed; failing job",
-                            d.prior_job, d.name,
-                        )
-                    }
+                    format!(
+                        "this job depends on job {} ({}) failing \
+                        but it has completed; failing job",
+                        d.prior_job, d.name,
+                    )
                 }
             } else {
                 /*

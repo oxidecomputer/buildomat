@@ -256,7 +256,7 @@ impl Worker {
     }
 
     pub fn factory(&self) -> FactoryId {
-        self.factory.unwrap_or_else(|| Worker::legacy_default_factory_id())
+        self.factory.unwrap_or_else(Worker::legacy_default_factory_id)
     }
 
     pub fn target(&self) -> TargetId {

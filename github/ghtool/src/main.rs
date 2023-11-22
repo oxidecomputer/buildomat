@@ -211,9 +211,9 @@ async fn do_member(mut l: Level<Stuff>) -> Result<()> {
         l.context().app_client()
     };
 
-    let res = c.orgs().check_membership_for_user(org, user).await?;
+    c.orgs().check_membership_for_user(org, user).await?;
 
-    println!("{:#?}", res);
+    println!("{user:?} is a member of {org:?}");
 
     Ok(())
 }

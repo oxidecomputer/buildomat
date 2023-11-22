@@ -185,8 +185,8 @@ fn ensure_vnic(
     /*
      * Refetch the VNIC so that we can get its auto-generated MAC address.
      */
-    Ok(dladm_vnic_get(name)?
-        .ok_or_else(|| anyhow!("VNIC {name} disappeared after creation"))?)
+    dladm_vnic_get(name)?
+        .ok_or_else(|| anyhow!("VNIC {name} disappeared after creation"))
 }
 
 enum DoNext {
@@ -473,12 +473,12 @@ async fn instance_worker_one(
             info!(log, "make root disk...");
             match targ.source()? {
                 ImageSource::File(image_path) => {
-                    let mut image = std::fs::File::open(&image_path)?;
+                    let mut image = std::fs::File::open(image_path)?;
                     let mut dst = std::fs::OpenOptions::new()
                         .create(true)
                         .truncate(true)
                         .write(true)
-                        .open(&vmdir.join("disk.raw"))?;
+                        .open(vmdir.join("disk.raw"))?;
                     std::io::copy(&mut image, &mut dst)?;
 
                     info!(log, "image is copied; expanding volume....");
@@ -613,7 +613,7 @@ async fn instance_worker_one(
             let zones = zone::Adm::list()
                 .await?
                 .into_iter()
-                .filter(|z| z.name() == &zn)
+                .filter(|z| z.name() == zn)
                 .collect::<Vec<_>>();
 
             if zones.len() > 1 {

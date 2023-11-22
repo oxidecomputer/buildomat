@@ -184,7 +184,7 @@ impl BunyanDecoder {
     }
 
     pub fn feed(&mut self, input: &Bytes) -> Result<()> {
-        self.accum.extend_from_slice(&input);
+        self.accum.extend_from_slice(input);
 
         loop {
             if let Some(i) = self.accum.iter().position(|&a| a == b'\n') {

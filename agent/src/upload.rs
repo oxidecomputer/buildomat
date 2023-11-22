@@ -248,7 +248,7 @@ pub(crate) fn upload(
                 buf.resize(5 * 1024 * 1024, 0);
 
                 let buf = match f.read(&mut buf) {
-                    Ok(sz) if sz == 0 => break,
+                    Ok(0) => break,
                     Ok(sz) => {
                         buf.truncate(sz);
                         total += sz as u64;

@@ -528,7 +528,7 @@ async fn status(
                         users.get(&job.owner).unwrap()
                     );
                     if let Some(job) = jobs.iter().find(|j| j.id == job.id) {
-                        out += &dump_info(&job);
+                        out += &dump_info(job);
                     }
                     out += "<br>\n";
                 }
@@ -557,11 +557,11 @@ async fn status(
                  * Completed jobs will be displayed in a later section.
                  */
                 false
-            } else if let Some(state) = state.as_deref() {
+            } else if let Some(state) = state {
                 /*
                  * This round, we are displaying jobs of a particular status.
                  */
-                state == &job.state
+                state == job.state
             } else {
                 /*
                  * Catch all the stragglers.
@@ -590,7 +590,7 @@ async fn status(
             out += "<li>";
             out +=
                 &format!("{} user {}", job.id, users.get(&job.owner).unwrap());
-            out += &dump_info(&job);
+            out += &dump_info(job);
             out += "<br>\n";
         }
 
@@ -626,7 +626,7 @@ async fn status(
             " <span style=\"background-color: #{}\">[{}]</span>",
             colour, word
         );
-        out += &dump_info(&job);
+        out += &dump_info(job);
         out += "<br>\n";
     }
     out += "</ul>\n";

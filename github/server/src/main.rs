@@ -429,7 +429,7 @@ impl App {
             }
 
             let mut seen = HashSet::new();
-            visit(&job, &jobfiles, &job, &mut seen)?;
+            visit(job, &jobfiles, job, &mut seen)?;
         }
 
         Ok(LoadedFromSha {

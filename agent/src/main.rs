@@ -859,7 +859,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                         Err(e) => Payload::Error(e.to_string()),
                     }
                 }
-                _ => Payload::Error(format!("unexpected message type")),
+                _ => Payload::Error("unexpected message type".to_string()),
             };
 
             req.reply(reply).await;
@@ -958,8 +958,8 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                  * account or with a different working directory.
                  */
                 cmd.current_dir(&t.workdir);
-                cmd.uid(t.uid as u32);
-                cmd.gid(t.gid as u32);
+                cmd.uid(t.uid);
+                cmd.gid(t.gid);
 
                 match exec::run(cmd) {
                     Ok(c) => {
@@ -1132,18 +1132,10 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cmdname = std::env::args()
-        .next()
-        .as_deref()
-        .map(|s| {
-            let path = PathBuf::from(s);
-            path.file_name()
-                .map(|s| s.to_str())
-                .flatten()
-                .map(|s| Some(s.to_string()))
-                .flatten()
-        })
-        .flatten();
+    let cmdname = std::env::args().next().as_deref().and_then(|s| {
+        let path = PathBuf::from(s);
+        path.file_name().and_then(|s| s.to_str()).map(|s| s.to_string())
+    });
 
     match cmdname.as_deref() {
         None => bail!("could not determine executable name?"),

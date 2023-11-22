@@ -177,13 +177,11 @@ async fn handle_client_turn(
 
     let mut ci = conn.inner.lock().await;
 
-    if r.is_writable() {
-        if !ci.writeq.is_empty() {
-            match us.try_write(&ci.writeq) {
-                Ok(n) => ci.writeq.advance(n),
-                Err(e) if e.kind() == ErrorKind::WouldBlock => (),
-                Err(e) => bail!("write error: {:?}", e),
-            }
+    if r.is_writable() && !ci.writeq.is_empty() {
+        match us.try_write(&ci.writeq) {
+            Ok(n) => ci.writeq.advance(n),
+            Err(e) if e.kind() == ErrorKind::WouldBlock => (),
+            Err(e) => bail!("write error: {:?}", e),
         }
     }
 
@@ -214,7 +212,7 @@ async fn handle_client_turn(
                     let req = Request {
                         id: msg.id,
                         payload: msg.payload.clone(),
-                        conn: Arc::clone(&conn),
+                        conn: Arc::clone(conn),
                     };
 
                     tx.send(req).await.unwrap();

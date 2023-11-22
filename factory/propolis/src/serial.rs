@@ -49,11 +49,10 @@ impl SerialForZone {
     }
 
     pub async fn recv(&mut self) -> Result<SerialData> {
-        Ok(self
-            .rx
+        self.rx
             .recv()
             .await
-            .ok_or_else(|| anyhow!("tx side of channel closed?"))?)
+            .ok_or_else(|| anyhow!("tx side of channel closed?"))
     }
 }
 

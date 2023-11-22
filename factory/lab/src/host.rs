@@ -40,11 +40,7 @@ where
 {
     let nodename = nodename.to_string();
     let tx = tx.clone();
-    let stream = if let Some(stream) = stream {
-        stream
-    } else {
-        return None;
-    };
+    let stream = stream?;
 
     let t = thread::Builder::new()
         .name(format!("read-{}", nodename))

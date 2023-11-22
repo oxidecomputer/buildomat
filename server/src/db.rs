@@ -374,9 +374,9 @@ impl Database {
          */
         let factory_metadata = factory_metadata
             .as_ref()
-            .map(|md| serde_json::to_value(md))
+            .map(serde_json::to_value)
             .transpose()?
-            .map(|j| JsonValue(j));
+            .map(JsonValue);
 
         c.immediate_transaction(|tx| {
             use schema::worker;
@@ -2013,7 +2013,7 @@ impl Database {
     }
 
     pub fn factory_auth(&self, token: &str) -> Result<Factory> {
-        if token == "" {
+        if token.is_empty() {
             /*
              * Make sure this trivially invalid value used in the legacy
              * sentinel record is never accepted, even if it somehow ends up in

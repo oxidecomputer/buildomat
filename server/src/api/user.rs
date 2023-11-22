@@ -231,9 +231,9 @@ pub(crate) struct JobOutputPublish {
 impl JobOutputPublish {
     fn safe(&self) -> DSResult<()> {
         let Self { series, version, name } = self;
-        Self::one_safe(&series)?;
-        Self::one_safe(&version)?;
-        Self::one_safe(&name)?;
+        Self::one_safe(series)?;
+        Self::one_safe(version)?;
+        Self::one_safe(name)?;
         Ok(())
     }
 
@@ -395,7 +395,7 @@ pub(crate) async fn job_get(
     let owner = c.require_user(log, &rqctx.request).await?;
     let job = c.load_job_for_user(log, &owner, p.job()?).await?;
 
-    Ok(HttpResponseOk(Job::load(log, &c, &job).await.or_500()?))
+    Ok(HttpResponseOk(Job::load(log, c, &job).await.or_500()?))
 }
 
 #[endpoint {
@@ -414,7 +414,7 @@ pub(crate) async fn jobs_get(
 
     let mut out = Vec::new();
     for job in jobs {
-        out.push(super::user::Job::load(log, &c, &job).await.or_500()?);
+        out.push(super::user::Job::load(log, c, &job).await.or_500()?);
     }
 
     Ok(HttpResponseOk(out))
@@ -462,7 +462,7 @@ impl Job {
             )
         };
 
-        Ok(format_job(&job, &tasks, output_rules, tags, &target, times))
+        Ok(format_job(job, &tasks, output_rules, tags, &target, times))
     }
 }
 
@@ -609,11 +609,11 @@ fn parse_output_rule(input: &str) -> DSResult<db::CreateOutputRule> {
         }
     }
 
-    if !rule.starts_with("/") {
+    if !rule.starts_with('/') {
         return Err(HttpError::for_client_error(
             None,
             StatusCode::BAD_REQUEST,
-            format!("output rule pattern must be absolute path"),
+            "output rule pattern must be absolute path".to_string(),
         ));
     }
 

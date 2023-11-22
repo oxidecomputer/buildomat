@@ -279,7 +279,7 @@ fn crates() -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    match std::env::args().skip(1).next().as_deref() {
+    match std::env::args().nth(1).as_deref() {
         Some("openapi") => openapi(),
         Some("build-linux-agent") => build_linux_agent(),
         Some("crates") => crates(),

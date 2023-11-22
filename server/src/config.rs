@@ -49,7 +49,7 @@ fn default_max_size_per_file_mb() -> u64 {
     /*
      * By default, allow 1GB files to be uploaded:
      */
-    1 * 1024
+    1024
 }
 
 #[derive(Deserialize, Debug)]
