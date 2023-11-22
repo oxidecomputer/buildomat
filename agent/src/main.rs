@@ -12,6 +12,7 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Result};
@@ -22,6 +23,7 @@ use rusty_ulid::Ulid;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 use tokio::time::MissedTickBehavior;
 
 use buildomat_client::types::*;
@@ -71,6 +73,7 @@ impl ConfigFile {
                 .build()
                 .expect("new client"),
             job: None,
+            tx: None,
         }
     }
 }
@@ -91,76 +94,170 @@ impl OutputRecord {
     }
 }
 
+enum AppendEntry {
+    JobEvent(OutputRecord),
+    TaskEvent(u32, OutputRecord),
+    FlushBarrier(oneshot::Sender<()>),
+}
+
+async fn append_worker(
+    client: buildomat_client::Client,
+    job: String,
+    mut rx: mpsc::Receiver<AppendEntry>,
+) {
+    let mut barrier: Option<oneshot::Sender<()>> = None;
+
+    loop {
+        if let Some(barrier) = barrier.take() {
+            barrier.send(()).unwrap();
+        }
+
+        /*
+         * Build a batch of events to send to the server.
+         */
+        let mut events: Vec<WorkerAppendJobOrTask> = Default::default();
+        while events.len() < 100 {
+            let ae = if events.is_empty() {
+                /*
+                 * Block and wait for the first event in the batch.
+                 */
+                if let Some(ae) = rx.recv().await {
+                    ae
+                } else {
+                    return;
+                }
+            } else {
+                /*
+                 * Grab more events if they are available, without blocking.
+                 */
+                if let Ok(ae) = rx.try_recv() {
+                    ae
+                } else {
+                    break;
+                }
+            };
+
+            events.push(match ae {
+                AppendEntry::JobEvent(rec) => WorkerAppendJobOrTask {
+                    task: None,
+                    stream: rec.stream,
+                    payload: rec.msg,
+                    time: rec.time,
+                },
+                AppendEntry::TaskEvent(task, rec) => WorkerAppendJobOrTask {
+                    task: Some(task),
+                    stream: rec.stream,
+                    payload: rec.msg,
+                    time: rec.time,
+                },
+                AppendEntry::FlushBarrier(fb) => {
+                    /*
+                     * If we get a flush request, push out the current batch so
+                     * we can acknowledge it in the correct order.
+                     */
+                    assert!(barrier.is_none());
+                    barrier = Some(fb);
+                    break;
+                }
+            });
+        }
+
+        if events.is_empty() {
+            continue;
+        }
+
+        loop {
+            match client
+                .worker_job_append()
+                .job(&job)
+                .body(events.clone())
+                .send()
+                .await
+            {
+                Ok(_) => break,
+                Err(e) => {
+                    println!("ERROR: append: {:?}", e);
+                    sleep_ms(1000).await;
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct ClientWrap {
     client: buildomat_client::Client,
-    job: Option<WorkerPingJob>,
+    job: Option<Arc<WorkerPingJob>>,
+    tx: Option<mpsc::Sender<AppendEntry>>,
 }
 
 impl ClientWrap {
-    async fn append(&self, rec: &OutputRecord) {
-        let job = self.job.as_ref().unwrap();
+    fn job_id(&self) -> Option<&str> {
+        self.job.as_ref().map(|job| job.id.as_str())
+    }
 
-        loop {
-            match self
-                .client
-                .worker_job_append()
-                .job(&job.id)
-                .body_map(|body| {
-                    body.stream(&rec.stream).time(rec.time).payload(&rec.msg)
-                })
-                .send()
-                .await
-            {
-                Ok(_) => return,
-                Err(e) => {
-                    println!("ERROR: append: {:?}", e);
-                    sleep_ms(1000).await;
-                }
-            }
-        }
+    async fn start_job(&mut self, job: WorkerPingJob) {
+        let job_id = job.id.to_string();
+        assert!(self.job.is_none());
+        self.job = Some(Arc::new(job));
+
+        let (tx, rx) = mpsc::channel(256);
+        self.tx = Some(tx);
+
+        tokio::task::spawn(append_worker(self.client.clone(), job_id, rx));
+    }
+
+    async fn append(&self, rec: OutputRecord) {
+        self.tx
+            .as_ref()
+            .unwrap()
+            .send(AppendEntry::JobEvent(rec))
+            .await
+            .unwrap();
     }
 
     async fn append_msg(&self, msg: &str) {
-        self.append(&OutputRecord::new("worker", msg)).await;
+        self.append(OutputRecord::new("worker", msg)).await;
     }
 
-    async fn append_task(&self, task: &WorkerPingTask, rec: &OutputRecord) {
-        let job = self.job.as_ref().unwrap();
-
-        loop {
-            match self
-                .client
-                .worker_task_append()
-                .job(&job.id)
-                .task(task.id)
-                .body_map(|body| {
-                    body.stream(&rec.stream).time(rec.time).payload(&rec.msg)
-                })
-                .send()
-                .await
-            {
-                Ok(_) => return,
-                Err(e) => {
-                    println!("ERROR: append: {:?}", e);
-                    sleep_ms(1000).await;
-                }
-            }
-        }
+    async fn append_task(&self, task: &WorkerPingTask, rec: OutputRecord) {
+        self.tx
+            .as_ref()
+            .unwrap()
+            .send(AppendEntry::TaskEvent(task.id, rec))
+            .await
+            .unwrap();
     }
 
     async fn append_task_msg(&self, task: &WorkerPingTask, msg: &str) {
-        self.append_task(task, &OutputRecord::new("task", msg)).await;
+        self.append_task(task, OutputRecord::new("task", msg)).await;
+    }
+
+    async fn flush_barrier(&self) {
+        let (tx, rx) = oneshot::channel::<()>();
+
+        self.tx
+            .as_ref()
+            .unwrap()
+            .send(AppendEntry::FlushBarrier(tx))
+            .await
+            .unwrap();
+
+        rx.await.unwrap();
     }
 
     async fn task_complete(&self, task: &WorkerPingTask, failed: bool) {
-        let job = self.job.as_ref().unwrap();
+        /*
+         * Make sure any previously enqueued event log events have gone out to
+         * the server before we complete the task.
+         */
+        self.flush_barrier().await;
 
         loop {
             match self
                 .client
                 .worker_task_complete()
-                .job(&job.id)
+                .job(self.job_id().unwrap())
                 .task(task.id)
                 .body_map(|body| body.failed(failed))
                 .send()
@@ -176,13 +273,17 @@ impl ClientWrap {
     }
 
     async fn job_complete(&self, failed: bool) {
-        let job = self.job.as_ref().unwrap();
+        /*
+         * Make sure any previously enqueued event log events have gone out to
+         * the server before we complete the job.
+         */
+        self.flush_barrier().await;
 
         loop {
             match self
                 .client
                 .worker_job_complete()
-                .job(&job.id)
+                .job(self.job_id().unwrap())
                 .body_map(|body| body.failed(failed))
                 .send()
                 .await
@@ -197,13 +298,11 @@ impl ClientWrap {
     }
 
     async fn chunk(&self, buf: bytes::Bytes) -> String {
-        let job = self.job.as_ref().unwrap();
-
         loop {
             match self
                 .client
                 .worker_job_upload_chunk()
-                .job(&job.id)
+                .job(self.job_id().unwrap())
                 .body(buf.clone())
                 .send()
                 .await
@@ -225,7 +324,6 @@ impl ClientWrap {
         size: u64,
         chunks: &[String],
     ) -> Option<String> {
-        let job = self.job.as_ref().unwrap();
         let commit_id = Ulid::generate();
         let wao = WorkerAddOutput {
             chunks: chunks.to_vec(),
@@ -238,7 +336,7 @@ impl ClientWrap {
             match self
                 .client
                 .worker_job_add_output()
-                .job(&job.id)
+                .job(self.job_id().unwrap())
                 .body(&wao)
                 .send()
                 .await
@@ -270,13 +368,11 @@ impl ClientWrap {
     }
 
     async fn input(&self, id: &str, path: &Path) {
-        let job = self.job.as_ref().unwrap();
-
         'outer: loop {
             match self
                 .client
                 .worker_job_input_download()
-                .job(&job.id)
+                .job(self.job_id().unwrap())
                 .input(id)
                 .send()
                 .await
@@ -320,10 +416,14 @@ impl ClientWrap {
     }
 
     async fn quota(&self) -> WorkerJobQuota {
-        let job = self.job.as_ref().unwrap();
-
         loop {
-            match self.client.worker_job_quota().job(&job.id).send().await {
+            match self
+                .client
+                .worker_job_quota()
+                .job(self.job_id().unwrap())
+                .send()
+                .await
+            {
                 Ok(wq) => {
                     return wq.into_inner();
                 }
@@ -664,7 +764,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                     /*
                      * If we have not yet been assigned a task, check for one:
                      */
-                    if cw.job.is_none() {
+                    if cw.job_id().is_none() {
                         assert!(matches!(stage, Stage::Ready));
 
                         if let Some(j) = &p.job {
@@ -679,7 +779,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                             );
                             tasks.clear();
                             tasks.extend(j.tasks.iter().cloned());
-                            cw.job = Some(j.clone());
+                            cw.start_job(j.clone()).await;
                             pingfreq.reset();
                             stage = Stage::Download(download::download(
                                 cw.clone(),
@@ -705,12 +805,10 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
              */
             let reply = match req.payload() {
                 Payload::StoreGet(name) => {
-                    let job = cw.job.as_ref().unwrap();
-
                     match cw
                         .client
                         .worker_job_store_get()
-                        .job(&job.id)
+                        .job(cw.job_id().unwrap())
                         .name(name)
                         .send()
                         .await
@@ -726,12 +824,10 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                     }
                 }
                 Payload::StorePut(name, value, secret) => {
-                    let job = cw.job.as_ref().unwrap();
-
                     match cw
                         .client
                         .worker_job_store_put()
-                        .job(&job.id)
+                        .job(cw.job_id().unwrap())
                         .name(name)
                         .body_map(|body| body.secret(*secret).value(value))
                         .send()
@@ -780,8 +876,6 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                 continue;
             }
             Stage::NextTask => {
-                let job = cw.job.as_ref().unwrap();
-
                 /*
                  * If any task fails, we will not execute subsequent tasks.
                  * In case it is useful for diagnostic purposes, we will
@@ -798,11 +892,11 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                      * There are no more tasks to complete, so move on to
                      * uploading outputs.
                      */
-                    println!("no more tasks for job {}", job.id);
+                    println!("no more tasks for job {}", cw.job_id().unwrap());
 
                     stage = Stage::Upload(upload::upload(
                         cw.clone(),
-                        job.output_rules.clone(),
+                        cw.job.as_ref().unwrap().output_rules.clone(),
                     ));
                     continue;
                 }
@@ -847,7 +941,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                     );
                     cmd.env("LANG", "en_US.UTF-8");
                     cmd.env("LC_ALL", "en_US.UTF-8");
-                    cmd.env("BUILDOMAT_JOB_ID", &job.id);
+                    cmd.env("BUILDOMAT_JOB_ID", cw.job_id().unwrap());
                     cmd.env("BUILDOMAT_TASK_ID", t.id.to_string());
                 }
                 for (k, v) in t.env.iter() {
@@ -878,13 +972,13 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                          */
                         cw.client
                             .worker_job_append()
-                            .job(&job.id)
-                            .body(
-                                WorkerAppendJob::builder()
-                                    .stream("agent")
-                                    .time(Utc::now())
-                                    .payload(format!("ERROR: exec: {:?}", e)),
-                            )
+                            .job(cw.job_id().unwrap())
+                            .body(vec![WorkerAppendJobOrTask {
+                                task: None,
+                                stream: "agent".into(),
+                                time: Utc::now(),
+                                payload: format!("ERROR: exec: {:?}", e),
+                            }])
                             .send()
                             .await
                             .ok();
@@ -907,10 +1001,10 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
 
                 match a {
                     Some(exec::Activity::Output(o)) => {
-                        cw.append_task(t, &o.to_record()).await;
+                        cw.append_task(t, o.to_record()).await;
                     }
                     Some(exec::Activity::Exit(ex)) => {
-                        cw.append_task(t, &ex.to_record()).await;
+                        cw.append_task(t, ex.to_record()).await;
 
                         /*
                          * Preserve the exit status for when we record task
@@ -927,7 +1021,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                          */
                         for a in bgprocs.killall().await {
                             if let exec::Activity::Output(o) = a {
-                                cw.append_task(t, &o.to_record()).await;
+                                cw.append_task(t, o.to_record()).await;
                             }
                         }
 
@@ -941,7 +1035,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                     None => {
                         for a in bgprocs.killall().await {
                             if let exec::Activity::Output(o) = a {
-                                cw.append_task(t, &o.to_record()).await;
+                                cw.append_task(t, o.to_record()).await;
                             }
                         }
 

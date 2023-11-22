@@ -230,7 +230,7 @@ pub fn thread_done(
 }
 
 pub fn run(cmd: Command) -> Result<Receiver<Activity>> {
-    let (tx, rx) = channel::<Activity>(64);
+    let (tx, rx) = channel::<Activity>(100);
 
     run_common(
         cmd,
@@ -365,7 +365,7 @@ struct Proc {
 
 impl BackgroundProcesses {
     pub fn new() -> Self {
-        let (tx, rx) = channel::<Activity>(64);
+        let (tx, rx) = channel::<Activity>(100);
 
         BackgroundProcesses { rx, tx, procs: Default::default() }
     }

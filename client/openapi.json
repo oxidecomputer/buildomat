@@ -1467,42 +1467,6 @@
         }
       }
     },
-    "/0/worker/job/{job}/append": {
-      "post": {
-        "operationId": "worker_job_append",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "job",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WorkerAppendJob"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/0/worker/job/{job}/chunk": {
       "post": {
         "operationId": "worker_job_upload_chunk",
@@ -1928,6 +1892,46 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/1/worker/job/{job}/append": {
+      "post": {
+        "operationId": "worker_job_append",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Array_of_WorkerAppendJobOrTask",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/WorkerAppendJobOrTask"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -2962,6 +2966,32 @@
           },
           "stream": {
             "type": "string"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "payload",
+          "stream",
+          "time"
+        ]
+      },
+      "WorkerAppendJobOrTask": {
+        "type": "object",
+        "properties": {
+          "payload": {
+            "type": "string"
+          },
+          "stream": {
+            "type": "string"
+          },
+          "task": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "time": {
             "type": "string",

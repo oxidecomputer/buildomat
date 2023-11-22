@@ -237,8 +237,9 @@ pub(crate) struct WorkerAppendJob {
 #[endpoint {
     method = POST,
     path = "/0/worker/job/{job}/append",
+    unpublished = true,
 }]
-pub(crate) async fn worker_job_append(
+pub(crate) async fn worker_job_append_one(
     rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<JobPath>,
     append: TypedBody<WorkerAppendJob>,
@@ -261,6 +262,49 @@ pub(crate) async fn worker_job_append(
         Utc::now(),
         Some(a.time),
         &a.payload,
+    )
+    .or_500()?;
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct WorkerAppendJobOrTask {
+    stream: String,
+    time: DateTime<Utc>,
+    payload: String,
+    task: Option<u32>,
+}
+
+#[endpoint {
+    method = POST,
+    path = "/1/worker/job/{job}/append",
+}]
+pub(crate) async fn worker_job_append(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<JobPath>,
+    append: TypedBody<Vec<WorkerAppendJobOrTask>>,
+) -> DSResult<HttpResponseUpdatedNoContent> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let w = c.require_worker(log, &rqctx.request).await?;
+
+    let a = append.into_inner();
+    let j = c.db.job_by_str(&path.into_inner().job).or_500()?; /* XXX */
+    w.owns(log, &j)?;
+
+    info!(log, "worker {} append {} events to job {}", w.id, a.len(), j.id);
+
+    c.db.job_append_events(
+        j.id,
+        a.into_iter().map(|a| db::JobEventToAppend {
+            task: a.task,
+            stream: a.stream,
+            time: Utc::now(),
+            time_remote: Some(a.time),
+            payload: a.payload,
+        }),
     )
     .or_500()?;
 

@@ -78,6 +78,14 @@ pub struct CreateOutputRule {
     pub require_match: bool,
 }
 
+pub struct JobEventToAppend {
+    pub task: Option<u32>,
+    pub stream: String,
+    pub time: DateTime<Utc>,
+    pub time_remote: Option<DateTime<Utc>>,
+    pub payload: String,
+}
+
 impl Database {
     pub fn new<P: AsRef<Path>>(
         log: Logger,
@@ -1237,6 +1245,37 @@ impl Database {
         assert_eq!(uc, 1);
 
         Ok(())
+    }
+
+    pub fn job_append_events(
+        &self,
+        job: JobId,
+        events: impl Iterator<Item = JobEventToAppend>,
+    ) -> OResult<()> {
+        use schema::job;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        c.immediate_transaction(|tx| {
+            let j: Job = job::dsl::job.find(job).get_result(tx)?;
+            if j.complete {
+                conflict!("job already complete, cannot append");
+            }
+
+            for e in events {
+                self.i_job_event_insert(
+                    tx,
+                    j.id,
+                    e.task,
+                    &e.stream,
+                    e.time,
+                    e.time_remote,
+                    &e.payload,
+                )?;
+            }
+
+            Ok(())
+        })
     }
 
     pub fn job_append_event(
