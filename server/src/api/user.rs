@@ -398,11 +398,155 @@ pub(crate) async fn job_get(
     Ok(HttpResponseOk(Job::load(log, &c, &job).await.or_500()?))
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JobScan {
+    #[serde(default)]
+    asc: bool,
+    state: Option<String>,
+}
+
+impl JobScan {
+    /**
+     * Convert the synthetic "state" field that we return to clients into a
+     * concrete set of database query parameters.
+     */
+    fn to_filter(&self, owner: db::UserId) -> DSResult<db::JobFilter> {
+        let mut jf = db::JobFilter { owner: Some(owner), ..Default::default() };
+
+        /*
+         * NOTE: This determination must continue to align with
+         * format_job_state(), which renders job state as a single enum string
+         * for the user:
+         */
+        match self.state.as_deref() {
+            None => (),
+            Some("cancelled") => {
+                /*
+                 * A cancelled job is any job that has been marked both failed
+                 * and cancelled.
+                 */
+                jf.failed = Some(true);
+                jf.cancelled = Some(true);
+            }
+            Some("failed") => {
+                /*
+                 * A failed job is any job that has been marked failed.  No
+                 * other fields are relevant.
+                 */
+                jf.failed = Some(true);
+                jf.cancelled = Some(false);
+            }
+            Some("completed") => {
+                /*
+                 * Any job marked completed without also having been marked
+                 * failed.
+                 */
+                jf.failed = Some(false);
+                jf.complete = Some(true);
+            }
+            Some("running") => {
+                /*
+                 * Any job that has not been completed (or failed), and which
+                 * has been assigned a worker.
+                 */
+                jf.failed = Some(false);
+                jf.complete = Some(false);
+                jf.worker = Some(true);
+            }
+            Some("waiting") => {
+                /*
+                 * Jobs that have not yet been assigned a worker, and which have
+                 * the waiting flag set.
+                 */
+                jf.failed = Some(false);
+                jf.complete = Some(false);
+                jf.worker = Some(false);
+                jf.waiting = Some(true);
+            }
+            Some("queued") => {
+                jf.failed = Some(false);
+                jf.complete = Some(false);
+                jf.worker = Some(false);
+                jf.waiting = Some(false);
+            }
+            Some(other) => {
+                return Err(HttpError::for_bad_request(
+                    None,
+                    format!("bad state {other:?} in filter"),
+                ));
+            }
+        }
+
+        Ok(jf)
+    }
+}
+
+impl From<JobSelect> for JobScan {
+    fn from(sel: JobSelect) -> Self {
+        JobScan { asc: sel.asc, state: sel.state.clone() }
+    }
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub(crate) struct JobSelect {
+    id: String,
+    asc: bool,
+    state: Option<String>,
+}
+
+impl JobSelect {
+    fn from_scan(job: &Job, scan: &JobScan) -> Self {
+        JobSelect {
+            id: job.id.to_string(),
+            asc: scan.asc,
+            state: scan.state.clone(),
+        }
+    }
+
+    fn marker(&self) -> DSResult<db::JobId> {
+        db::JobId::from_str(&self.id).map_err(|e| {
+            HttpError::for_bad_request(None, format!("bad marker ID: {e}"))
+        })
+    }
+}
+
+#[endpoint {
+    method = GET,
+    path = "/1/jobs",
+}]
+pub(crate) async fn jobs_get(
+    rqctx: RequestContext<Arc<Central>>,
+    pag: TypedQuery<PaginationParams<JobScan, JobSelect>>,
+) -> DSResult<HttpResponseOk<ResultsPage<Job>>> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let owner = c.require_user(log, &rqctx.request).await?;
+
+    let pag = pag.into_inner();
+    let limit = rqctx.page_limit(&pag)?;
+    let (marker, scan) = match pag.page {
+        WhichPage::First(scan) => (None, scan),
+        WhichPage::Next(sel) => (Some(sel.marker()?), sel.into()),
+    };
+    let filter = scan.to_filter(owner.id)?;
+
+    let jobs = c.db.jobs(limit, marker, scan.asc, filter).or_500()?;
+
+    let mut out = Vec::new();
+    for job in jobs {
+        out.push(super::user::Job::load(log, &c, &job).await.or_500()?);
+    }
+
+    Ok(HttpResponseOk(ResultsPage::new(out, &scan, JobSelect::from_scan)?))
+}
+
 #[endpoint {
     method = GET,
     path = "/0/jobs",
+    unpublished = true,
 }]
-pub(crate) async fn jobs_get(
+pub(crate) async fn jobs_get_old(
     rqctx: RequestContext<Arc<Central>>,
 ) -> DSResult<HttpResponseOk<Vec<Job>>> {
     let c = rqctx.context();

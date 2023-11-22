@@ -9,8 +9,9 @@ mod prelude {
     pub use chrono::prelude::*;
     pub use dropshot::{
         endpoint, HttpError, HttpResponseCreated, HttpResponseDeleted,
-        HttpResponseOk, HttpResponseUpdatedNoContent, Path as TypedPath,
-        Query as TypedQuery, RequestContext, TypedBody, UntypedBody,
+        HttpResponseOk, HttpResponseUpdatedNoContent, PaginationParams,
+        Path as TypedPath, Query as TypedQuery, RequestContext, ResultsPage,
+        TypedBody, UntypedBody, WhichPage,
     };
     pub use hyper::header::{CONTENT_LENGTH, CONTENT_TYPE};
     pub use hyper::StatusCode;

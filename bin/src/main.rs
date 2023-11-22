@@ -17,7 +17,7 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
-use buildomat_client::{ext::*, types::*, Client, ClientBuilder};
+use buildomat_client::{ext::*, prelude::*, types::*, Client, ClientBuilder};
 use buildomat_common::*;
 use chrono::prelude::*;
 use futures::StreamExt;
@@ -549,6 +549,7 @@ async fn do_job_list(mut l: Level<Stuff>) -> Result<()> {
 
     l.optmulti("T", "", "job tag filter", "TAG=VALUE");
     l.optopt("F", "", "job state filter", "STATE");
+    l.optopt("N", "", "list only the N most recent jobs", "COUNT");
 
     let a = no_args!(l);
     let ftags = a
@@ -562,10 +563,25 @@ async fn do_job_list(mut l: Level<Stuff>) -> Result<()> {
         })
         .collect::<Result<Vec<_>>>()?;
     let fstate = a.opts().opt_str("F");
+    let limit = a.opts().opt_str("N").map(|n| u32::from_str(&n)).transpose()?;
 
     let mut t = a.table();
 
-    for job in l.context().user().jobs_get().send().await?.into_inner() {
+    let mut req = l.context().user().jobs_get();
+    if let Some(limit) = limit {
+        /*
+         * Use the descending sort so that we start at the largest job ID; ULIDs
+         * are prefixed with a sortable timestamp, so the largest are the most
+         * recent.
+         */
+        req = req.asc(false).limit(limit);
+    }
+    if let Some(fstate) = &fstate {
+        req = req.state(fstate);
+    }
+    let mut res = req.stream();
+
+    while let Some(job) = res.next().await.transpose()? {
         if ftags.iter().any(|(k, v)| {
             let jv = job.tags.get(k);
             jv != Some(v)
@@ -574,7 +590,11 @@ async fn do_job_list(mut l: Level<Stuff>) -> Result<()> {
         }
 
         if let Some(s) = &fstate {
-            if s != &job.state {
+            if s == "cancelled" {
+                if &job.state != "failed" || !job.cancelled {
+                    continue;
+                }
+            } else if s != &job.state {
                 continue;
             }
         }

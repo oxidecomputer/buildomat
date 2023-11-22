@@ -3,6 +3,7 @@
  */
 
 use std::collections::HashMap;
+use std::num::NonZeroU32;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Mutex;
@@ -84,6 +85,16 @@ pub struct JobEventToAppend {
     pub time: DateTime<Utc>,
     pub time_remote: Option<DateTime<Utc>>,
     pub payload: String,
+}
+
+#[derive(Default)]
+pub struct JobFilter {
+    pub owner: Option<UserId>,
+    pub failed: Option<bool>,
+    pub complete: Option<bool>,
+    pub worker: Option<bool>,
+    pub waiting: Option<bool>,
+    pub cancelled: Option<bool>,
 }
 
 impl Database {
@@ -1734,6 +1745,54 @@ impl Database {
         assert_eq!(ic, 1);
 
         Ok(())
+    }
+
+    pub fn jobs(
+        &self,
+        limit: NonZeroU32,
+        marker: Option<JobId>,
+        asc: bool,
+        filter: JobFilter,
+    ) -> Result<Vec<Job>> {
+        use schema::job;
+
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let mut q = job::dsl::job.into_boxed();
+        if let Some(failed) = filter.failed {
+            q = q.filter(job::dsl::failed.eq(failed));
+        }
+        if let Some(complete) = filter.complete {
+            q = q.filter(job::dsl::complete.eq(complete));
+        }
+        if let Some(worker) = filter.worker {
+            if worker {
+                q = q.filter(job::dsl::worker.is_not_null());
+            } else {
+                q = q.filter(job::dsl::worker.is_null());
+            }
+        }
+        if let Some(waiting) = filter.waiting {
+            q = q.filter(job::dsl::waiting.eq(waiting));
+        }
+        if let Some(cancelled) = filter.cancelled {
+            q = q.filter(job::dsl::cancelled.eq(cancelled));
+        }
+
+        if let Some(marker) = marker {
+            if asc {
+                q = q.filter(job::dsl::id.gt(marker));
+            } else {
+                q = q.filter(job::dsl::id.lt(marker));
+            }
+        }
+        if asc {
+            q = q.order_by(job::dsl::id.asc());
+        } else {
+            q = q.order_by(job::dsl::id.desc());
+        }
+
+        Ok(q.limit(limit.get().try_into().unwrap()).get_results(c)?)
     }
 
     pub fn user_jobs(&self, owner: UserId) -> Result<Vec<Job>> {

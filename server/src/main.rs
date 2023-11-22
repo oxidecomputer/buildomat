@@ -920,6 +920,7 @@ async fn main() -> Result<()> {
     ad.register(api::user::job_add_input).api_check()?;
     ad.register(api::user::job_add_input_sync).api_check()?;
     ad.register(api::user::job_cancel).api_check()?;
+    ad.register(api::user::jobs_get_old).api_check()?;
     ad.register(api::user::jobs_get).api_check()?;
     ad.register(api::user::quota).api_check()?;
     ad.register(api::user::whoami).api_check()?;
