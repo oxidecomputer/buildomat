@@ -73,9 +73,18 @@ impl std::ops::Deref for AuthUser {
     }
 }
 
+#[derive(Iden)]
+pub enum JobTagDef {
+    Table,
+    Job,
+    Name,
+    Value,
+}
+
 #[derive(Debug)]
 //#[diesel(table_name = task)]
 //#[diesel(primary_key(job, seq))]
+#[enum_def(prefix = "", suffix = "Def")]
 pub struct Task {
     pub job: JobId,
     pub seq: i32,
@@ -88,6 +97,34 @@ pub struct Task {
     pub workdir: Option<String>,
     pub complete: bool,
     pub failed: bool,
+}
+
+impl FromRow for Task {
+    fn columns() -> Vec<ColumnRef> {
+        [
+            TaskDef::Job,
+            TaskDef::Seq,
+            TaskDef::Name,
+            TaskDef::Script,
+            TaskDef::EnvClear,
+            TaskDef::Env,
+            TaskDef::UserId,
+            TaskDef::GroupId,
+            TaskDef::Workdir,
+            TaskDef::Complete,
+            TaskDef::Failed,
+        ]
+        .into_iter()
+        .map(|col| {
+            ColumnRef::TableColumn(SeaRc::new(TaskDef::Table), SeaRc::new(col))
+        })
+        .collect()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<Task> {
+        todo!()
+        //let s = TaskDef::Token.as_str();
+    }
 }
 
 impl Task {
@@ -139,6 +176,7 @@ impl JobEvent {
 #[derive(Debug)]
 //#[diesel(table_name = job_output_rule)]
 //#[diesel(primary_key(job, seq))]
+#[enum_def(prefix = "", suffix = "Def")]
 pub struct JobOutputRule {
     pub job: JobId,
     pub seq: i32,
@@ -146,6 +184,32 @@ pub struct JobOutputRule {
     pub ignore: bool,
     pub size_change_ok: bool,
     pub require_match: bool,
+}
+
+impl FromRow for JobOutputRule {
+    fn columns() -> Vec<ColumnRef> {
+        [
+            JobOutputRuleDef::Job,
+            JobOutputRuleDef::Seq,
+            JobOutputRuleDef::Rule,
+            JobOutputRuleDef::Ignore,
+            JobOutputRuleDef::SizeChangeOk,
+            JobOutputRuleDef::RequireMatch,
+        ]
+        .into_iter()
+        .map(|col| {
+            ColumnRef::TableColumn(
+                SeaRc::new(JobOutputRuleDef::Table),
+                SeaRc::new(col),
+            )
+        })
+        .collect()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<JobOutputRule> {
+        todo!()
+        //let s = JobOutputRuleDef::Token.as_str();
+    }
 }
 
 impl JobOutputRule {
@@ -388,10 +452,7 @@ impl FromRow for Job {
         ]
         .into_iter()
         .map(|col| {
-            ColumnRef::TableColumn(
-                SeaRc::new(JobDef::Table),
-                SeaRc::new(col),
-            )
+            ColumnRef::TableColumn(SeaRc::new(JobDef::Table), SeaRc::new(col))
         })
         .collect()
     }
@@ -401,7 +462,6 @@ impl FromRow for Job {
         //let s = WorkerDef::Token.as_str();
     }
 }
-
 
 #[derive(Debug, Clone)]
 //#[diesel(table_name = factory)]

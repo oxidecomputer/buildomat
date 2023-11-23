@@ -674,6 +674,7 @@ dependencies = [
  "chrono",
  "diesel",
  "jmclib",
+ "sea-query",
  "serde",
  "serde_json",
  "slog",

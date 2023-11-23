@@ -25,7 +25,7 @@ use slog::{info, Logger};
 //                 Ok(diesel::serialize::IsNull::No)
 //             }
 //         }
-// 
+//
 //         impl<DB> FromSql<diesel::sql_types::Text, DB> for $name
 //         where
 //             DB: diesel::backend::Backend,
@@ -43,9 +43,7 @@ use slog::{info, Logger};
 #[macro_export]
 macro_rules! sqlite_json_new_type {
     ($name:ident, $mytype:ty) => {
-        #[derive(
-            Clone, Debug
-        )]
+        #[derive(Clone, Debug)]
         pub struct $name(pub $mytype);
 
         // impl ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite> for $name
@@ -98,14 +96,7 @@ macro_rules! sqlite_json_new_type {
 #[macro_export]
 macro_rules! sqlite_integer_new_type {
     ($name:ident, $mytype:ty, $intype:ty) => {
-        #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Hash,
-            Eq,
-        )]
+        #[derive(Clone, Copy, Debug, PartialEq, Hash, Eq)]
         pub struct $name(pub $mytype);
 
         // impl ToSql<diesel::sql_types::$sqltype, diesel::sqlite::Sqlite>
@@ -161,16 +152,7 @@ macro_rules! sqlite_integer_new_type {
 #[macro_export]
 macro_rules! sqlite_ulid_new_type {
     ($name:ident) => {
-        #[derive(
-            Clone,
-            Copy,
-            PartialEq,
-            Eq,
-            PartialOrd,
-            Ord,
-            Hash,
-            Debug,
-        )]
+        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
         pub struct $name(pub rusty_ulid::Ulid);
 
         impl From<$name> for sea_query::Value {
@@ -246,21 +228,14 @@ macro_rules! sqlite_ulid_new_type {
 #[derive(Clone, Copy, Debug)]
 pub struct IsoDate(pub DateTime<Utc>);
 
-// impl ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite> for IsoDate
-// where
-//     String: ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite>,
-// {
-//     fn to_sql(
-//         &self,
-//         out: &mut diesel::serialize::Output<diesel::sqlite::Sqlite>,
-//     ) -> diesel::serialize::Result {
-//         out.set_value(
-//             self.0.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
-//         );
-//         Ok(diesel::serialize::IsNull::No)
-//     }
-// }
-// 
+impl From<IsoDate> for sea_query::Value {
+    fn from(value: IsoDate) -> sea_query::Value {
+        sea_query::Value::from(
+            value.0.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
+        )
+    }
+}
+
 // impl<DB> FromSql<diesel::sql_types::Text, DB> for IsoDate
 // where
 //     DB: diesel::backend::Backend,

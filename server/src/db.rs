@@ -4,7 +4,6 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::str::FromStr;
 use std::sync::Mutex;
 
 use anyhow::{anyhow, bail, Result};
@@ -14,7 +13,7 @@ use buildomat_types::*;
 use chrono::prelude::*;
 use rusqlite::Transaction;
 use rusty_ulid::Ulid;
-use sea_query::{Expr, Order, Query, SqliteQueryBuilder};
+use sea_query::{Asterisk, Expr, Order, Query, SqliteQueryBuilder};
 use sea_query_rusqlite::{RusqliteBinder, RusqliteValues};
 #[allow(unused_imports)]
 use slog::{error, info, warn, Logger};
@@ -103,6 +102,18 @@ impl Database {
         Ok(Database(log, Mutex::new(Inner { conn })))
     }
 
+    pub fn tx_exec(
+        &self,
+        tx: &mut Transaction,
+        q: String,
+        v: RusqliteValues,
+    ) -> OResult<usize> {
+        let mut s = tx.prepare(&q)?;
+        let out = s.execute(&*v.as_params())?;
+
+        Ok(out)
+    }
+
     pub fn exec(&self, q: String, v: RusqliteValues) -> OResult<usize> {
         let c = &mut self.1.lock().unwrap().conn;
 
@@ -122,6 +133,112 @@ impl Database {
         let out = s.query_map(&*v.as_params(), T::from_row)?;
 
         Ok(out.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn get_row<T: FromRow>(
+        &self,
+        q: String,
+        v: RusqliteValues,
+    ) -> OResult<T> {
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let mut s = c.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
+        match out.len() {
+            0 => conflict!("record not found"),
+            1 => Ok(out.pop().unwrap()),
+            n => conflict!("found {n} records when we wanted only 1"),
+        }
+    }
+
+    pub fn get_row_opt<T: FromRow>(
+        &self,
+        q: String,
+        v: RusqliteValues,
+    ) -> OResult<Option<T>> {
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let mut s = c.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
+        match out.len() {
+            0 => Ok(None),
+            1 => Ok(Some(out.pop().unwrap())),
+            n => conflict!("found {n} records when we wanted only 1"),
+        }
+    }
+
+    pub fn tx_get_count(
+        &self,
+        tx: &mut Transaction,
+        q: String,
+        v: RusqliteValues,
+    ) -> OResult<usize> {
+        let mut s = tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), |row| row.get::<_, i64>(0))?;
+        let mut out = out.collect::<rusqlite::Result<Vec<i64>>>()?;
+        match out.len() {
+            0 => conflict!("record not found"),
+            1 => Ok(out[0].try_into().unwrap()),
+            n => conflict!("found {n} records when we wanted only 1"),
+        }
+    }
+
+    pub fn tx_get_row_opt<T: FromRow>(
+        &self,
+        tx: &mut Transaction,
+        q: String,
+        v: RusqliteValues,
+    ) -> OResult<Option<T>> {
+        let mut s = tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
+        match out.len() {
+            0 => Ok(None),
+            1 => Ok(Some(out.pop().unwrap())),
+            n => conflict!("found {n} records when we wanted only 1"),
+        }
+    }
+
+    pub fn tx_get_row<T: FromRow>(
+        &self,
+        tx: &mut Transaction,
+        q: String,
+        v: RusqliteValues,
+    ) -> OResult<T> {
+        let mut s = tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
+        match out.len() {
+            0 => conflict!("record not found"),
+            1 => Ok(out.pop().unwrap()),
+            n => conflict!("found {n} records when we wanted only 1"),
+        }
+    }
+
+    fn i_worker_for_bootstrap(
+        &self,
+        tx: &mut Transaction,
+        bs: &str,
+    ) -> OResult<Worker> {
+        let (q, v) = Query::select()
+            .from(WorkerDef::Table)
+            .columns(Worker::columns())
+            .and_where(Expr::col(WorkerDef::Bootstrap).eq(bs))
+            .build_rusqlite(SqliteQueryBuilder);
+
+        self.tx_get_row(tx, q, v)
+    }
+
+    fn i_worker(&self, tx: &mut Transaction, id: WorkerId) -> OResult<Worker> {
+        let (q, v) = Query::select()
+            .from(WorkerDef::Table)
+            .columns(Worker::columns())
+            .and_where(Expr::col(WorkerDef::Id).eq(id))
+            .build_rusqlite(SqliteQueryBuilder);
+
+        self.tx_get_row(tx, q, v)
     }
 
     pub fn workers(&self) -> OResult<Vec<Worker>> {
@@ -227,30 +344,35 @@ impl Database {
     }
 
     pub fn worker_destroy(&self, id: WorkerId) -> Result<bool> {
-        todo!()
-        // use schema::worker::dsl;
+        let (q, v) = Query::update()
+            .table(WorkerDef::Table)
+            .values([(WorkerDef::Deleted, true.into())])
+            .and_where(Expr::col(WorkerDef::Id).eq(id))
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(diesel::update(dsl::worker)
-        //     .filter(dsl::id.eq(id))
-        //     .set(dsl::deleted.eq(true))
-        //     .execute(c)?
-        //     > 0)
+        Ok(self.exec(q, v)? > 0)
     }
 
     pub fn worker_ping(&self, id: WorkerId) -> Result<bool> {
-        todo!()
-        // use schema::worker::dsl;
+        let now = IsoDate(Utc::now());
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        let (q, v) = Query::update()
+            .table(WorkerDef::Table)
+            .values([(WorkerDef::Lastping, now.into())])
+            .and_where(Expr::col(WorkerDef::Id).eq(id))
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // let now = models::IsoDate(Utc::now());
-        // Ok(diesel::update(dsl::worker)
-        //     .filter(dsl::id.eq(id))
-        //     .set(dsl::lastping.eq(now))
-        //     .execute(c)?
-        //     > 0)
+        Ok(self.exec(q, v)? > 0)
+    }
+
+    fn i_job(&self, tx: &mut Transaction, jid: JobId) -> OResult<Job> {
+        let (q, v) = Query::select()
+            .from(JobDef::Table)
+            .columns(Job::columns())
+            .and_where(Expr::col(JobDef::Id).eq(jid))
+            .build_rusqlite(SqliteQueryBuilder);
+
+        self.tx_get_row(tx, q, v)
     }
 
     pub fn i_worker_assign_job(
@@ -259,71 +381,81 @@ impl Database {
         w: &Worker,
         jid: JobId,
     ) -> OResult<()> {
-        todo!()
-        // use schema::job;
+        let j: Job = self.i_job(tx, jid)?;
+        if let Some(jw) = j.worker.as_ref() {
+            conflict!("job {} already assigned to worker {}", j.id, jw);
+        }
 
-        // let j: Job = job::dsl::job.find(jid).get_result(tx)?;
-        // if let Some(jw) = j.worker.as_ref() {
-        //     conflict!("job {} already assigned to worker {}", j.id, jw);
-        // }
+        let c = {
+            let (q, v) = Query::select()
+                .expr(Expr::asterisk().count())
+                .from(JobDef::Table)
+                .and_where(Expr::col(JobDef::Worker).eq(w.id))
+                .build_rusqlite(SqliteQueryBuilder);
 
-        // let c: i64 = job::dsl::job
-        //     .filter(job::dsl::worker.eq(w.id))
-        //     .count()
-        //     .get_result(tx)?;
-        // if c > 0 {
-        //     conflict!("worker {} already has {} jobs assigned", w.id, c);
-        // }
+            self.tx_get_count(tx, q, v)?
+        };
+        if c > 0 {
+            conflict!("worker {} already has {} jobs assigned", w.id, c);
+        }
 
-        // let uc = diesel::update(job::dsl::job)
-        //     .filter(job::dsl::id.eq(j.id))
-        //     .set(job::dsl::worker.eq(w.id))
-        //     .execute(tx)?;
-        // assert_eq!(uc, 1);
+        let uc = {
+            let (q, v) = Query::update()
+                .table(JobDef::Table)
+                .values([(JobDef::Worker, w.id.into())])
+                .and_where(Expr::col(JobDef::Id).eq(j.id))
+                .and_where(Expr::col(JobDef::Worker).is_null())
+                .build_rusqlite(SqliteQueryBuilder);
 
-        // /*
-        //  * Estimate how long the job was waiting in the queue for a worker.
-        //  */
-        // self.i_job_time_record(tx, j.id, "assigned", Utc::now())?;
-        // let wait = if let Some(dur) =
-        //     self.i_job_time_delta(tx, j.id, "ready", "assigned")?
-        // {
-        //     format!(" (queued for {})", dur.render())
-        // } else if let Ok(dur) =
-        //     Utc::now().signed_duration_since(j.id.datetime()).to_std()
-        // {
-        //     format!(" (queued for {})", dur.render())
-        // } else {
-        //     "".to_string()
-        // };
+            self.tx_exec(tx, q, v)?
+        };
+        assert_eq!(uc, 1);
 
-        // self.i_job_event_insert(
-        //     tx,
-        //     j.id,
-        //     None,
-        //     "control",
-        //     Utc::now(),
-        //     None,
-        //     &format!("job assigned to worker {}{}", w.id, wait),
-        // )?;
+        /*
+         * Estimate how long the job was waiting in the queue for a worker.
+         */
+        self.i_job_time_record(tx, j.id, "assigned", Utc::now())?;
+        let wait = if let Some(dur) =
+            self.i_job_time_delta(tx, j.id, "ready", "assigned")?
+        {
+            format!(" (queued for {})", dur.render())
+        } else if let Ok(dur) =
+            Utc::now().signed_duration_since(j.id.datetime()).to_std()
+        {
+            format!(" (queued for {})", dur.render())
+        } else {
+            "".to_string()
+        };
 
-        // Ok(())
+        self.i_job_event_insert(
+            tx,
+            j.id,
+            None,
+            "control",
+            Utc::now(),
+            None,
+            &format!("job assigned to worker {}{}", w.id, wait),
+        )?;
+
+        Ok(())
     }
 
     pub fn worker_assign_job(&self, wid: WorkerId, jid: JobId) -> OResult<()> {
-        todo!()
-        // let c = &mut self.1.lock().unwrap().conn;
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // c.immediate_transaction(|tx| {
-        //     use schema::worker;
+        let w = self.i_worker(&mut tx, wid)?;
+        if w.deleted || w.recycle {
+            conflict!("worker {} already deleted, cannot assign job", w.id);
+        }
 
-        //     let w: Worker = worker::dsl::worker.find(wid).get_result(tx)?;
-        //     if w.deleted || w.recycle {
-        //         conflict!("worker {} already deleted, cannot assign job", w.id);
-        //     }
+        self.i_worker_assign_job(&mut tx, &w, jid)?;
 
-        //     self.i_worker_assign_job(tx, &w, jid)
-        // })
+        tx.commit()?;
+
+        Ok(())
     }
 
     pub fn worker_bootstrap(
@@ -331,66 +463,70 @@ impl Database {
         bootstrap: &str,
         token: &str,
     ) -> Result<Option<Worker>> {
-        todo!()
-        // let log = &self.0;
-        // let c = &mut self.1.lock().unwrap().conn;
+        let log = &self.0;
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // c.immediate_transaction(|tx| {
-        //     use schema::worker;
+        let w = self.i_worker_for_bootstrap(&mut tx, bootstrap)?;
+        if w.deleted {
+            error!(
+                log,
+                "worker {} already deleted, cannot bootstrap", w.id
+            );
+            return Ok(None);
+        }
 
-        //     let w: Worker = worker::dsl::worker
-        //         .filter(worker::dsl::bootstrap.eq(bootstrap))
-        //         .get_result(tx)?;
-        //     assert_eq!(&w.bootstrap, bootstrap);
-        //     if w.deleted {
-        //         error!(
-        //             log,
-        //             "worker {} already deleted, cannot bootstrap", w.id
-        //         );
-        //         return Ok(None);
-        //     }
+        if w.factory_private.is_none() {
+            error!(
+                log,
+                "worker {} has no instance, cannot bootstrap", w.id
+            );
+            return Ok(None);
+        }
 
-        //     if w.factory_private.is_none() {
-        //         error!(
-        //             log,
-        //             "worker {} has no instance, cannot bootstrap", w.id
-        //         );
-        //         return Ok(None);
-        //     }
+        if let Some(current) = w.token.as_deref() {
+            if current == token {
+                /*
+                 * Everything is as expected.
+                 */
+            } else {
+                /*
+                 * A conflict exists?
+                 */
+                error!(
+                    log,
+                    "worker {} already has a token ({} != {})",
+                    w.id,
+                    current,
+                    token
+                );
+                return Ok(None);
+            }
+        } else {
+            let count = {
+                let (q, v) = Query::update()
+                    .table(WorkerDef::Table)
+                    .values([
+                        (WorkerDef::Token, token.into()),
+                        (WorkerDef::Lastping, IsoDate(Utc::now()).into()),
+                    ])
+                    .and_where(Expr::col(WorkerDef::Id).eq(w.id))
+                    .and_where(Expr::col(WorkerDef::Bootstrap).eq(bootstrap))
+                    .and_where(Expr::col(WorkerDef::Token).is_null())
+                    .build_rusqlite(SqliteQueryBuilder);
 
-        //     if let Some(current) = w.token.as_deref() {
-        //         if current == token {
-        //             /*
-        //              * Everything is as expected.
-        //              */
-        //         } else {
-        //             /*
-        //              * A conflict exists?
-        //              */
-        //             error!(
-        //                 log,
-        //                 "worker {} already has a token ({} != {})",
-        //                 w.id,
-        //                 current,
-        //                 token
-        //             );
-        //             return Ok(None);
-        //         }
-        //     } else {
-        //         let count = diesel::update(worker::dsl::worker)
-        //             .filter(worker::dsl::id.eq(w.id))
-        //             .filter(worker::dsl::bootstrap.eq(bootstrap))
-        //             .filter(worker::dsl::token.is_null())
-        //             .set((
-        //                 worker::dsl::token.eq(token),
-        //                 worker::dsl::lastping.eq(IsoDate(Utc::now())),
-        //             ))
-        //             .execute(tx)?;
-        //         assert_eq!(count, 1);
-        //     }
+                self.tx_exec(&mut tx, q, v)?
+            };
+            assert_eq!(count, 1);
+        }
 
-        //     Ok(Some(worker::dsl::worker.find(w.id).get_result(tx)?))
-        // })
+        let out = self.i_worker(&mut tx, w.id)?;
+
+        tx.commit()?;
+
+        Ok(Some(out))
     }
 
     pub fn worker_associate(
@@ -483,25 +619,27 @@ impl Database {
         // })
     }
 
-    pub fn worker_get(&self, id: WorkerId) -> Result<Worker> {
-        todo!()
+    pub fn worker_get(&self, id: WorkerId) -> OResult<Worker> {
+        let (q, v) = Query::select()
+            .from(WorkerDef::Table)
+            .columns(Worker::columns())
+            .and_where(Expr::col(WorkerDef::Id).eq(id))
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // use schema::worker::dsl;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-        // Ok(dsl::worker.find(id).get_result(c)?)
+        self.get_row(q, v)
     }
 
-    pub fn worker_get_opt(&self, id: WorkerId) -> Result<Option<Worker>> {
-        todo!()
+    pub fn worker_get_opt(&self, id: WorkerId) -> OResult<Option<Worker>> {
+        let (q, v) = Query::select()
+            .from(WorkerDef::Table)
+            .columns(Worker::columns())
+            .and_where(Expr::col(WorkerDef::Id).eq(id))
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // use schema::worker::dsl;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-        // Ok(dsl::worker.find(id).get_result(c).optional()?)
+        self.get_row_opt(q, v)
     }
 
-    pub fn worker_auth(&self, token: &str) -> Result<Worker> {
+    pub fn worker_auth(&self, token: &str) -> OResult<Worker> {
         todo!()
 
         // use schema::worker;
@@ -575,102 +713,103 @@ impl Database {
     /**
      * Enumerate all jobs.
      */
-    pub fn jobs_all(&self) -> Result<Vec<Job>> {
-        todo!()
+    pub fn jobs_all(&self) -> OResult<Vec<Job>> {
+        let (q, v) = Query::select()
+            .from(JobDef::Table)
+            .columns(Job::columns())
+            .order_by(JobDef::Id, Order::Asc)
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // use schema::job::dsl;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-        // Ok(dsl::job.order_by(dsl::id.asc()).get_results(c)?)
+        self.get_rows(q, v)
     }
 
     /**
      * Enumerate jobs that are active; i.e., not yet complete, but not waiting.
      */
-    pub fn jobs_active(&self) -> Result<Vec<Job>> {
-        todo!()
+    pub fn jobs_active(&self) -> OResult<Vec<Job>> {
+        let (q, v) = Query::select()
+            .from(JobDef::Table)
+            .columns(Job::columns())
+            .order_by(JobDef::Id, Order::Asc)
+            .and_where(Expr::col(JobDef::Complete).eq(false))
+            .and_where(Expr::col(JobDef::Waiting).eq(false))
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // use schema::job::dsl;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-        // Ok(dsl::job
-        //     .filter(dsl::complete.eq(false))
-        //     .filter(dsl::waiting.eq(false))
-        //     .order_by(dsl::id.asc())
-        //     .get_results(c)?)
+        self.get_rows(q, v)
     }
 
     /**
      * Enumerate jobs that are waiting for inputs, or for dependees to complete.
      */
-    pub fn jobs_waiting(&self) -> Result<Vec<Job>> {
-        todo!()
+    pub fn jobs_waiting(&self) -> OResult<Vec<Job>> {
+        let (q, v) = Query::select()
+            .from(JobDef::Table)
+            .columns(Job::columns())
+            .order_by(JobDef::Id, Order::Asc)
+            .and_where(Expr::col(JobDef::Complete).eq(false))
+            .and_where(Expr::col(JobDef::Waiting).eq(true))
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // use schema::job::dsl;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-        // Ok(dsl::job
-        //     .filter(dsl::complete.eq(false))
-        //     .filter(dsl::waiting.eq(true))
-        //     .order_by(dsl::id.asc())
-        //     .get_results(c)?)
+        self.get_rows(q, v)
     }
 
     /**
      * Enumerate some number of the most recently complete jobs.
      */
-    pub fn jobs_completed(&self, limit: usize) -> Result<Vec<Job>> {
-        todo!()
+    pub fn jobs_completed(&self, limit: usize) -> OResult<Vec<Job>> {
+        let (q, v) = Query::select()
+            .from(JobDef::Table)
+            .columns(Job::columns())
+            .order_by(JobDef::Id, Order::Desc)
+            .and_where(Expr::col(JobDef::Complete).eq(true))
+            .limit(limit.try_into().unwrap())
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // use schema::job::dsl;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-        // let mut res = dsl::job
-        //     .filter(dsl::complete.eq(true))
-        //     .order_by(dsl::id.desc())
-        //     .limit(limit.try_into().unwrap())
-        //     .get_results(c)?;
-        // res.reverse();
-        // Ok(res)
+        let mut res = self.get_rows(q, v)?;
+        res.reverse();
+        Ok(res)
     }
 
-    pub fn job_tasks(&self, job: JobId) -> Result<Vec<Task>> {
-        todo!()
+    pub fn job_tasks(&self, job: JobId) -> OResult<Vec<Task>> {
+        let (q, v) = Query::select()
+            .from(TaskDef::Table)
+            .columns(Task::columns())
+            .order_by(TaskDef::Seq, Order::Asc)
+            .and_where(Expr::col(TaskDef::Job).eq(job))
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // use schema::task::dsl;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-        // Ok(dsl::task
-        //     .filter(dsl::job.eq(job))
-        //     .order_by(dsl::seq.asc())
-        //     .get_results(c)?)
+        self.get_rows(q, v)
     }
 
-    pub fn job_tags(&self, job: JobId) -> Result<HashMap<String, String>> {
-        todo!()
+    pub fn job_tags(&self, job: JobId) -> OResult<HashMap<String, String>> {
+        let (q, v) = Query::select()
+            .from(JobTagDef::Table)
+            .columns([
+                JobTagDef::Name,
+                JobTagDef::Value,
+            ])
+            .and_where(Expr::col(JobTagDef::Job).eq(job))
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // use schema::job_tag::dsl;
+        let c = &mut self.1.lock().unwrap().conn;
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        let mut s = c.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), |row| {
+            Ok((row.get_unwrap(0), row.get_unwrap(1)))
+        })?;
 
-        // Ok(dsl::job_tag
-        //     .select((dsl::name, dsl::value))
-        //     .filter(dsl::job.eq(job))
-        //     .get_results::<(String, String)>(c)?
-        //     .into_iter()
-        //     .collect())
+        Ok(out.collect::<rusqlite::Result<_>>()?)
     }
 
-    pub fn job_output_rules(&self, job: JobId) -> Result<Vec<JobOutputRule>> {
-        todo!()
+    pub fn job_output_rules(&self, job: JobId) -> OResult<Vec<JobOutputRule>> {
+        let (q, v) = Query::select()
+            .from(JobOutputRuleDef::Table)
+            .columns(JobOutputRule::columns())
+            .order_by(JobOutputRuleDef::Seq, Order::Asc)
+            .and_where(Expr::col(JobOutputRuleDef::Job).eq(job))
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // use schema::job_output_rule::dsl;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-        // Ok(dsl::job_output_rule
-        //     .filter(dsl::job.eq(job))
-        //     .order_by(dsl::seq.asc())
-        //     .get_results(c)?)
+        self.get_rows(q, v)
     }
 
     pub fn job_depends(&self, job: JobId) -> Result<Vec<JobDepend>> {
@@ -2060,7 +2199,11 @@ impl Database {
             rusqlite::TransactionBehavior::Immediate,
         )?;
 
-        self.i_user_create(name, &mut tx)
+        let out = self.i_user_create(name, &mut tx)?;
+
+        tx.commit()?;
+
+        Ok(out)
     }
 
     pub fn user_ensure(&self, name: &str) -> Result<AuthUser> {
