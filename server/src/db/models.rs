@@ -2,33 +2,42 @@
  * Copyright 2023 Oxide Computer Company
  */
 
-use super::schema::*;
 use anyhow::Result;
 use buildomat_types::metadata;
 use chrono::prelude::*;
-use diesel::deserialize::FromSql;
-use diesel::serialize::ToSql;
+use rusqlite::Row;
+use sea_query::{enum_def, ColumnRef, Iden, IdenStatic, SeaRc};
 use std::str::FromStr;
 use std::time::Duration;
 
-use buildomat_database::*;
-pub use buildomat_database::{Dictionary, IsoDate, JsonValue};
+use buildomat_database::sqlite::rusqlite;
+pub use buildomat_database::sqlite::{Dictionary, IsoDate, JsonValue};
+use buildomat_database::{
+    sqlite_integer_new_type, sqlite_json_new_type, sqlite_ulid_new_type,
+};
 
-integer_new_type!(UnixUid, u32, i32, Integer, diesel::sql_types::Integer);
-integer_new_type!(UnixGid, u32, i32, Integer, diesel::sql_types::Integer);
-integer_new_type!(DataSize, u64, i64, BigInt, diesel::sql_types::BigInt);
+sqlite_integer_new_type!(UnixUid, u32, i32);
+sqlite_integer_new_type!(UnixGid, u32, i32);
+sqlite_integer_new_type!(DataSize, u64, i64);
 
-ulid_new_type!(UserId);
-ulid_new_type!(JobId);
-ulid_new_type!(JobFileId);
-ulid_new_type!(TaskId);
-ulid_new_type!(WorkerId);
-ulid_new_type!(FactoryId);
-ulid_new_type!(TargetId);
+sqlite_ulid_new_type!(UserId);
+sqlite_ulid_new_type!(JobId);
+sqlite_ulid_new_type!(JobFileId);
+sqlite_ulid_new_type!(TaskId);
+sqlite_ulid_new_type!(WorkerId);
+sqlite_ulid_new_type!(FactoryId);
+sqlite_ulid_new_type!(TargetId);
 
-#[derive(Debug, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = user)]
-#[diesel(primary_key(id))]
+use std::convert::TryFrom;
+
+pub trait FromRow: Sized {
+    fn columns() -> Vec<ColumnRef>;
+    fn from_row(row: &Row) -> rusqlite::Result<Self>;
+}
+
+#[derive(Debug)]
+//#[diesel(table_name = user)]
+//#[diesel(primary_key(id))]
 pub struct User {
     pub id: UserId,
     pub name: String,
@@ -36,9 +45,9 @@ pub struct User {
     pub time_create: IsoDate,
 }
 
-#[derive(Debug, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = user_privilege)]
-#[diesel(primary_key(user, privilege))]
+#[derive(Debug)]
+//#[diesel(table_name = user_privilege)]
+//#[diesel(primary_key(user, privilege))]
 pub struct Privilege {
     pub user: UserId,
     pub privilege: String,
@@ -64,9 +73,9 @@ impl std::ops::Deref for AuthUser {
     }
 }
 
-#[derive(Debug, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = task)]
-#[diesel(primary_key(job, seq))]
+#[derive(Debug)]
+//#[diesel(table_name = task)]
+//#[diesel(primary_key(job, seq))]
 pub struct Task {
     pub job: JobId,
     pub seq: i32,
@@ -99,9 +108,9 @@ impl Task {
     }
 }
 
-#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = job_event)]
-#[diesel(primary_key(job, seq))]
+#[derive(Debug, Clone)]
+//#[diesel(table_name = job_event)]
+//#[diesel(primary_key(job, seq))]
 pub struct JobEvent {
     pub job: JobId,
     pub task: Option<i32>,
@@ -127,9 +136,9 @@ impl JobEvent {
     }
 }
 
-#[derive(Debug, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = job_output_rule)]
-#[diesel(primary_key(job, seq))]
+#[derive(Debug)]
+//#[diesel(table_name = job_output_rule)]
+//#[diesel(primary_key(job, seq))]
 pub struct JobOutputRule {
     pub job: JobId,
     pub seq: i32,
@@ -156,18 +165,18 @@ impl JobOutputRule {
     }
 }
 
-#[derive(Debug, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = job_output)]
-#[diesel(primary_key(job, path))]
+#[derive(Debug)]
+//#[diesel(table_name = job_output)]
+//#[diesel(primary_key(job, path))]
 pub struct JobOutput {
     pub job: JobId,
     pub path: String,
     pub id: JobFileId,
 }
 
-#[derive(Debug, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = job_input)]
-#[diesel(primary_key(job, name))]
+#[derive(Debug)]
+//#[diesel(table_name = job_input)]
+//#[diesel(primary_key(job, name))]
 pub struct JobInput {
     pub job: JobId,
     pub name: String,
@@ -188,9 +197,9 @@ impl JobInput {
     }
 }
 
-#[derive(Debug, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = job_file)]
-#[diesel(primary_key(job, id))]
+#[derive(Debug)]
+//#[diesel(table_name = job_file)]
+//#[diesel(primary_key(job, id))]
 pub struct JobFile {
     pub job: JobId,
     pub id: JobFileId,
@@ -201,9 +210,9 @@ pub struct JobFile {
     pub time_archived: Option<IsoDate>,
 }
 
-#[derive(Debug, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = published_file)]
-#[diesel(primary_key(owner, series, version, name))]
+#[derive(Debug)]
+//#[diesel(table_name = published_file)]
+//#[diesel(primary_key(owner, series, version, name))]
 pub struct PublishedFile {
     pub owner: UserId,
     pub series: String,
@@ -213,9 +222,10 @@ pub struct PublishedFile {
     pub file: JobFileId,
 }
 
-#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = worker)]
-#[diesel(primary_key(id))]
+#[derive(Debug, Clone)]
+//#[diesel(table_name = worker)]
+//#[diesel(primary_key(id))]
+#[enum_def(prefix = "", suffix = "Def")]
 pub struct Worker {
     pub id: WorkerId,
     pub bootstrap: String,
@@ -228,6 +238,37 @@ pub struct Worker {
     pub target: Option<TargetId>,
     pub wait_for_flush: bool,
     pub factory_metadata: Option<JsonValue>,
+}
+
+impl FromRow for Worker {
+    fn columns() -> Vec<ColumnRef> {
+        [
+            WorkerDef::Id,
+            WorkerDef::Bootstrap,
+            WorkerDef::Token,
+            WorkerDef::FactoryPrivate,
+            WorkerDef::Deleted,
+            WorkerDef::Recycle,
+            WorkerDef::Lastping,
+            WorkerDef::Factory,
+            WorkerDef::Target,
+            WorkerDef::WaitForFlush,
+            WorkerDef::FactoryMetadata,
+        ]
+        .into_iter()
+        .map(|col| {
+            ColumnRef::TableColumn(
+                SeaRc::new(WorkerDef::Table),
+                SeaRc::new(col),
+            )
+        })
+        .collect()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<Worker> {
+        todo!()
+        //let s = WorkerDef::Token.as_str();
+    }
 }
 
 impl Worker {
@@ -280,9 +321,10 @@ impl Worker {
     }
 }
 
-#[derive(Clone, Debug, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = job)]
-#[diesel(primary_key(id))]
+#[derive(Clone, Debug)]
+//#[diesel(table_name = job)]
+//#[diesel(primary_key(id))]
+#[enum_def(prefix = "", suffix = "Def")]
 pub struct Job {
     pub id: JobId,
     pub owner: UserId,
@@ -329,9 +371,41 @@ impl Job {
     }
 }
 
-#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = factory)]
-#[diesel(primary_key(id))]
+impl FromRow for Job {
+    fn columns() -> Vec<ColumnRef> {
+        [
+            JobDef::Id,
+            JobDef::Owner,
+            JobDef::Name,
+            JobDef::Target,
+            JobDef::Complete,
+            JobDef::Failed,
+            JobDef::Worker,
+            JobDef::Waiting,
+            JobDef::TargetId,
+            JobDef::Cancelled,
+            JobDef::TimeArchived,
+        ]
+        .into_iter()
+        .map(|col| {
+            ColumnRef::TableColumn(
+                SeaRc::new(JobDef::Table),
+                SeaRc::new(col),
+            )
+        })
+        .collect()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<Job> {
+        todo!()
+        //let s = WorkerDef::Token.as_str();
+    }
+}
+
+
+#[derive(Debug, Clone)]
+//#[diesel(table_name = factory)]
+//#[diesel(primary_key(id))]
 pub struct Factory {
     pub id: FactoryId,
     pub name: String,
@@ -339,9 +413,9 @@ pub struct Factory {
     pub lastping: Option<IsoDate>,
 }
 
-#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = target)]
-#[diesel(primary_key(id))]
+#[derive(Debug, Clone)]
+//#[diesel(table_name = target)]
+//#[diesel(primary_key(id))]
 pub struct Target {
     pub id: TargetId,
     pub name: String,
@@ -350,9 +424,9 @@ pub struct Target {
     pub privilege: Option<String>,
 }
 
-#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = job_depend)]
-#[diesel(primary_key(job, name))]
+#[derive(Debug, Clone)]
+//#[diesel(table_name = job_depend)]
+//#[diesel(primary_key(job, name))]
 pub struct JobDepend {
     pub job: JobId,
     pub name: String,
@@ -377,18 +451,18 @@ impl JobDepend {
     }
 }
 
-#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = job_time)]
-#[diesel(primary_key(job, name))]
+#[derive(Debug, Clone)]
+//#[diesel(table_name = job_time)]
+//#[diesel(primary_key(job, name))]
 pub struct JobTime {
     pub job: JobId,
     pub name: String,
     pub time: IsoDate,
 }
 
-#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = job_store)]
-#[diesel(primary_key(job, name))]
+#[derive(Debug, Clone)]
+//#[diesel(table_name = job_store)]
+//#[diesel(primary_key(job, name))]
 pub struct JobStore {
     pub job: JobId,
     pub name: String,

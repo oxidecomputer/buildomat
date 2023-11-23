@@ -29,8 +29,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 #[allow(unused_imports)]
 use slog::{error, info, o, warn, Logger};
-#[macro_use]
-extern crate diesel;
 use buildomat_common::*;
 
 mod api;

@@ -1,196 +1,117 @@
-/*
- * Copyright 2023 Oxide Computer Company
- */
+use sea_query::Iden;
 
-table! {
-    user (id) {
-        id -> Text,
-        name -> Text,
-        token -> Text,
-        time_create -> Text,
-    }
+#[derive(Iden)]
+pub enum User {
+    Table,
+    Id,
+    Name,
+    Token,
+    TimeCreate,
 }
 
-table! {
-    job (id) {
-        id -> Text,
-        owner -> Text,
-        name -> Text,
-        target -> Text,
-        complete -> Bool,
-        failed -> Bool,
-        worker -> Nullable<Text>,
-        waiting -> Bool,
-        target_id -> Nullable<Text>,
-        cancelled -> Bool,
-        time_archived -> Nullable<Text>,
-    }
+#[derive(Iden)]
+pub enum Job {
+    Table,
+    Id,
+    Owner,
+    Name,
+    Target,
+    Complete,
+    Failed,
+    Worker,
+    Waiting,
+    TargetId,
+    Cancelled,
+    TimeArchived,
 }
 
-table! {
-    job_tag (job, name) {
-        job -> Text,
-        name -> Text,
-        value -> Text,
-    }
+#[derive(Iden)]
+pub enum JobTag {
+    Table,
+    Job,
+    Name,
+    Value,
 }
 
-table! {
-    task (job, seq) {
-        job -> Text,
-        seq -> Integer,
-        name -> Text,
-        script -> Text,
-        env_clear -> Bool,
-        env -> Text,
-        user_id -> Nullable<Integer>,
-        group_id -> Nullable<Integer>,
-        workdir -> Nullable<Text>,
-        complete -> Bool,
-        failed -> Bool,
-    }
+#[derive(Iden)]
+pub enum Task {
+    Table,
+    Seq,
+    Name,
+    Script,
+    EnvClear,
+    Env,
+    UserId,
+    GroupId,
+    Workdir,
+    Complete,
+    Failed,
 }
 
-table! {
-    job_input (job, name) {
-        job -> Text,
-        name -> Text,
-        id -> Nullable<Text>,
-        other_job -> Nullable<Text>,
-    }
+#[derive(Iden)]
+pub enum JobInput {
+    Table,
+    Job,
+    Seq,
+    Rule,
+    Ignore,
+    SizeChangeOk,
+    RequireMatch,
 }
 
-table! {
-    job_output_rule (job, seq) {
-        job -> Text,
-        seq -> Integer,
-        rule -> Text,
-        ignore -> Bool,
-        size_change_ok -> Bool,
-        require_match -> Bool,
-    }
+#[derive(Iden)]
+pub enum JobOutput {
+    Table,
+    Job,
+    Path,
+    Id,
 }
 
-table! {
-    job_output (job, path) {
-        job -> Text,
-        path -> Text,
-        id -> Text,
-    }
+#[derive(Iden)]
+pub enum JobFile {
+    Table,
+    Job,
+    Id,
+    Size,
+    TimeArchived,
 }
 
-table! {
-    job_file (job, id) {
-        job -> Text,
-        id -> Text,
-        size -> BigInt,
-        time_archived -> Nullable<Text>,
-    }
+#[derive(Iden)]
+pub enum JobEvent {
+    Table,
+    Job,
+    Task,
+    Seq,
+    Stream,
+    Time,
+    Payload,
+    TimeRemote,
 }
 
-joinable!(job_file -> job (job));
-allow_tables_to_appear_in_same_query!(job_file, job);
-
-allow_tables_to_appear_in_same_query!(job_output, job_file);
-allow_tables_to_appear_in_same_query!(job_input, job_file);
-
-table! {
-    job_event (job, seq) {
-        job -> Text,
-        task -> Nullable<Integer>,
-        seq -> Integer,
-        stream -> Text,
-        time -> Text,
-        payload -> Text,
-        time_remote -> Nullable<Text>,
-    }
+#[derive(Iden)]
+pub enum Worker {
+    Table,
+    Id,
+    Bootstrap,
+    Token,
+    FactoryPrivate,
+    Deleted,
+    Recycle,
+    Lastping,
+    Factory,
+    Target,
+    WaitForFlush,
+    FactoryMetadata,
 }
 
-table! {
-    worker (id) {
-        id -> Text,
-        bootstrap -> Text,
-        token -> Nullable<Text>,
-        factory_private -> Nullable<Text>,
-        deleted -> Bool,
-        recycle -> Bool,
-        lastping -> Nullable<Text>,
-        factory -> Nullable<Text>,
-        target -> Nullable<Text>,
-        wait_for_flush -> Bool,
-        factory_metadata -> Nullable<Text>,
-    }
+#[derive(Iden)]
+pub enum Factory {
+    Table,
+    Id,
 }
 
-joinable!(job -> worker (worker));
-allow_tables_to_appear_in_same_query!(job, worker);
-
-table! {
-    factory (id) {
-        id -> Text,
-        name -> Text,
-        token -> Text,
-        lastping -> Nullable<Text>,
-    }
-}
-
-table! {
-    target (id) {
-        id -> Text,
-        name -> Text,
-        desc -> Text,
-        redirect -> Nullable<Text>,
-        privilege -> Nullable<Text>,
-    }
-}
-
-table! {
-    user_privilege (user, privilege) {
-        user -> Text,
-        privilege -> Text,
-    }
-}
-
-table! {
-    published_file (owner, series, version, name) {
-        owner -> Text,
-        series -> Text,
-        version -> Text,
-        name -> Text,
-        job -> Text,
-        file -> Text,
-    }
-}
-
-allow_tables_to_appear_in_same_query!(published_file, job_file);
-
-table! {
-    job_depend (job, name) {
-        job -> Text,
-        name -> Text,
-        prior_job -> Text,
-        copy_outputs -> Bool,
-        on_failed -> Bool,
-        on_completed -> Bool,
-        satisfied -> Bool,
-    }
-}
-
-table! {
-    job_time (job, name) {
-        job -> Text,
-        name -> Text,
-        time -> Text,
-    }
-}
-
-table! {
-    job_store (job, name) {
-        job -> Text,
-        name -> Text,
-        value -> Text,
-        secret -> Bool,
-        source -> Text,
-        time_update -> Text,
-    }
-}
+#[derive(Iden)]
+#[derive(Iden)]
+#[derive(Iden)]
+#[derive(Iden)]
+#[derive(Iden)]
