@@ -176,7 +176,7 @@ async fn job_waiters_one(log: &Logger, c: &Central) -> Result<()> {
                 continue;
             }
 
-            let failmsg = if let Some(pj) = c.db.job_by_id_opt(d.prior_job)? {
+            let failmsg = if let Some(pj) = c.db.job_opt(d.prior_job)? {
                 /*
                  * The job exists!  Check on the status.
                  */
@@ -306,7 +306,7 @@ async fn lease_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
         .collect::<Vec<_>>();
     let remove = leases
         .drain(..)
-        .map(|id| Ok((id, c.db.job_by_id_opt(id)?)))
+        .map(|id| Ok((id, c.db.job_opt(id)?)))
         .collect::<Result<Vec<_>>>()?
         .drain(..)
         .filter(|(_, job)| {

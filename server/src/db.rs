@@ -343,7 +343,7 @@ impl Database {
         Ok(self.exec(q, v)? > 0)
     }
 
-    pub fn worker_destroy(&self, id: WorkerId) -> Result<bool> {
+    pub fn worker_destroy(&self, id: WorkerId) -> OResult<bool> {
         let (q, v) = Query::update()
             .table(WorkerDef::Table)
             .values([(WorkerDef::Deleted, true.into())])
@@ -353,7 +353,7 @@ impl Database {
         Ok(self.exec(q, v)? > 0)
     }
 
-    pub fn worker_ping(&self, id: WorkerId) -> Result<bool> {
+    pub fn worker_ping(&self, id: WorkerId) -> OResult<bool> {
         let now = IsoDate(Utc::now());
 
         let (q, v) = Query::update()
@@ -365,12 +365,16 @@ impl Database {
         Ok(self.exec(q, v)? > 0)
     }
 
-    fn i_job(&self, tx: &mut Transaction, jid: JobId) -> OResult<Job> {
-        let (q, v) = Query::select()
+    fn q_job(&self, job: JobId) -> (String, RusqliteValues) {
+        Query::select()
             .from(JobDef::Table)
             .columns(Job::columns())
-            .and_where(Expr::col(JobDef::Id).eq(jid))
-            .build_rusqlite(SqliteQueryBuilder);
+            .and_where(Expr::col(JobDef::Id).eq(job))
+            .build_rusqlite(SqliteQueryBuilder)
+    }
+
+    fn i_job(&self, tx: &mut Transaction, jid: JobId) -> OResult<Job> {
+        let (q, v) = self.q_job(jid);
 
         self.tx_get_row(tx, q, v)
     }
@@ -462,7 +466,7 @@ impl Database {
         &self,
         bootstrap: &str,
         token: &str,
-    ) -> Result<Option<Worker>> {
+    ) -> OResult<Option<Worker>> {
         let log = &self.0;
         let c = &mut self.1.lock().unwrap().conn;
         let mut tx = c.transaction_with_behavior(
@@ -666,7 +670,7 @@ impl Database {
         target: &Target,
         job: Option<JobId>,
         wait_for_flush: bool,
-    ) -> Result<Worker> {
+    ) -> OResult<Worker> {
         todo!()
 
         // use schema::worker;
@@ -812,17 +816,15 @@ impl Database {
         self.get_rows(q, v)
     }
 
-    pub fn job_depends(&self, job: JobId) -> Result<Vec<JobDepend>> {
-        todo!()
+    pub fn job_depends(&self, job: JobId) -> OResult<Vec<JobDepend>> {
+        let (q, v) = Query::select()
+            .from(JobDependDef::Table)
+            .columns(JobDepend::columns())
+            .order_by(JobDependDef::Name, Order::Asc)
+            .and_where(Expr::col(JobDependDef::Job).eq(job))
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // use schema::job_depend;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(job_depend::dsl::job_depend
-        //     .filter(job_depend::dsl::job.eq(job))
-        //     .order_by(job_depend::dsl::name)
-        //     .get_results(c)?)
+        self.get_rows(q, v)
     }
 
     /**
@@ -830,7 +832,7 @@ impl Database {
      * satisfied.  In the process, if requested, we will copy any output files
      * from the previous job into the new job as input files.
      */
-    pub fn job_depend_satisfy(&self, jid: JobId, d: &JobDepend) -> Result<()> {
+    pub fn job_depend_satisfy(&self, jid: JobId, d: &JobDepend) -> OResult<()> {
         todo!()
 
         // use schema::{job, job_depend, job_input};
@@ -923,7 +925,7 @@ impl Database {
     pub fn job_inputs(
         &self,
         job: JobId,
-    ) -> Result<Vec<(JobInput, Option<JobFile>)>> {
+    ) -> OResult<Vec<(JobInput, Option<JobFile>)>> {
         todo!()
 
         // use schema::{job_file, job_input};
@@ -965,8 +967,15 @@ impl Database {
         &self,
         tx: &mut Transaction,
         job: JobId,
-    ) -> Result<Vec<(JobOutput, JobFile)>> {
-        todo!()
+    ) -> OResult<Vec<(JobOutput, JobFile)>> {
+        // XXXJOIN let (q, v) = Query::select()
+        // XXXJOIN     .from(JobOutputDef::Table)
+        // XXXJOIN     .columns(JobOutput::columns())
+        // XXXJOIN     .and_where(Expr::col(JobOutputDef::job).eq(job))
+        // XXXJOIN     .build_rusqlite(SqliteQueryBuilder);
+        // XXXJOIN /* XXX */
+
+        // XXXJOIN self.tx_get_row(tx, q, v)
 
         // use schema::{job_file, job_output};
 
@@ -979,9 +988,10 @@ impl Database {
         //     .filter(job_file::dsl::job.eq(job))
         //     .order_by(job_file::dsl::id.asc())
         //     .get_results(tx)?)
+        todo!()
     }
 
-    pub fn job_outputs(&self, job: JobId) -> Result<Vec<(JobOutput, JobFile)>> {
+    pub fn job_outputs(&self, job: JobId) -> OResult<Vec<(JobOutput, JobFile)>> {
         todo!()
 
         // let c = &mut self.1.lock().unwrap().conn;
@@ -989,11 +999,11 @@ impl Database {
         // self.i_job_outputs(c, job)
     }
 
-    pub fn job_file_by_id_opt(
+    pub fn job_file_opt(
         &self,
         job: JobId,
         file: JobFileId,
-    ) -> Result<Option<JobFile>> {
+    ) -> OResult<Option<JobFile>> {
         todo!()
 
         // let c = &mut self.1.lock().unwrap().conn;
@@ -1009,42 +1019,29 @@ impl Database {
         &self,
         job: JobId,
         minseq: usize,
-    ) -> Result<Vec<JobEvent>> {
-        todo!()
+    ) -> OResult<Vec<JobEvent>> {
+        let (q, v) = Query::select()
+            .from(JobEventDef::Table)
+            .columns(JobEvent::columns())
+            .order_by(JobEventDef::Seq, Order::Asc)
+            .and_where(Expr::col(JobEventDef::Job).eq(job))
+            .and_where(Expr::col(JobEventDef::Seq).eq(minseq as i64))
+                /*.gte(minseq as i64))*/
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // use schema::job_event::dsl;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-        // Ok(dsl::job_event
-        //     .filter(dsl::job.eq(job))
-        //     .filter(dsl::seq.ge(minseq as i32))
-        //     .order_by(dsl::seq.asc())
-        //     .get_results(c)?)
+        self.get_rows(q, v)
     }
 
-    pub fn job_by_str(&self, job: &str) -> Result<Job> {
-        todo!()
+    pub fn job(&self, job: JobId) -> OResult<Job> {
+        let (q, v) = self.q_job(job);
 
-        // let id = JobId(Ulid::from_str(job)?);
-        // let c = &mut self.1.lock().unwrap().conn;
-        // use schema::job::dsl;
-        // Ok(dsl::job.filter(dsl::id.eq(id)).get_result(c)?)
+        self.get_row(q, v)
     }
 
-    pub fn job_by_id(&self, job: JobId) -> Result<Job> {
-        todo!()
+    pub fn job_opt(&self, job: JobId) -> OResult<Option<Job>> {
+        let (q, v) = self.q_job(job);
 
-        // let c = &mut self.1.lock().unwrap().conn;
-        // use schema::job::dsl;
-        // Ok(dsl::job.filter(dsl::id.eq(job)).get_result(c)?)
-    }
-
-    pub fn job_by_id_opt(&self, job: JobId) -> Result<Option<Job>> {
-        todo!()
-
-        // let c = &mut self.1.lock().unwrap().conn;
-        // use schema::job::dsl;
-        // Ok(dsl::job.filter(dsl::id.eq(job)).get_result(c).optional()?)
+        self.get_row_opt(q, v)
     }
 
     pub fn job_create<I>(
@@ -1058,69 +1055,67 @@ impl Database {
         inputs: &[String],
         tags: I,
         depends: Vec<CreateDepend>,
-    ) -> Result<Job>
+    ) -> OResult<Job>
     where
         I: IntoIterator<Item = (String, String)>,
     {
-        todo!()
-
         // use schema::{
         //     job, job_depend, job_input, job_output_rule, job_tag, task,
         // };
 
-        // if tasks.is_empty() {
-        //     bail!("a job must have at least one task");
-        // }
-        // if tasks.len() > 64 {
-        //     bail!("a job must have 64 or fewer tasks");
-        // }
+        if tasks.is_empty() {
+            conflict!("a job must have at least one task");
+        }
+        if tasks.len() > 64 {
+            conflict!("a job must have 64 or fewer tasks");
+        }
 
-        // if depends.len() > 8 {
-        //     bail!("a job must depend on 8 or fewer other jobs");
-        // }
-        // for cd in depends.iter() {
-        //     if cd.name.contains('/') || cd.name.trim().is_empty() {
-        //         bail!("invalid depend name");
-        //     }
+        if depends.len() > 8 {
+            conflict!("a job must depend on 8 or fewer other jobs");
+        }
+        for cd in depends.iter() {
+            if cd.name.contains('/') || cd.name.trim().is_empty() {
+                conflict!("invalid depend name");
+            }
 
-        //     if !cd.on_failed && !cd.on_completed {
-        //         bail!("depend must have at least one trigger condition");
-        //     }
-        // }
+            if !cd.on_failed && !cd.on_completed {
+                conflict!("depend must have at least one trigger condition");
+            }
+        }
 
-        // if inputs.len() > 32 {
-        //     bail!("a job must have 32 or fewer input files");
-        // }
-        // for ci in inputs.iter() {
-        //     if ci.contains('/') || ci.trim().is_empty() {
-        //         bail!("invalid input name");
-        //     }
-        // }
+        if inputs.len() > 32 {
+            conflict!("a job must have 32 or fewer input files");
+        }
+        for ci in inputs.iter() {
+            if ci.contains('/') || ci.trim().is_empty() {
+                conflict!("invalid input name");
+            }
+        }
 
-        // /*
-        //  * If the job has any input files or any jobs on which it depends, it
-        //  * begins in the "waiting" state.  Otherwise it can begin immediately.
-        //  */
-        // let waiting = !inputs.is_empty() || !depends.is_empty();
+        /*
+         * If the job has any input files or any jobs on which it depends, it
+         * begins in the "waiting" state.  Otherwise it can begin immediately.
+         */
+        let waiting = !inputs.is_empty() || !depends.is_empty();
 
-        // let j = Job {
-        //     id: JobId::generate(),
-        //     owner,
-        //     name: name.to_string(),
-        //     target: target_name.to_string(),
-        //     target_id: Some(target),
-        //     waiting,
-        //     complete: false,
-        //     failed: false,
-        //     worker: None,
-        //     cancelled: false,
-        //     time_archived: None,
-        // };
+        let j = Job {
+            id: JobId::generate(),
+            owner,
+            name: name.to_string(),
+            target: target_name.to_string(),
+            target_id: Some(target),
+            waiting,
+            complete: false,
+            failed: false,
+            worker: None,
+            cancelled: false,
+            time_archived: None,
+        };
 
-        // /*
-        //  * Use the timestamp from the generated ID as the submit time.
-        //  */
-        // let start = j.id.datetime();
+        /*
+         * Use the timestamp from the generated ID as the submit time.
+         */
+        let start = j.id.datetime();
 
         // let c = &mut self.1.lock().unwrap().conn;
 
@@ -1200,35 +1195,30 @@ impl Database {
 
         //     Ok(j)
         // })
+
+        todo!()
     }
 
-    pub fn job_input_by_str(&self, job: &str, file: &str) -> Result<JobInput> {
-        todo!()
+    pub fn job_input(&self, job: JobId, file: JobFileId) -> OResult<JobInput> {
+        let (q, v) = Query::select()
+            .from(JobInputDef::Table)
+            .columns(JobInput::columns())
+            .and_where(Expr::col(JobInputDef::Job).eq(job))
+            .and_where(Expr::col(JobInputDef::Id).eq(file))
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // use schema::job_input;
-
-        // let job = JobId(Ulid::from_str(job)?);
-        // let file = JobFileId(Ulid::from_str(file)?);
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(job_input::dsl::job_input
-        //     .filter(job_input::dsl::job.eq(job))
-        //     .filter(job_input::dsl::id.eq(file))
-        //     .get_result(c)?)
+        self.get_row(q, v)
     }
 
-    pub fn job_output(&self, job: JobId, file: JobFileId) -> Result<JobOutput> {
-        todo!()
+    pub fn job_output(&self, job: JobId, file: JobFileId) -> OResult<JobOutput> {
+        let (q, v) = Query::select()
+            .from(JobOutputDef::Table)
+            .columns(JobOutput::columns())
+            .and_where(Expr::col(JobOutputDef::Job).eq(job))
+            .and_where(Expr::col(JobOutputDef::Id).eq(file))
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // use schema::job_output;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(job_output::dsl::job_output
-        //     .filter(job_output::dsl::job.eq(job))
-        //     .filter(job_output::dsl::id.eq(file))
-        //     .get_result(c)?)
+        self.get_row(q, v)
     }
 
     pub fn published_file_by_name(
@@ -1399,25 +1389,20 @@ impl Database {
     }
 
     pub fn job_next_unarchived(&self) -> OResult<Option<Job>> {
-        todo!()
+        /*
+         * Find the oldest completed job that has not yet been archived to long
+         * term storage.
+         */
+        let (q, v) = Query::select()
+            .from(JobDef::Table)
+            .columns(Job::columns())
+            .order_by(JobDef::Id, Order::Asc)
+            .and_where(Expr::col(JobDef::Complete).eq(true))
+            .and_where(Expr::col(JobDef::TimeArchived).is_null())
+            .limit(1)
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // use schema::job;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // /*
-        //  * Find the oldest completed job that has not yet been archived to long
-        //  * term storage.
-        //  */
-        // let res: Option<Job> = job::dsl::job
-        //     .filter(job::dsl::complete.eq(true))
-        //     .filter(job::dsl::time_archived.is_null())
-        //     .order_by(job::dsl::id.asc())
-        //     .limit(1)
-        //     .get_result(c)
-        //     .optional()?;
-
-        // Ok(res)
+        self.get_row_opt(q, v)
     }
 
     pub fn job_mark_archived(
@@ -1442,26 +1427,27 @@ impl Database {
     }
 
     pub fn job_file_next_unarchived(&self) -> OResult<Option<JobFile>> {
-        todo!()
+        /*
+         * Find the most recently uploaded output stored as part of a job that
+         * has been completed.
+         */
+        let (q, v) = Query::select()
+            .from(JobDef::Table)
+            .inner_join(
+                JobFileDef::Table,
+                Expr::col((JobDef::Table, JobDef::Id))
+                .eq(
+                    Expr::col((JobFileDef::Table, JobFileDef::Job))
+                ))
+            .columns(JobFile::columns())
+            .order_by(JobFileDef::Id, Order::Asc)
 
-        // use schema::{job, job_file};
+            .and_where(Expr::col(JobDef::Complete).eq(true))
+            .and_where(Expr::col(JobFileDef::TimeArchived).is_null())
+            .limit(1)
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // /*
-        //  * Find the most recently uploaded output stored as part of a job that
-        //  * has been completed.
-        //  */
-        // let res: Option<(Job, JobFile)> = job::dsl::job
-        //     .inner_join(job_file::table)
-        //     .filter(job::dsl::complete.eq(true))
-        //     .filter(job_file::dsl::time_archived.is_null())
-        //     .order_by(job_file::dsl::id.asc())
-        //     .limit(1)
-        //     .get_result(c)
-        //     .optional()?;
-
-        // Ok(res.map(|(_, out)| out))
+        self.get_row_opt(q, v)
     }
 
     pub fn job_file_mark_archived(
@@ -1643,7 +1629,7 @@ impl Database {
         // })
     }
 
-    pub fn job_complete(&self, job: JobId, failed: bool) -> Result<bool> {
+    pub fn job_complete(&self, job: JobId, failed: bool) -> OResult<bool> {
         todo!()
 
         // use schema::{job, task};
@@ -1742,7 +1728,7 @@ impl Database {
         job: JobId,
         name: &str,
         when: DateTime<Utc>,
-    ) -> Result<()> {
+    ) -> OResult<()> {
         todo!()
 
         // use schema::job_time;
@@ -1764,7 +1750,7 @@ impl Database {
         job: JobId,
         from: &str,
         until: &str,
-    ) -> Result<Option<std::time::Duration>> {
+    ) -> OResult<Option<std::time::Duration>> {
         todo!()
 
         // use schema::job_time;
@@ -1800,7 +1786,7 @@ impl Database {
     pub fn job_times(
         &self,
         job: JobId,
-    ) -> Result<HashMap<String, DateTime<Utc>>> {
+    ) -> OResult<HashMap<String, DateTime<Utc>>> {
         todo!()
 
         // use schema::job_time;
@@ -1815,7 +1801,7 @@ impl Database {
         //     .collect())
     }
 
-    pub fn job_store(&self, job: JobId) -> Result<HashMap<String, JobStore>> {
+    pub fn job_store(&self, job: JobId) -> OResult<HashMap<String, JobStore>> {
         todo!()
 
         // use schema::job_store;
@@ -1838,24 +1824,22 @@ impl Database {
         secret: bool,
         source: &str,
     ) -> OResult<()> {
-        todo!()
-
         // use schema::{job, job_store};
 
-        // if name.is_empty()
-        //     || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-        // {
-        //     conflict!("invalid store entry name");
-        // }
+        if name.is_empty()
+            || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            conflict!("invalid store entry name");
+        }
 
-        // /*
-        //  * Cap the number of values and the size of each value:
-        //  */
-        // let max_val_count = 100;
-        // let max_val_kib = 10;
-        // if value.as_bytes().len() > max_val_kib * 1024 {
-        //     conflict!("maximum value size is {max_val_kib}KiB");
-        // }
+        /*
+         * Cap the number of values and the size of each value:
+         */
+        let max_val_count = 100;
+        let max_val_kib = 10;
+        if value.as_bytes().len() > max_val_kib * 1024 {
+            conflict!("maximum value size is {max_val_kib}KiB");
+        }
 
         // let c = &mut self.1.lock().unwrap().conn;
 
@@ -1927,6 +1911,8 @@ impl Database {
 
         //     Ok(())
         // })
+
+        todo!()
     }
 
     pub fn task_complete(
@@ -1934,7 +1920,7 @@ impl Database {
         job: JobId,
         seq: u32,
         failed: bool,
-    ) -> Result<bool> {
+    ) -> OResult<bool> {
         todo!()
 
         // use schema::task;
@@ -1973,7 +1959,7 @@ impl Database {
         time: DateTime<Utc>,
         time_remote: Option<DateTime<Utc>>,
         payload: &str,
-    ) -> Result<()> {
+    ) -> OResult<()> {
         todo!()
 
         // use schema::job_event;
@@ -1999,90 +1985,76 @@ impl Database {
         // Ok(())
     }
 
-    pub fn user_jobs(&self, owner: UserId) -> Result<Vec<Job>> {
-        todo!()
+    pub fn user_jobs(&self, owner: UserId) -> OResult<Vec<Job>> {
+        let (q, v) = Query::select()
+            .from(JobDef::Table)
+            .columns(Job::columns())
+            .and_where(Expr::col(JobDef::Owner).eq(owner))
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // use schema::job;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(job::dsl::job.filter(job::dsl::owner.eq(owner)).get_results(c)?)
+        self.get_rows(q, v)
     }
 
-    pub fn worker_job(&self, worker: WorkerId) -> Result<Option<Job>> {
-        todo!()
+    pub fn worker_job(&self, worker: WorkerId) -> OResult<Option<Job>> {
+        let (q, v) = Query::select()
+            .from(JobDef::Table)
+            .columns(Job::columns())
+            .and_where(Expr::col(JobDef::Worker).eq(worker))
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // use schema::job;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // let t: Vec<Job> =
-        //     job::dsl::job.filter(job::dsl::worker.eq(worker)).get_results(c)?;
-
-        // match t.len() {
-        //     0 => Ok(None),
-        //     1 => Ok(Some(t[0].clone())),
-        //     n => bail!("found {} jobs for worker {}", n, worker),
-        // }
+        self.get_row_opt(q, v)
     }
 
-    pub fn user_get_by_id(&self, id: UserId) -> Result<Option<AuthUser>> {
-        todo!()
+    pub fn user(&self, id: UserId) -> OResult<Option<AuthUser>> {
+        let (q, v) = Query::select()
+            .from(UserDef::Table)
+            .columns(User::columns())
+            .and_where(Expr::col(UserDef::Id).eq(id))
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // use schema::user::dsl;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // dsl::user
-        //     .find(id)
-        //     .get_result::<User>(c)
-        //     .optional()?
-        //     .map::<Result<_>, _>(|u| {
-        //         Ok(AuthUser {
-        //             privileges: self.user_privileges(u.id, c)?,
-        //             user: u,
-        //         })
-        //     })
-        //     .transpose()
+        self.get_row_opt::<User>(q, v)?
+            .map(|user| Ok(AuthUser {
+                privileges: self.i_user_privileges(user.id)?,
+                user,
+            }))
+        .transpose()
     }
 
-    pub fn user_get_by_name(&self, name: &str) -> Result<Option<User>> {
-        todo!()
+    pub fn user_by_name(&self, name: &str) -> OResult<Option<AuthUser>> {
+        let (q, v) = Query::select()
+            .from(UserDef::Table)
+            .columns(User::columns())
+            .and_where(Expr::col(UserDef::Name).eq(name))
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // use schema::user::dsl;
+        self.get_row_opt::<User>(q, v)?
+            .map(|user| Ok(AuthUser {
+                privileges: self.i_user_privileges(user.id)?,
+                user,
+            }))
+        .transpose()
 
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(dsl::user
-        //     .filter(dsl::name.eq(name))
-        //     .get_result::<User>(c)
-        //     .optional()?)
     }
 
-    pub fn users(&self) -> Result<Vec<AuthUser>> {
-        todo!()
+    pub fn users(&self) -> OResult<Vec<AuthUser>> {
+        let (q, v) = Query::select()
+            .from(UserDef::Table)
+            .columns(User::columns())
+            .build_rusqlite(SqliteQueryBuilder);
 
-        // use schema::user::dsl;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // dsl::user
-        //     .get_results::<User>(c)?
-        //     .drain(..)
-        //     .map(|u| {
-        //         Ok(AuthUser {
-        //             privileges: self.user_privileges(u.id, c)?,
-        //             user: u,
-        //         })
-        //     })
-        //     .collect::<Result<Vec<_>>>()
+        self.get_rows::<User>(q, v)?
+            .into_iter()
+            .map(|user| Ok(AuthUser {
+                privileges: self.i_user_privileges(user.id)?,
+                user,
+            }))
+            .collect::<OResult<_>>()
     }
 
-    fn user_privileges(
+    fn i_user_privileges(
         &self,
         user: UserId,
-        tx: &mut Transaction,
-    ) -> Result<Vec<String>> {
+    ) -> OResult<Vec<String>> {
         todo!()
 
         // use schema::user_privilege::dsl;
@@ -2101,7 +2073,7 @@ impl Database {
         &self,
         u: UserId,
         privilege: &str,
-    ) -> Result<bool> {
+    ) -> OResult<bool> {
         todo!()
 
         // use schema::{user, user_privilege};
@@ -2144,7 +2116,7 @@ impl Database {
         &self,
         u: UserId,
         privilege: &str,
-    ) -> Result<bool> {
+    ) -> OResult<bool> {
         todo!()
 
         // use schema::{user, user_privilege};
@@ -2168,7 +2140,7 @@ impl Database {
         // })
     }
 
-    fn i_user_create(&self, name: &str, tx: &mut Transaction) -> Result<User> {
+    fn i_user_create(&self, name: &str, tx: &mut Transaction) -> OResult<User> {
         todo!()
 
         // use schema::user::dsl;
@@ -2185,13 +2157,13 @@ impl Database {
         // Ok(u)
     }
 
-    pub fn user_create(&self, name: &str) -> Result<User> {
+    pub fn user_create(&self, name: &str) -> OResult<User> {
         /*
          * Make sure the requested username is not one we might mistake as a
          * ULID later.
          */
         if looks_like_a_ulid(name) {
-            bail!("usernames must not look like ULIDs");
+            conflict!("usernames must not look like ULIDs");
         }
 
         let c = &mut self.1.lock().unwrap().conn;
@@ -2206,7 +2178,7 @@ impl Database {
         Ok(out)
     }
 
-    pub fn user_ensure(&self, name: &str) -> Result<AuthUser> {
+    pub fn user_ensure(&self, name: &str) -> OResult<AuthUser> {
         todo!()
 
         // use schema::user::dsl;
@@ -2235,7 +2207,7 @@ impl Database {
         // })
     }
 
-    pub fn user_auth(&self, token: &str) -> Result<AuthUser> {
+    pub fn user_auth(&self, token: &str) -> OResult<AuthUser> {
         todo!()
 
         // use schema::user;
@@ -2259,7 +2231,7 @@ impl Database {
         // }
     }
 
-    pub fn factory_create(&self, name: &str) -> Result<Factory> {
+    pub fn factory_create(&self, name: &str) -> OResult<Factory> {
         todo!()
 
         // let f = Factory {
@@ -2278,7 +2250,7 @@ impl Database {
         // Ok(f)
     }
 
-    pub fn factory_get(&self, id: FactoryId) -> Result<Factory> {
+    pub fn factory_get(&self, id: FactoryId) -> OResult<Factory> {
         todo!()
 
         // use schema::factory::dsl;
@@ -2304,7 +2276,7 @@ impl Database {
         // Ok(dsl::factory.find(id).get_result(c)?)
     }
 
-    pub fn factory_auth(&self, token: &str) -> Result<Factory> {
+    pub fn factory_auth(&self, token: &str) -> OResult<Factory> {
         todo!()
 
         // if token.is_empty() {
@@ -2334,7 +2306,7 @@ impl Database {
         // }
     }
 
-    pub fn factory_ping(&self, id: FactoryId) -> Result<bool> {
+    pub fn factory_ping(&self, id: FactoryId) -> OResult<bool> {
         todo!()
 
         // use schema::factory::dsl;
@@ -2349,7 +2321,7 @@ impl Database {
         //     > 0)
     }
 
-    pub fn targets(&self) -> Result<Vec<Target>> {
+    pub fn targets(&self) -> OResult<Vec<Target>> {
         todo!()
 
         // use schema::target::dsl;
@@ -2358,7 +2330,7 @@ impl Database {
         // Ok(dsl::target.order_by(dsl::id.asc()).get_results(c)?)
     }
 
-    pub fn target_get(&self, id: TargetId) -> Result<Target> {
+    pub fn target_get(&self, id: TargetId) -> OResult<Target> {
         todo!()
 
         // use schema::target::dsl;
@@ -2367,7 +2339,7 @@ impl Database {
         // Ok(dsl::target.find(id).get_result(c)?)
     }
 
-    pub fn target_create(&self, name: &str, desc: &str) -> Result<Target> {
+    pub fn target_create(&self, name: &str, desc: &str) -> OResult<Target> {
         todo!()
 
         // if name != name.trim() || name.is_empty() {
@@ -2391,7 +2363,7 @@ impl Database {
         // Ok(t)
     }
 
-    pub fn target_resolve(&self, name: &str) -> Result<Option<Target>> {
+    pub fn target_resolve(&self, name: &str) -> OResult<Option<Target>> {
         todo!()
 
         // use schema::target::dsl;
@@ -2434,7 +2406,7 @@ impl Database {
         &self,
         id: TargetId,
         privilege: Option<&str>,
-    ) -> Result<()> {
+    ) -> OResult<()> {
         todo!()
 
         // use schema::target::dsl;
@@ -2454,7 +2426,7 @@ impl Database {
         &self,
         id: TargetId,
         redirect: Option<TargetId>,
-    ) -> Result<()> {
+    ) -> OResult<()> {
         todo!()
 
         // use schema::target::dsl;
@@ -2485,7 +2457,7 @@ impl Database {
         id: TargetId,
         new_name: &str,
         signpost_description: &str,
-    ) -> Result<Target> {
+    ) -> OResult<Target> {
         todo!()
 
         // use schema::target::dsl;

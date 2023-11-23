@@ -690,7 +690,7 @@ impl Central {
          * system.  If the database is damaged, job records will need to be
          * repopulated by importing from the archive.
          */
-        let job = self.db.job_by_id(id).or_500()?;
+        let job = self.db.job(id).or_500()?;
 
         let readpriv = "admin.job.read";
         if job.owner == user.id {
@@ -732,7 +732,7 @@ impl Central {
 
             aj.job_output(output)
         } else {
-            self.db.job_output(job.id, output)
+            Ok(self.db.job_output(job.id, output)?)
         }
     }
 
@@ -750,7 +750,7 @@ impl Central {
 
             aj.job_outputs()
         } else {
-            self.db.job_outputs(job.id)
+            Ok(self.db.job_outputs(job.id)?)
         }
     }
 
@@ -775,7 +775,7 @@ impl Central {
 
             aj.job_events(minseq)
         } else {
-            self.db.job_events(job.id, minseq)
+            Ok(self.db.job_events(job.id, minseq)?)
         }
     }
 }

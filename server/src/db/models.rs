@@ -38,6 +38,7 @@ pub trait FromRow: Sized {
 #[derive(Debug)]
 //#[diesel(table_name = user)]
 //#[diesel(primary_key(id))]
+#[enum_def(prefix = "", suffix = "Def")]
 pub struct User {
     pub id: UserId,
     pub name: String,
@@ -45,9 +46,32 @@ pub struct User {
     pub time_create: IsoDate,
 }
 
+impl FromRow for User {
+    fn columns() -> Vec<ColumnRef> {
+        [
+            UserDef::Id,
+            UserDef::Name,
+            UserDef::Token,
+            UserDef::TimeCreate
+        ]
+        .into_iter()
+        .map(|col| {
+            ColumnRef::TableColumn(SeaRc::new(UserDef::Table), SeaRc::new(col))
+        })
+        .collect()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<User> {
+        todo!()
+        //let s = UserDef::Token.as_str();
+    }
+}
+
+
 #[derive(Debug)]
 //#[diesel(table_name = user_privilege)]
 //#[diesel(primary_key(user, privilege))]
+#[enum_def(prefix = "", suffix = "Def")]
 pub struct Privilege {
     pub user: UserId,
     pub privilege: String,
@@ -73,6 +97,9 @@ impl std::ops::Deref for AuthUser {
     }
 }
 
+/*
+ * This table doesn't have its own model struct:
+ */
 #[derive(Iden)]
 pub enum JobTagDef {
     Table,
@@ -148,6 +175,7 @@ impl Task {
 #[derive(Debug, Clone)]
 //#[diesel(table_name = job_event)]
 //#[diesel(primary_key(job, seq))]
+#[enum_def(prefix = "", suffix = "Def")]
 pub struct JobEvent {
     pub job: JobId,
     pub task: Option<i32>,
@@ -170,6 +198,33 @@ pub struct JobEvent {
 impl JobEvent {
     pub fn age(&self) -> Duration {
         self.time.age()
+    }
+}
+
+impl FromRow for JobEvent {
+    fn columns() -> Vec<ColumnRef> {
+        [
+            JobEventDef::Job,
+            JobEventDef::Task,
+            JobEventDef::Seq,
+            JobEventDef::Stream,
+            JobEventDef::Time,
+            JobEventDef::Payload,
+            JobEventDef::TimeRemote,
+        ]
+        .into_iter()
+        .map(|col| {
+            ColumnRef::TableColumn(
+                SeaRc::new(JobEventDef::Table),
+                SeaRc::new(col),
+            )
+        })
+        .collect()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<JobEvent> {
+        todo!()
+        //let s = TaskDef::Token.as_str();
     }
 }
 
@@ -232,15 +287,36 @@ impl JobOutputRule {
 #[derive(Debug)]
 //#[diesel(table_name = job_output)]
 //#[diesel(primary_key(job, path))]
+#[enum_def(prefix = "", suffix = "Def")]
 pub struct JobOutput {
     pub job: JobId,
     pub path: String,
     pub id: JobFileId,
 }
 
+impl FromRow for JobOutput {
+    fn columns() -> Vec<ColumnRef> {
+        [JobOutputDef::Job, JobOutputDef::Path, JobOutputDef::Id]
+            .into_iter()
+            .map(|col| {
+                ColumnRef::TableColumn(
+                    SeaRc::new(JobOutputDef::Table),
+                    SeaRc::new(col),
+                )
+            })
+            .collect()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<JobOutput> {
+        todo!()
+        //let s = JobOutputDef::Token.as_str();
+    }
+}
+
 #[derive(Debug)]
 //#[diesel(table_name = job_input)]
 //#[diesel(primary_key(job, name))]
+#[enum_def(prefix = "", suffix = "Def")]
 pub struct JobInput {
     pub job: JobId,
     pub name: String,
@@ -255,6 +331,30 @@ pub struct JobInput {
     pub other_job: Option<JobId>,
 }
 
+impl FromRow for JobInput {
+    fn columns() -> Vec<ColumnRef> {
+        [
+            JobInputDef::Job,
+            JobInputDef::Name,
+            JobInputDef::Id,
+            JobInputDef::OtherJob,
+        ]
+        .into_iter()
+        .map(|col| {
+            ColumnRef::TableColumn(
+                SeaRc::new(JobInputDef::Table),
+                SeaRc::new(col),
+            )
+        })
+        .collect()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<JobInput> {
+        todo!()
+        //let s = JobInputDef::Token.as_str();
+    }
+}
+
 impl JobInput {
     pub fn from_create(name: &str, job: JobId) -> JobInput {
         JobInput { job, name: name.to_string(), id: None, other_job: None }
@@ -264,6 +364,7 @@ impl JobInput {
 #[derive(Debug)]
 //#[diesel(table_name = job_file)]
 //#[diesel(primary_key(job, id))]
+#[enum_def(prefix = "", suffix = "Def")]
 pub struct JobFile {
     pub job: JobId,
     pub id: JobFileId,
@@ -274,9 +375,35 @@ pub struct JobFile {
     pub time_archived: Option<IsoDate>,
 }
 
+impl FromRow for JobFile {
+    fn columns() -> Vec<ColumnRef> {
+        [
+            JobFileDef::Job,
+            JobFileDef::Id,
+            JobFileDef::Size,
+            JobFileDef::TimeArchived,
+        ]
+        .into_iter()
+        .map(|col| {
+            ColumnRef::TableColumn(
+                SeaRc::new(JobFileDef::Table),
+                SeaRc::new(col),
+            )
+        })
+        .collect()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<JobFile> {
+        todo!()
+        //let s = JobFileDef::Token.as_str();
+    }
+}
+
+
 #[derive(Debug)]
 //#[diesel(table_name = published_file)]
 //#[diesel(primary_key(owner, series, version, name))]
+#[enum_def(prefix = "", suffix = "Def")]
 pub struct PublishedFile {
     pub owner: UserId,
     pub series: String,
@@ -413,28 +540,6 @@ pub struct Job {
     pub time_archived: Option<IsoDate>,
 }
 
-impl Job {
-    #[allow(dead_code)]
-    pub fn time_submit(&self) -> DateTime<Utc> {
-        self.id.datetime()
-    }
-
-    pub fn target(&self) -> TargetId {
-        self.target_id.unwrap_or_else(|| {
-            /*
-             * XXX No new records should be created without a resolved target
-             * ID, but old records might not have had one.  This is the ID of
-             * the canned "default" target:
-             */
-            TargetId::from_str("00E82MSW0000000000000TT000").unwrap()
-        })
-    }
-
-    pub fn is_archived(&self) -> bool {
-        self.time_archived.is_some()
-    }
-}
-
 impl FromRow for Job {
     fn columns() -> Vec<ColumnRef> {
         [
@@ -463,9 +568,32 @@ impl FromRow for Job {
     }
 }
 
+impl Job {
+    #[allow(dead_code)]
+    pub fn time_submit(&self) -> DateTime<Utc> {
+        self.id.datetime()
+    }
+
+    pub fn target(&self) -> TargetId {
+        self.target_id.unwrap_or_else(|| {
+            /*
+             * XXX No new records should be created without a resolved target
+             * ID, but old records might not have had one.  This is the ID of
+             * the canned "default" target:
+             */
+            TargetId::from_str("00E82MSW0000000000000TT000").unwrap()
+        })
+    }
+
+    pub fn is_archived(&self) -> bool {
+        self.time_archived.is_some()
+    }
+}
+
 #[derive(Debug, Clone)]
 //#[diesel(table_name = factory)]
 //#[diesel(primary_key(id))]
+#[enum_def(prefix = "", suffix = "Def")]
 pub struct Factory {
     pub id: FactoryId,
     pub name: String,
@@ -476,6 +604,7 @@ pub struct Factory {
 #[derive(Debug, Clone)]
 //#[diesel(table_name = target)]
 //#[diesel(primary_key(id))]
+#[enum_def(prefix = "", suffix = "Def")]
 pub struct Target {
     pub id: TargetId,
     pub name: String,
@@ -487,6 +616,7 @@ pub struct Target {
 #[derive(Debug, Clone)]
 //#[diesel(table_name = job_depend)]
 //#[diesel(primary_key(job, name))]
+#[enum_def(prefix = "", suffix = "Def")]
 pub struct JobDepend {
     pub job: JobId,
     pub name: String,
@@ -495,6 +625,33 @@ pub struct JobDepend {
     pub on_failed: bool,
     pub on_completed: bool,
     pub satisfied: bool,
+}
+
+impl FromRow for JobDepend {
+    fn columns() -> Vec<ColumnRef> {
+        [
+            JobDependDef::Job,
+            JobDependDef::Name,
+            JobDependDef::PriorJob,
+            JobDependDef::CopyOutputs,
+            JobDependDef::OnFailed,
+            JobDependDef::OnCompleted,
+            JobDependDef::Satisfied,
+        ]
+        .into_iter()
+        .map(|col| {
+            ColumnRef::TableColumn(
+                SeaRc::new(JobDependDef::Table),
+                SeaRc::new(col),
+            )
+        })
+        .collect()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<JobDepend> {
+        todo!()
+        //let s = WorkerDef::Token.as_str();
+    }
 }
 
 impl JobDepend {
@@ -514,6 +671,7 @@ impl JobDepend {
 #[derive(Debug, Clone)]
 //#[diesel(table_name = job_time)]
 //#[diesel(primary_key(job, name))]
+#[enum_def(prefix = "", suffix = "Def")]
 pub struct JobTime {
     pub job: JobId,
     pub name: String,
@@ -523,6 +681,7 @@ pub struct JobTime {
 #[derive(Debug, Clone)]
 //#[diesel(table_name = job_store)]
 //#[diesel(primary_key(job, name))]
+#[enum_def(prefix = "", suffix = "Def")]
 pub struct JobStore {
     pub job: JobId,
     pub name: String,

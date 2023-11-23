@@ -31,10 +31,26 @@ pub(crate) struct JobPath {
     job: String,
 }
 
+impl JobPath {
+    fn job(&self) -> DSResult<db::JobId> {
+        self.job.parse::<db::JobId>().or_500()
+    }
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct JobInputPath {
     job: String,
     input: String,
+}
+
+impl JobInputPath {
+    fn job(&self) -> DSResult<db::JobId> {
+        self.job.parse::<db::JobId>().or_500()
+    }
+
+    fn input(&self) -> DSResult<db::JobFileId> {
+        self.job.parse::<db::JobFileId>().or_500()
+    }
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -43,10 +59,22 @@ pub(crate) struct JobTaskPath {
     task: u32,
 }
 
+impl JobTaskPath {
+    fn job(&self) -> DSResult<db::JobId> {
+        self.job.parse::<db::JobId>().or_500()
+    }
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct JobStorePath {
     job: String,
     name: String,
+}
+
+impl JobStorePath {
+    fn job(&self) -> DSResult<db::JobId> {
+        self.job.parse::<db::JobId>().or_500()
+    }
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
@@ -201,10 +229,10 @@ pub(crate) async fn worker_job_input_download(
     let w = c.require_worker(log, &rqctx.request).await?;
 
     let p = path.into_inner();
-    let j = c.db.job_by_str(&p.job).or_500()?;
+    let j = c.db.job(p.job()?).or_500()?;
     w.owns(log, &j)?;
 
-    let i = c.db.job_input_by_str(&p.job, &p.input).or_500()?;
+    let i = c.db.job_input(p.job()?, p.input()?).or_500()?;
 
     let mut res = Response::builder();
     res = res.header(CONTENT_TYPE, "application/octet-stream");
@@ -250,7 +278,7 @@ pub(crate) async fn worker_job_append_one(
     let w = c.require_worker(log, &rqctx.request).await?;
 
     let a = append.into_inner();
-    let j = c.db.job_by_str(&path.into_inner().job).or_500()?; /* XXX */
+    let j = c.db.job(path.into_inner().job()?).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
     info!(log, "worker {} append to job {} stream {}", w.id, j.id, a.stream);
@@ -291,7 +319,7 @@ pub(crate) async fn worker_job_append(
     let w = c.require_worker(log, &rqctx.request).await?;
 
     let a = append.into_inner();
-    let j = c.db.job_by_str(&path.into_inner().job).or_500()?; /* XXX */
+    let j = c.db.job(path.into_inner().job()?).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
     info!(log, "worker {} append {} events to job {}", w.id, a.len(), j.id);
@@ -327,7 +355,7 @@ pub(crate) async fn worker_task_append(
 
     let a = append.into_inner();
     let p = path.into_inner();
-    let j = c.db.job_by_str(&p.job).or_500()?; /* XXX */
+    let j = c.db.job(p.job()?).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
     info!(
@@ -373,7 +401,7 @@ pub(crate) async fn worker_task_complete(
 
     let b = body.into_inner();
     let p = path.into_inner();
-    let j = c.db.job_by_str(&p.job).or_500()?; /* XXX */
+    let j = c.db.job(p.job()?).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
     info!(log, "worker {} complete job {} task {}", w.id, j.id, p.task);
@@ -401,7 +429,7 @@ pub(crate) async fn worker_job_store_get(
     let w = c.require_worker(log, &rqctx.request).await?;
 
     let p = path.into_inner();
-    let j = c.db.job_by_str(&p.job).or_500()?; /* XXX */
+    let j = c.db.job(p.job()?).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
     info!(log, "worker {} job {} get store value {}", w.id, j.id, p.name);
@@ -432,7 +460,7 @@ pub(crate) async fn worker_job_store_put(
 
     let b = body.into_inner();
     let p = path.into_inner();
-    let j = c.db.job_by_str(&p.job).or_500()?; /* XXX */
+    let j = c.db.job(p.job()?).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
     info!(log, "worker {} job {} put store value {}", w.id, j.id, p.name);
@@ -463,7 +491,7 @@ pub(crate) async fn worker_job_complete(
 
     let b = body.into_inner();
     let p = path.into_inner();
-    let j = c.db.job_by_str(&p.job).or_500()?; /* XXX */
+    let j = c.db.job(p.job()?).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
     if let Err(e) = c.complete_job(log, j.id, b.failed) {
@@ -498,7 +526,7 @@ pub(crate) async fn worker_job_upload_chunk(
     let log = &rqctx.log;
 
     let w = c.require_worker(log, &rqctx.request).await?;
-    let j = c.db.job_by_str(&path.into_inner().job).or_500()?; /* XXX */
+    let j = c.db.job(path.into_inner().job()?).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
     let cid = c.write_chunk(j.id, chunk.as_bytes()).or_500()?;
@@ -567,7 +595,7 @@ pub(crate) async fn worker_job_add_output(
     let log = &rqctx.log;
 
     let w = c.require_worker(log, &rqctx.request).await?;
-    let j = c.db.job_by_str(&path.into_inner().job).or_500()?; /* XXX */
+    let j = c.db.job(path.into_inner().job()?).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
     let add = add.into_inner();
@@ -678,7 +706,7 @@ pub(crate) async fn worker_job_add_output_sync(
         add.size as u64
     };
     let w = c.require_worker(log, &rqctx.request).await?;
-    let j = c.db.job_by_str(&path.into_inner().job).or_500()?; /* XXX */
+    let j = c.db.job(path.into_inner().job()?).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
     let chunks = add

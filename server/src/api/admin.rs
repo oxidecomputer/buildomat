@@ -175,7 +175,7 @@ pub(crate) async fn user_get(
 
     c.require_admin(log, &rqctx.request, "user.read").await?;
 
-    if let Some(u) = c.db.user_get_by_id(path.into_inner().user()?).or_500()? {
+    if let Some(u) = c.db.user(path.into_inner().user()?).or_500()? {
         Ok(HttpResponseOk(User {
             id: u.user.id.to_string(),
             name: u.user.name,
@@ -296,7 +296,7 @@ pub(crate) async fn admin_job_get(
     c.require_admin(log, &rqctx.request, "job.read").await?;
 
     let id = path.into_inner().job.parse::<db::JobId>().or_500()?;
-    let job = c.db.job_by_id(id).or_500()?;
+    let job = c.db.job(id).or_500()?;
 
     Ok(HttpResponseOk(super::user::Job::load(log, c, &job).await.or_500()?))
 }
@@ -315,7 +315,7 @@ pub(crate) async fn admin_job_archive_request(
     c.require_admin(log, &rqctx.request, "job.archive").await?;
 
     let id = path.into_inner().job.parse::<db::JobId>().or_500()?;
-    let job = c.db.job_by_id(id).or_500()?;
+    let job = c.db.job(id).or_500()?;
 
     if !job.complete {
         return Err(HttpError::for_bad_request(

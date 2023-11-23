@@ -590,7 +590,7 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<bool> {
          * Service explicit requests from the operator to archive a job
          * first.
          */
-        let job = c.db.job_by_id(job)?;
+        let job = c.db.job(job)?;
         if !job.complete {
             warn!(log, "job {} not complete; cannot archive yet", job.id);
             return Ok(false);
@@ -697,7 +697,7 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<bool> {
         target_id: _,
     } = job;
 
-    let Some(owner) = c.db.user_get_by_id(owner)? else {
+    let Some(owner) = c.db.user(owner)? else {
         bail!("could not locate user {owner}");
     };
 

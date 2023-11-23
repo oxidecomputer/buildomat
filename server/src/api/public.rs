@@ -28,7 +28,7 @@ pub(crate) async fn public_file_download(
     /*
      * Load the user from the database.
      */
-    let u = if let Some(au) = c.db.user_get_by_name(&p.username).or_500()? {
+    let u = if let Some(au) = c.db.user_by_name(&p.username).or_500()? {
         au.id
     } else {
         return Err(HttpError::for_client_error(
