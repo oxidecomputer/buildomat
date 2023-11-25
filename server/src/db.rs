@@ -269,8 +269,8 @@ impl Database {
             conflict!("job {} already assigned to worker {}", j.id, jw);
         }
 
-        let c = {
-            self.tx_get_count(
+        let c: usize = {
+            self.tx_get_row(
                 tx,
                 Query::select()
                     .expr(Expr::col(Asterisk).count())
@@ -1748,7 +1748,7 @@ impl Database {
          * also need to make sure we do not allow values to be stored in
          * excess of the value count cap.
          */
-        let count = self.tx_get_count(
+        let count: usize = self.tx_get_row(
             &mut tx,
             Query::select()
                 .from(JobStoreDef::Table)
@@ -2488,22 +2488,6 @@ impl Database {
             1 => Ok(Some(out.pop().unwrap())),
             n => conflict!("found {n} records when we wanted only 1"),
         }
-    }
-
-    pub fn tx_get_count(
-        &self,
-        tx: &mut Transaction,
-        s: SelectStatement,
-    ) -> OResult<usize> {
-        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
-        let mut s = tx.prepare(&q)?;
-        let out = s.query_map(&*v.as_params(), |row| row.get::<_, i64>(0))?;
-        let out = out.collect::<rusqlite::Result<Vec<i64>>>()?;
-        match out.len() {
-            0 => conflict!("record not found"),
-            1 => Ok(out[0].try_into().unwrap()),
-            n => conflict!("found {n} records when we wanted only 1"),
-        } /* XXX what */
     }
 
     pub fn tx_get_row_opt<T: FromRow>(

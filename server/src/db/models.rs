@@ -1204,11 +1204,25 @@ impl JobStore {
  */
 impl FromRow for Option<i32> {
     fn columns() -> Vec<ColumnRef> {
-        Default::default()
+        unimplemented!()
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<Option<i32>> {
         Ok(row.get(0)?)
+    }
+}
+
+/*
+ * This implementation allows us to use the existing tx_get_row() routine to
+ * fish out a COUNT() value.
+ */
+impl FromRow for usize {
+    fn columns() -> Vec<ColumnRef> {
+        unimplemented!()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<usize> {
+        Ok(row.get::<_, i64>(0)?.try_into().unwrap())
     }
 }
 
