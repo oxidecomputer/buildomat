@@ -8,6 +8,7 @@ use std::path::Path;
 use anyhow::{bail, Result};
 use chrono::prelude::*;
 pub use jmclib::sqlite::rusqlite;
+use sea_query::{ArrayType, ColumnType, Nullable, Value};
 use slog::{info, Logger};
 
 // #[macro_export]
@@ -45,6 +46,18 @@ macro_rules! sqlite_json_new_type {
     ($name:ident, $mytype:ty) => {
         #[derive(Clone, Debug)]
         pub struct $name(pub $mytype);
+
+        impl From<$name> for sea_query::Value {
+            fn from(value: $name) -> sea_query::Value {
+                todo!()
+            }
+        }
+
+        impl sea_query::Nullable for $name {
+            fn null() -> Value {
+                Value::String(None)
+            }
+        }
 
         // impl ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite> for $name
         // where
@@ -98,6 +111,18 @@ macro_rules! sqlite_integer_new_type {
     ($name:ident, $mytype:ty, $intype:ty) => {
         #[derive(Clone, Copy, Debug, PartialEq, Hash, Eq)]
         pub struct $name(pub $mytype);
+
+        impl From<$name> for sea_query::Value {
+            fn from(value: $name) -> sea_query::Value {
+                todo!()
+            }
+        }
+
+        impl sea_query::Nullable for $name {
+            fn null() -> Value {
+                todo!() /* Value::String(None) */
+            }
+        }
 
         // impl ToSql<diesel::sql_types::$sqltype, diesel::sqlite::Sqlite>
         //     for $name
@@ -159,6 +184,12 @@ macro_rules! sqlite_ulid_new_type {
             fn from(value: $name) -> sea_query::Value {
                 todo!()
                 //sea_query::Value::from(($name).0.to_string())
+            }
+        }
+
+        impl sea_query::Nullable for $name {
+            fn null() -> Value {
+                Value::String(None)
             }
         }
 
@@ -225,16 +256,66 @@ macro_rules! sqlite_ulid_new_type {
  * IsoDate
  */
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IsoDate(pub DateTime<Utc>);
 
-impl From<IsoDate> for sea_query::Value {
-    fn from(value: IsoDate) -> sea_query::Value {
-        sea_query::Value::from(
-            value.0.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
-        )
+//impl Into<sea_query::SimpleExpr> for IsoDate {
+//    fn into(self) -> sea_query::SimpleExpr {
+//        sea_query::SimpleExpr::Value(sea_query::Value::String(Some(Box::new(
+//            self.0.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
+//        ))))
+//    }
+//}
+
+impl From<IsoDate> for Value {
+    fn from(v: IsoDate) -> Self {
+        Value::String(Some(Box::new(
+            v.0.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
+        )))
     }
 }
+
+impl Nullable for IsoDate {
+    fn null() -> Value {
+        Value::String(None)
+    }
+}
+
+// SIGH //
+// SIGH // impl ValueType for IsoDate {
+// SIGH //     fn try_from(v: Value) -> std::result::Result<Self, ValueTypeErr> {
+// SIGH //         let Value::String(Some(s)) = v else {
+// SIGH //             return Err(ValueTypeErr);
+// SIGH //         };
+// SIGH //
+// SIGH //         Ok(IsoDate(DateTime::from(match DateTime::parse_from_rfc3339(&s) {
+// SIGH //             Ok(fo) => fo,
+// SIGH //             Err(e1) => {
+// SIGH //                 /*
+// SIGH //                  * Try an older date format from before we switched to diesel:
+// SIGH //                  */
+// SIGH //                 match DateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S%.9f%z") {
+// SIGH //                     Ok(fo) => fo,
+// SIGH //                     Err(_) => {
+// SIGH //                         return Err(ValueTypeErr);
+// SIGH //                     }
+// SIGH //                 }
+// SIGH //             }
+// SIGH //         })))
+// SIGH //     }
+// SIGH //
+// SIGH //     fn type_name() -> String {
+// SIGH //         "IsoDate".to_string()
+// SIGH //     }
+// SIGH //
+// SIGH //     fn array_type() -> sea_query::ArrayType {
+// SIGH //         ArrayType::String
+// SIGH //     }
+// SIGH //
+// SIGH //     fn column_type() -> sea_query::ColumnType {
+// SIGH //         ColumnType::String(None)
+// SIGH //     }
+// SIGH // }
 
 // impl<DB> FromSql<diesel::sql_types::Text, DB> for IsoDate
 // where

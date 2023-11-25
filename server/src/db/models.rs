@@ -6,7 +6,10 @@ use anyhow::Result;
 use buildomat_types::metadata;
 use chrono::prelude::*;
 use rusqlite::Row;
-use sea_query::{enum_def, ColumnRef, Iden, IdenStatic, SeaRc};
+use sea_query::{
+    enum_def, ColumnRef, Expr, Iden, IdenStatic, InsertStatement, OnConflict,
+    Query, SeaRc, SelectStatement, SimpleExpr, Value,
+};
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -33,6 +36,16 @@ use std::convert::TryFrom;
 pub trait FromRow: Sized {
     fn columns() -> Vec<ColumnRef>;
     fn from_row(row: &Row) -> rusqlite::Result<Self>;
+
+    fn bare_columns() -> Vec<SeaRc<dyn Iden>> {
+        Self::columns()
+            .into_iter()
+            .map(|v| match v {
+                ColumnRef::TableColumn(_, c) => c,
+                _ => unreachable!(),
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug)]
@@ -48,17 +61,15 @@ pub struct User {
 
 impl FromRow for User {
     fn columns() -> Vec<ColumnRef> {
-        [
-            UserDef::Id,
-            UserDef::Name,
-            UserDef::Token,
-            UserDef::TimeCreate
-        ]
-        .into_iter()
-        .map(|col| {
-            ColumnRef::TableColumn(SeaRc::new(UserDef::Table), SeaRc::new(col))
-        })
-        .collect()
+        [UserDef::Id, UserDef::Name, UserDef::Token, UserDef::TimeCreate]
+            .into_iter()
+            .map(|col| {
+                ColumnRef::TableColumn(
+                    SeaRc::new(UserDef::Table),
+                    SeaRc::new(col),
+                )
+            })
+            .collect()
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<User> {
@@ -67,14 +78,47 @@ impl FromRow for User {
     }
 }
 
+impl User {
+    pub fn find(id: UserId) -> SelectStatement {
+        Query::select()
+            .from(UserDef::Table)
+            .columns(User::columns())
+            .and_where(Expr::col(UserDef::Id).eq(id))
+            .to_owned()
+    }
+
+    pub fn insert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(JobDef::Table)
+            .columns(Self::bare_columns())
+            .values_panic([
+                self.id.into(),
+                self.name.clone().into(),
+                self.token.clone().into(),
+                self.time_create.into(),
+            ])
+            .to_owned()
+    }
+}
 
 #[derive(Debug)]
 //#[diesel(table_name = user_privilege)]
 //#[diesel(primary_key(user, privilege))]
 #[enum_def(prefix = "", suffix = "Def")]
-pub struct Privilege {
+pub struct UserPrivilege {
     pub user: UserId,
     pub privilege: String,
+}
+
+impl UserPrivilege {
+    pub fn upsert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(UserPrivilegeDef::Table)
+            .columns([UserPrivilegeDef::User, UserPrivilegeDef::Privilege])
+            .values_panic([self.user.into(), self.privilege.clone().into()])
+            .on_conflict(OnConflict::new().do_nothing().to_owned())
+            .to_owned()
+    }
 }
 
 #[derive(Debug)]
@@ -169,6 +213,26 @@ impl Task {
             complete: false,
             failed: false,
         }
+    }
+
+    pub fn insert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(TaskDef::Table)
+            .columns(Self::bare_columns())
+            .values_panic([
+                self.job.into(),
+                self.seq.into(),
+                self.name.clone().into(),
+                self.script.clone().into(),
+                self.env_clear.into(),
+                self.env.clone().into(),
+                self.user_id.into(),
+                self.group_id.into(),
+                self.workdir.clone().into(),
+                self.complete.into(),
+                self.failed.into(),
+            ])
+            .to_owned()
     }
 }
 
@@ -282,6 +346,21 @@ impl JobOutputRule {
             require_match: cd.require_match,
         }
     }
+
+    pub fn insert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(JobOutputRuleDef::Table)
+            .columns(Self::bare_columns())
+            .values_panic([
+                self.job.into(),
+                self.seq.into(),
+                self.rule.clone().into(),
+                self.ignore.into(),
+                self.size_change_ok.into(),
+                self.require_match.into(),
+            ])
+            .to_owned()
+    }
 }
 
 #[derive(Debug)]
@@ -356,6 +435,25 @@ impl FromRow for JobInput {
 }
 
 impl JobInput {
+    pub fn insert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(JobInputDef::Table)
+            .columns(Self::bare_columns())
+            .values_panic([
+                self.job.into(),
+                self.name.clone().into(),
+                self.id.into(),
+                self.other_job.into(),
+            ])
+            .to_owned()
+    }
+
+    pub fn upsert(&self) -> InsertStatement {
+        self.insert()
+            .on_conflict(OnConflict::new().do_nothing().to_owned())
+            .to_owned()
+    }
+
     pub fn from_create(name: &str, job: JobId) -> JobInput {
         JobInput { job, name: name.to_string(), id: None, other_job: None }
     }
@@ -399,6 +497,16 @@ impl FromRow for JobFile {
     }
 }
 
+impl JobFile {
+    pub fn find(job: JobId, file: JobFileId) -> SelectStatement {
+        Query::select()
+            .from(JobFileDef::Table)
+            .columns(JobFile::columns())
+            .and_where(Expr::col(JobFileDef::Job).eq(job))
+            .and_where(Expr::col(JobFileDef::Id).eq(file))
+            .to_owned()
+    }
+}
 
 #[derive(Debug)]
 //#[diesel(table_name = published_file)]
@@ -411,6 +519,50 @@ pub struct PublishedFile {
     pub name: String,
     pub job: JobId,
     pub file: JobFileId,
+}
+
+impl FromRow for PublishedFile {
+    fn columns() -> Vec<ColumnRef> {
+        [
+            PublishedFileDef::Owner,
+            PublishedFileDef::Series,
+            PublishedFileDef::Version,
+            PublishedFileDef::Name,
+            PublishedFileDef::Job,
+            PublishedFileDef::File,
+        ]
+        .into_iter()
+        .map(|col| {
+            ColumnRef::TableColumn(
+                SeaRc::new(PublishedFileDef::Table),
+                SeaRc::new(col),
+            )
+        })
+        .collect()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<PublishedFile> {
+        todo!()
+        //let s = PublishedFileDef::Token.as_str();
+    }
+}
+
+impl PublishedFile {
+    pub fn find(
+        owner: UserId,
+        series: &str,
+        version: &str,
+        name: &str,
+    ) -> SelectStatement {
+        Query::select()
+            .from(PublishedFileDef::Table)
+            .columns(PublishedFile::columns())
+            .and_where(Expr::col(PublishedFileDef::Owner).eq(owner))
+            .and_where(Expr::col(PublishedFileDef::Series).eq(series))
+            .and_where(Expr::col(PublishedFileDef::Version).eq(version))
+            .and_where(Expr::col(PublishedFileDef::Name).eq(name))
+            .to_owned()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -463,6 +615,33 @@ impl FromRow for Worker {
 }
 
 impl Worker {
+    pub fn insert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(WorkerDef::Table)
+            .columns(Self::bare_columns())
+            .values_panic([
+                self.id.into(),
+                self.bootstrap.clone().into(),
+                self.token.clone().into(),
+                self.factory_private.clone().into(),
+                self.deleted.into(),
+                self.recycle.into(),
+                self.lastping.into(),
+                self.factory.into(),
+                self.wait_for_flush.into(),
+                self.factory_metadata.clone().into(),
+            ])
+            .to_owned()
+    }
+
+    pub fn find(id: WorkerId) -> SelectStatement {
+        Query::select()
+            .from(WorkerDef::Table)
+            .columns(Worker::columns())
+            .and_where(Expr::col(WorkerDef::Id).eq(id))
+            .to_owned()
+    }
+
     pub fn legacy_default_factory_id() -> FactoryId {
         /*
          * XXX No new workers will be created without a factory, but old records
@@ -588,6 +767,34 @@ impl Job {
     pub fn is_archived(&self) -> bool {
         self.time_archived.is_some()
     }
+
+    pub fn find(id: JobId) -> SelectStatement {
+        Query::select()
+            .from(JobDef::Table)
+            .columns(Job::columns())
+            .and_where(Expr::col(JobDef::Id).eq(id))
+            .to_owned()
+    }
+
+    pub fn insert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(JobDef::Table)
+            .columns(Self::bare_columns())
+            .values_panic([
+                self.id.into(),
+                self.owner.into(),
+                self.name.clone().into(),
+                self.target.clone().into(),
+                self.complete.into(),
+                self.failed.into(),
+                self.worker.into(),
+                self.waiting.into(),
+                self.target_id.into(),
+                self.cancelled.into(),
+                self.time_archived.into(),
+            ])
+            .to_owned()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -601,6 +808,53 @@ pub struct Factory {
     pub lastping: Option<IsoDate>,
 }
 
+impl FromRow for Factory {
+    fn columns() -> Vec<ColumnRef> {
+        [
+            FactoryDef::Id,
+            FactoryDef::Name,
+            FactoryDef::Token,
+            FactoryDef::Lastping,
+        ]
+        .into_iter()
+        .map(|col| {
+            ColumnRef::TableColumn(
+                SeaRc::new(FactoryDef::Table),
+                SeaRc::new(col),
+            )
+        })
+        .collect()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<Factory> {
+        todo!()
+        //let s = WorkerDef::Token.as_str();
+    }
+}
+
+impl Factory {
+    pub fn find(id: FactoryId) -> SelectStatement {
+        Query::select()
+            .from(FactoryDef::Table)
+            .columns(Factory::columns())
+            .and_where(Expr::col(FactoryDef::Id).eq(id))
+            .to_owned()
+    }
+
+    pub fn insert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(FactoryDef::Table)
+            .columns(Self::bare_columns())
+            .values_panic([
+                self.id.into(),
+                self.name.clone().into(),
+                self.token.clone().into(),
+                self.lastping.into(),
+            ])
+            .to_owned()
+    }
+}
+
 #[derive(Debug, Clone)]
 //#[diesel(table_name = target)]
 //#[diesel(primary_key(id))]
@@ -611,6 +865,63 @@ pub struct Target {
     pub desc: String,
     pub redirect: Option<TargetId>,
     pub privilege: Option<String>,
+}
+
+impl FromRow for Target {
+    fn columns() -> Vec<ColumnRef> {
+        [
+            TargetDef::Id,
+            TargetDef::Name,
+            TargetDef::Desc,
+            TargetDef::Redirect,
+            TargetDef::Privilege,
+        ]
+        .into_iter()
+        .map(|col| {
+            ColumnRef::TableColumn(
+                SeaRc::new(TargetDef::Table),
+                SeaRc::new(col),
+            )
+        })
+        .collect()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<Target> {
+        todo!()
+        //let s = WorkerDef::Token.as_str();
+    }
+}
+
+impl Target {
+    pub fn find(id: TargetId) -> SelectStatement {
+        Query::select()
+            .from(TargetDef::Table)
+            .columns(Target::columns())
+            .and_where(Expr::col(TargetDef::Id).eq(id))
+            .to_owned()
+    }
+
+    pub fn find_by_name(name: &str) -> SelectStatement {
+        Query::select()
+            .from(TargetDef::Table)
+            .columns(Target::columns())
+            .and_where(Expr::col(TargetDef::Name).eq(name))
+            .to_owned()
+    }
+
+    pub fn insert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(TargetDef::Table)
+            .columns(Self::bare_columns())
+            .values_panic([
+                self.id.into(),
+                self.name.clone().into(),
+                self.desc.clone().into(),
+                self.redirect.into(),
+                self.privilege.clone().into(),
+            ])
+            .to_owned()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -655,6 +966,31 @@ impl FromRow for JobDepend {
 }
 
 impl JobDepend {
+    pub fn find(job: JobId, name: &str) -> SelectStatement {
+        Query::select()
+            .from(JobDependDef::Table)
+            .columns(JobDepend::columns())
+            .and_where(Expr::col(JobDependDef::Job).eq(job))
+            .and_where(Expr::col(JobDependDef::Name).eq(name))
+            .to_owned()
+    }
+
+    pub fn insert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(JobDependDef::Table)
+            .columns(Self::bare_columns())
+            .values_panic([
+                self.job.into(),
+                self.name.clone().into(),
+                self.prior_job.into(),
+                self.copy_outputs.into(),
+                self.on_failed.into(),
+                self.on_completed.into(),
+                self.satisfied.into(),
+            ])
+            .to_owned()
+    }
+
     pub fn from_create(cd: &super::CreateDepend, job: JobId) -> JobDepend {
         JobDepend {
             job,
@@ -678,6 +1014,49 @@ pub struct JobTime {
     pub time: IsoDate,
 }
 
+impl FromRow for JobTime {
+    fn columns() -> Vec<ColumnRef> {
+        [JobTimeDef::Job, JobTimeDef::Name, JobTimeDef::Time]
+            .into_iter()
+            .map(|col| {
+                ColumnRef::TableColumn(
+                    SeaRc::new(JobTimeDef::Table),
+                    SeaRc::new(col),
+                )
+            })
+            .collect()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<JobTime> {
+        todo!()
+        //let s = WorkerDef::Token.as_str();
+    }
+}
+
+impl JobTime {
+    pub fn upsert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(JobTimeDef::Table)
+            .columns(Self::bare_columns())
+            .values_panic([
+                self.job.into(),
+                self.name.clone().into(),
+                self.time.into(),
+            ])
+            .on_conflict(OnConflict::new().do_nothing().to_owned())
+            .to_owned()
+    }
+
+    pub fn find(job: JobId, name: &str) -> SelectStatement {
+        Query::select()
+            .from(JobTimeDef::Table)
+            .columns(JobTime::columns())
+            .and_where(Expr::col(JobTimeDef::Job).eq(job))
+            .and_where(Expr::col(JobTimeDef::Name).eq(name))
+            .to_owned()
+    }
+}
+
 #[derive(Debug, Clone)]
 //#[diesel(table_name = job_store)]
 //#[diesel(primary_key(job, name))]
@@ -689,4 +1068,30 @@ pub struct JobStore {
     pub secret: bool,
     pub source: String,
     pub time_update: IsoDate,
+}
+
+impl FromRow for JobStore {
+    fn columns() -> Vec<ColumnRef> {
+        [
+            JobStoreDef::Job,
+            JobStoreDef::Name,
+            JobStoreDef::Value,
+            JobStoreDef::Secret,
+            JobStoreDef::Source,
+            JobStoreDef::TimeUpdate,
+        ]
+        .into_iter()
+        .map(|col| {
+            ColumnRef::TableColumn(
+                SeaRc::new(JobStoreDef::Table),
+                SeaRc::new(col),
+            )
+        })
+        .collect()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<JobStore> {
+        todo!()
+        //let s = WorkerDef::Token.as_str();
+    }
 }

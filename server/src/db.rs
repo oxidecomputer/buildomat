@@ -13,7 +13,7 @@ use buildomat_types::*;
 use chrono::prelude::*;
 use rusqlite::Transaction;
 use rusty_ulid::Ulid;
-use sea_query::{Asterisk, Expr, Order, Query, SqliteQueryBuilder};
+use sea_query::{Asterisk, Expr, Order, Query, SqliteQueryBuilder, OnConflict, SelectStatement, UpdateStatement, InsertStatement, DeleteStatement};
 use sea_query_rusqlite::{RusqliteBinder, RusqliteValues};
 #[allow(unused_imports)]
 use slog::{error, info, warn, Logger};
@@ -31,6 +31,8 @@ pub enum OperationError {
     Sql(#[from] rusqlite::Error),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    OutOfRange(#[from] chrono::OutOfRangeError),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -102,6 +104,33 @@ impl Database {
         Ok(Database(log, Mutex::new(Inner { conn })))
     }
 
+    pub fn tx_exec_delete(
+        &self,
+        tx: &mut Transaction,
+        d: DeleteStatement,
+    ) -> OResult<usize> {
+        let (q, v) = d.build_rusqlite(SqliteQueryBuilder);
+        self.tx_exec(tx, q, v)
+    }
+
+    pub fn tx_exec_update(
+        &self,
+        tx: &mut Transaction,
+        u: UpdateStatement,
+    ) -> OResult<usize> {
+        let (q, v) = u.build_rusqlite(SqliteQueryBuilder);
+        self.tx_exec(tx, q, v)
+    }
+
+    pub fn tx_exec_insert(
+        &self,
+        tx: &mut Transaction,
+        i: InsertStatement,
+    ) -> OResult<usize> {
+        let (q, v) = i.build_rusqlite(SqliteQueryBuilder);
+        self.tx_exec(tx, q, v)
+    }
+
     pub fn tx_exec(
         &self,
         tx: &mut Transaction,
@@ -114,6 +143,21 @@ impl Database {
         Ok(out)
     }
 
+    pub fn exec_delete(&self, d: DeleteStatement) -> OResult<usize> {
+        let (q, v) = d.build_rusqlite(SqliteQueryBuilder);
+        self.exec(q, v)
+    }
+
+    pub fn exec_update(&self, u: UpdateStatement) -> OResult<usize> {
+        let (q, v) = u.build_rusqlite(SqliteQueryBuilder);
+        self.exec(q, v)
+    }
+
+    pub fn exec_insert(&self, i: InsertStatement) -> OResult<usize> {
+        let (q, v) = i.build_rusqlite(SqliteQueryBuilder);
+        self.exec(q, v)
+    }
+
     pub fn exec(&self, q: String, v: RusqliteValues) -> OResult<usize> {
         let c = &mut self.1.lock().unwrap().conn;
 
@@ -122,11 +166,26 @@ impl Database {
         Ok(out)
     }
 
+    pub fn get_strings(
+        &self,
+        s: SelectStatement,
+    ) -> OResult<Vec<String>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let mut s = c.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), |row| {
+            row.get(0)
+        })?;
+
+        Ok(out.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn get_rows<T: FromRow>(
         &self,
-        q: String,
-        v: RusqliteValues,
+        s: SelectStatement,
     ) -> OResult<Vec<T>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
         let c = &mut self.1.lock().unwrap().conn;
 
         let mut s = c.prepare(&q)?;
@@ -137,9 +196,9 @@ impl Database {
 
     pub fn get_row<T: FromRow>(
         &self,
-        q: String,
-        v: RusqliteValues,
+        s: SelectStatement,
     ) -> OResult<T> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
         let c = &mut self.1.lock().unwrap().conn;
 
         let mut s = c.prepare(&q)?;
@@ -154,9 +213,9 @@ impl Database {
 
     pub fn get_row_opt<T: FromRow>(
         &self,
-        q: String,
-        v: RusqliteValues,
+        s: SelectStatement,
     ) -> OResult<Option<T>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
         let c = &mut self.1.lock().unwrap().conn;
 
         let mut s = c.prepare(&q)?;
@@ -172,9 +231,9 @@ impl Database {
     pub fn tx_get_count(
         &self,
         tx: &mut Transaction,
-        q: String,
-        v: RusqliteValues,
+        s: SelectStatement,
     ) -> OResult<usize> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
         let mut s = tx.prepare(&q)?;
         let out = s.query_map(&*v.as_params(), |row| row.get::<_, i64>(0))?;
         let mut out = out.collect::<rusqlite::Result<Vec<i64>>>()?;
@@ -182,15 +241,15 @@ impl Database {
             0 => conflict!("record not found"),
             1 => Ok(out[0].try_into().unwrap()),
             n => conflict!("found {n} records when we wanted only 1"),
-        }
+        } /* XXX what */
     }
 
     pub fn tx_get_row_opt<T: FromRow>(
         &self,
         tx: &mut Transaction,
-        q: String,
-        v: RusqliteValues,
+        s: SelectStatement,
     ) -> OResult<Option<T>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
         let mut s = tx.prepare(&q)?;
         let out = s.query_map(&*v.as_params(), T::from_row)?;
         let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
@@ -201,12 +260,26 @@ impl Database {
         }
     }
 
+    pub fn tx_get_strings(
+        &self,
+        tx: &mut Transaction,
+        s: SelectStatement,
+    ) -> OResult<Vec<String>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        let mut s = tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), |row| {
+            row.get(0)
+        })?;
+
+        Ok(out.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn tx_get_row<T: FromRow>(
         &self,
         tx: &mut Transaction,
-        q: String,
-        v: RusqliteValues,
+        s: SelectStatement,
     ) -> OResult<T> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
         let mut s = tx.prepare(&q)?;
         let out = s.query_map(&*v.as_params(), T::from_row)?;
         let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
@@ -222,73 +295,62 @@ impl Database {
         tx: &mut Transaction,
         bs: &str,
     ) -> OResult<Worker> {
-        let (q, v) = Query::select()
+        self.tx_get_row(tx, 
+        Query::select()
             .from(WorkerDef::Table)
             .columns(Worker::columns())
             .and_where(Expr::col(WorkerDef::Bootstrap).eq(bs))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.tx_get_row(tx, q, v)
+            .to_owned())
     }
 
     fn i_worker(&self, tx: &mut Transaction, id: WorkerId) -> OResult<Worker> {
-        let (q, v) = Query::select()
+        self.tx_get_row(tx, Query::select()
             .from(WorkerDef::Table)
             .columns(Worker::columns())
             .and_where(Expr::col(WorkerDef::Id).eq(id))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.tx_get_row(tx, q, v)
+            .to_owned())
     }
 
     pub fn workers(&self) -> OResult<Vec<Worker>> {
-        let (q, v) = Query::select()
+        self.get_rows(Query::select()
             .from(WorkerDef::Table)
             .columns(Worker::columns())
             .order_by(WorkerDef::Id, Order::Asc)
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_rows(q, v)
+            .to_owned())
     }
 
     pub fn workers_active(&self) -> OResult<Vec<Worker>> {
-        let (q, v) = Query::select()
+        self.get_rows(Query::select()
             .from(WorkerDef::Table)
             .columns(Worker::columns())
             .order_by(WorkerDef::Id, Order::Asc)
             .and_where(Expr::col(WorkerDef::Deleted).eq(false))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_rows(q, v)
+            .to_owned())
     }
 
     pub fn workers_for_factory(
         &self,
         factory: &Factory,
     ) -> OResult<Vec<Worker>> {
-        let (q, v) = Query::select()
+        self.get_rows(Query::select()
             .from(WorkerDef::Table)
             .columns(Worker::columns())
             .order_by(WorkerDef::Id, Order::Asc)
             .and_where(Expr::col(WorkerDef::Factory).eq(factory.id))
             .and_where(Expr::col(WorkerDef::Deleted).eq(false))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_rows(q, v)
+            .to_owned())
     }
 
     pub fn worker_jobs(&self, worker: WorkerId) -> OResult<Vec<Job>> {
-        let (q, v) = Query::select()
+        self.get_rows(Query::select()
             .from(JobDef::Table)
             .columns(Job::columns())
             .and_where(Expr::col(JobDef::Worker).eq(worker))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_rows(q, v)
+            .to_owned())
     }
 
     pub fn free_workers(&self) -> OResult<Vec<Worker>> {
-        let (q, v) = Query::select()
+        self.get_rows(Query::select()
             .columns(Worker::columns())
             .from(WorkerDef::Table)
             .left_join(
@@ -307,9 +369,7 @@ impl Database {
             .and_where(
                 Expr::col((WorkerDef::Table, WorkerDef::Token)).is_not_null(),
             )
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_rows(q, v)
+            .to_owned())
     }
 
     pub fn worker_recycle_all(&self) -> OResult<usize> {
@@ -365,18 +425,8 @@ impl Database {
         Ok(self.exec(q, v)? > 0)
     }
 
-    fn q_job(&self, job: JobId) -> (String, RusqliteValues) {
-        Query::select()
-            .from(JobDef::Table)
-            .columns(Job::columns())
-            .and_where(Expr::col(JobDef::Id).eq(job))
-            .build_rusqlite(SqliteQueryBuilder)
-    }
-
     fn i_job(&self, tx: &mut Transaction, jid: JobId) -> OResult<Job> {
-        let (q, v) = self.q_job(jid);
-
-        self.tx_get_row(tx, q, v)
+        self.tx_get_row(tx, Job::find(jid))
     }
 
     pub fn i_worker_assign_job(
@@ -391,13 +441,14 @@ impl Database {
         }
 
         let c = {
-            let (q, v) = Query::select()
-                .expr(Expr::asterisk().count())
+
+            self.tx_get_count(tx, 
+            Query::select()
+                .expr(Expr::col(Asterisk).count())
                 .from(JobDef::Table)
                 .and_where(Expr::col(JobDef::Worker).eq(w.id))
-                .build_rusqlite(SqliteQueryBuilder);
-
-            self.tx_get_count(tx, q, v)?
+                .to_owned()
+                )?
         };
         if c > 0 {
             conflict!("worker {} already has {} jobs assigned", w.id, c);
@@ -539,129 +590,123 @@ impl Database {
         factory_private: &str,
         factory_metadata: Option<&metadata::FactoryMetadata>,
     ) -> OResult<()> {
-        todo!()
-        // let c = &mut self.1.lock().unwrap().conn;
+        /*
+         * First, convert the provided metadata object to a serde JSON value.
+         * We'll use this (rather than the concrete string) for comparison with
+         * an existing record because the string might not be serialised
+         * byte-for-byte the same each time.
+         */
+        let factory_metadata = factory_metadata
+            .as_ref()
+            .map(serde_json::to_value)
+            .transpose()?
+            .map(JsonValue);
 
-        // /*
-        //  * First, convert the provided metadata object to a serde JSON value.
-        //  * We'll use this (rather than the concrete string) for comparison with
-        //  * an existing record because the string might not be serialised
-        //  * byte-for-byte the same each time.
-        //  */
-        // let factory_metadata = factory_metadata
-        //     .as_ref()
-        //     .map(serde_json::to_value)
-        //     .transpose()?
-        //     .map(JsonValue);
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // c.immediate_transaction(|tx| {
-        //     use schema::worker;
+        let w: Worker = self.tx_get_row(&mut tx, Worker::find(wid))?;
+        if w.deleted {
+            conflict!("worker {} already deleted, cannot associate", w.id);
+        }
 
-        //     let w: Worker = worker::dsl::worker.find(wid).get_result(tx)?;
-        //     if w.deleted {
-        //         conflict!("worker {} already deleted, cannot associate", w.id);
-        //     }
+        if let Some(current) = w.factory_private.as_deref() {
+            if current == factory_private {
+                /*
+                 * Everything is as expected.
+                 */
+            } else {
+                /*
+                 * A conflict exists?
+                 */
+                conflict!(
+                    "worker {} already associated with instance {} not {}",
+                    w.id,
+                    current,
+                    factory_private
+                );
+            }
+        } else {
+            /*
+             * The worker is not yet associated with an instance ID.
+             */
+            let count = self.tx_exec_update(&mut tx,
+                Query::update()
+                .table(WorkerDef::Table)
+                .and_where(Expr::col(WorkerDef::Id).eq(w.id))
+                .value(WorkerDef::FactoryPrivate, factory_private).to_owned())?;
+            assert_eq!(count, 1);
+        }
 
-        //     if let Some(current) = w.factory_private.as_deref() {
-        //         if current == factory_private {
-        //             /*
-        //              * Everything is as expected.
-        //              */
-        //         } else {
-        //             /*
-        //              * A conflict exists?
-        //              */
-        //             conflict!(
-        //                 "worker {} already associated with instance {} not {}",
-        //                 w.id,
-        //                 current,
-        //                 factory_private
-        //             );
-        //         }
-        //     } else {
-        //         /*
-        //          * The worker is not yet associated with an instance ID.
-        //          */
-        //         let count = diesel::update(worker::dsl::worker)
-        //             .filter(worker::dsl::id.eq(w.id))
-        //             .set(worker::dsl::factory_private.eq(factory_private))
-        //             .execute(tx)?;
-        //         assert_eq!(count, 1);
-        //     }
+        if let Some(current) = w.factory_metadata.as_ref() {
+            /*
+             * The worker record already has factory metadata.
+             */
+            if let Some(new) = factory_metadata.as_ref() {
+                if current.0 == new.0 {
+                    /*
+                     * The factory metadata in the database matches what we
+                     * have already.
+                     */
+                } else {
+                    conflict!(
+                        "worker {} factory metadata mismatch: {:?} != {:?}",
+                        w.id,
+                        current,
+                        factory_metadata,
+                    );
+                }
+            }
+        } else if let Some(factory_metadata) = factory_metadata {
+            /*
+             * Store the factory metadata for this worker:
+             */
+            let count = self.tx_exec_update(&mut tx,
+                Query::update()
+                .table(WorkerDef::Table)
+                .and_where(Expr::col(WorkerDef::Id).eq(w.id))
+                .value(WorkerDef::FactoryMetadata, factory_metadata).to_owned())?;
+            assert_eq!(count, 1);
+        }
 
-        //     if let Some(current) = w.factory_metadata.as_ref() {
-        //         /*
-        //          * The worker record already has factory metadata.
-        //          */
-        //         if let Some(new) = factory_metadata.as_ref() {
-        //             if current.0 == new.0 {
-        //                 /*
-        //                  * The factory metadata in the database matches what we
-        //                  * have already.
-        //                  */
-        //             } else {
-        //                 conflict!(
-        //                     "worker {} factory metadata mismatch: {:?} != {:?}",
-        //                     w.id,
-        //                     current,
-        //                     factory_metadata,
-        //                 );
-        //             }
-        //         }
-        //     } else if let Some(factory_metadata) = factory_metadata {
-        //         /*
-        //          * Store the factory metadata for this worker:
-        //          */
-        //         let count = diesel::update(worker::dsl::worker)
-        //             .filter(worker::dsl::id.eq(w.id))
-        //             .set(worker::dsl::factory_metadata.eq(factory_metadata))
-        //             .execute(tx)?;
-        //         assert_eq!(count, 1);
-        //     }
-
-        //     Ok(())
-        // })
+        tx.commit()?;
+        Ok(())
     }
 
-    pub fn worker_get(&self, id: WorkerId) -> OResult<Worker> {
-        let (q, v) = Query::select()
+    pub fn worker(&self, id: WorkerId) -> OResult<Worker> {
+        self.get_row(Query::select()
             .from(WorkerDef::Table)
             .columns(Worker::columns())
             .and_where(Expr::col(WorkerDef::Id).eq(id))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_row(q, v)
+            .to_owned())
     }
 
-    pub fn worker_get_opt(&self, id: WorkerId) -> OResult<Option<Worker>> {
-        let (q, v) = Query::select()
+    pub fn worker_opt(&self, id: WorkerId) -> OResult<Option<Worker>> {
+        self.get_row_opt(Query::select()
             .from(WorkerDef::Table)
             .columns(Worker::columns())
             .and_where(Expr::col(WorkerDef::Id).eq(id))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_row_opt(q, v)
+            .to_owned())
     }
 
     pub fn worker_auth(&self, token: &str) -> OResult<Worker> {
-        todo!()
+        let mut workers = self.get_rows::<Worker>(Query::select()
+            .from(WorkerDef::Table)
+            .columns(Worker::columns())
+            .and_where(Expr::col(WorkerDef::Token).eq(token))
+            .and_where(Expr::col(WorkerDef::Deleted).eq(false))
+            .to_owned())?;
 
-        // use schema::worker;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // let mut workers: Vec<Worker> = worker::dsl::worker
-        //     .filter(worker::dsl::token.eq(token))
-        //     .get_results(c)?;
-
-        // match (workers.pop(), workers.pop()) {
-        //     (None, _) => bail!("auth failure"),
-        //     (Some(u), Some(x)) => bail!("token error ({}, {})", u.id, x.id),
-        //     (Some(u), None) => {
-        //         assert_eq!(u.token.as_deref(), Some(token));
-        //         Ok(u)
-        //     }
-        // }
+        match (workers.pop(), workers.pop()) {
+            (None, _) => conflict!("auth failure"),
+            (Some(u), Some(x)) => conflict!("token error ({}, {})", u.id, x.id),
+            (Some(u), None) => {
+                assert_eq!(u.token.as_deref(), Some(token));
+                Ok(u)
+            }
+        }
     }
 
     pub fn worker_create(
@@ -671,118 +716,107 @@ impl Database {
         job: Option<JobId>,
         wait_for_flush: bool,
     ) -> OResult<Worker> {
-        todo!()
+        let w = Worker {
+            id: WorkerId::generate(),
+            bootstrap: genkey(64),
+            factory_private: None,
+            factory_metadata: None,
+            token: None,
+            deleted: false,
+            recycle: false,
+            lastping: None,
+            factory: Some(factory.id),
+            target: Some(target.id),
+            wait_for_flush,
+        };
 
-        // use schema::worker;
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // let w = Worker {
-        //     id: WorkerId::generate(),
-        //     bootstrap: genkey(64),
-        //     factory_private: None,
-        //     factory_metadata: None,
-        //     token: None,
-        //     deleted: false,
-        //     recycle: false,
-        //     lastping: None,
-        //     factory: Some(factory.id),
-        //     target: Some(target.id),
-        //     wait_for_flush,
-        // };
+        let (q, v) = w.insert().build_rusqlite(SqliteQueryBuilder);
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        let count = self.tx_exec(&mut tx, q, v)?;
+        assert_eq!(count, 1);
 
-        // c.immediate_transaction(|tx| {
-        //     let count = diesel::insert_into(worker::dsl::worker)
-        //         .values(&w)
-        //         .execute(tx)?;
-        //     assert_eq!(count, 1);
+        /*
+         * If this is a concrete target, we will be given the job ID at
+         * worker creation time.  This allows the factory to reserve the
+         * specific job and use the job configuration for target-specific
+         * pre-setup.
+         *
+         * If no job was specified, this will be an ephemeral target that
+         * will be assigned later by the job assignment task.
+         */
+        if let Some(job) = job {
+            self.i_worker_assign_job(&mut tx, &w, job)?;
+        }
 
-        //     /*
-        //      * If this is a concrete target, we will be given the job ID at
-        //      * worker creation time.  This allows the factory to reserve the
-        //      * specific job and use the job configuration for target-specific
-        //      * pre-setup.
-        //      *
-        //      * If no job was specified, this will be an ephemeral target that
-        //      * will be assigned later by the job assignment task.
-        //      */
-        //     if let Some(job) = job {
-        //         self.i_worker_assign_job(tx, &w, job)?;
-        //     }
-
-        //     Ok(w)
-        // })
+        Ok(w)
     }
 
     /**
      * Enumerate all jobs.
      */
     pub fn jobs_all(&self) -> OResult<Vec<Job>> {
-        let (q, v) = Query::select()
+        self.get_rows(Query::select()
             .from(JobDef::Table)
             .columns(Job::columns())
             .order_by(JobDef::Id, Order::Asc)
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_rows(q, v)
+            .to_owned())
     }
 
     /**
      * Enumerate jobs that are active; i.e., not yet complete, but not waiting.
      */
     pub fn jobs_active(&self) -> OResult<Vec<Job>> {
-        let (q, v) = Query::select()
+        self.get_rows(Query::select()
             .from(JobDef::Table)
             .columns(Job::columns())
             .order_by(JobDef::Id, Order::Asc)
             .and_where(Expr::col(JobDef::Complete).eq(false))
             .and_where(Expr::col(JobDef::Waiting).eq(false))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_rows(q, v)
+            .to_owned())
     }
 
     /**
      * Enumerate jobs that are waiting for inputs, or for dependees to complete.
      */
     pub fn jobs_waiting(&self) -> OResult<Vec<Job>> {
-        let (q, v) = Query::select()
+        self.get_rows(Query::select()
             .from(JobDef::Table)
             .columns(Job::columns())
             .order_by(JobDef::Id, Order::Asc)
             .and_where(Expr::col(JobDef::Complete).eq(false))
             .and_where(Expr::col(JobDef::Waiting).eq(true))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_rows(q, v)
+            .to_owned())
     }
 
     /**
      * Enumerate some number of the most recently complete jobs.
      */
     pub fn jobs_completed(&self, limit: usize) -> OResult<Vec<Job>> {
-        let (q, v) = Query::select()
+        let mut res = self.get_rows(Query::select()
             .from(JobDef::Table)
             .columns(Job::columns())
             .order_by(JobDef::Id, Order::Desc)
             .and_where(Expr::col(JobDef::Complete).eq(true))
             .limit(limit.try_into().unwrap())
-            .build_rusqlite(SqliteQueryBuilder);
+            .to_owned())?;
 
-        let mut res = self.get_rows(q, v)?;
         res.reverse();
+
         Ok(res)
     }
 
     pub fn job_tasks(&self, job: JobId) -> OResult<Vec<Task>> {
-        let (q, v) = Query::select()
+        self.get_rows(Query::select()
             .from(TaskDef::Table)
             .columns(Task::columns())
             .order_by(TaskDef::Seq, Order::Asc)
             .and_where(Expr::col(TaskDef::Job).eq(job))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_rows(q, v)
+            .to_owned())
     }
 
     pub fn job_tags(&self, job: JobId) -> OResult<HashMap<String, String>> {
@@ -806,25 +840,21 @@ impl Database {
     }
 
     pub fn job_output_rules(&self, job: JobId) -> OResult<Vec<JobOutputRule>> {
-        let (q, v) = Query::select()
+        self.get_rows(Query::select()
             .from(JobOutputRuleDef::Table)
             .columns(JobOutputRule::columns())
             .order_by(JobOutputRuleDef::Seq, Order::Asc)
             .and_where(Expr::col(JobOutputRuleDef::Job).eq(job))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_rows(q, v)
+            .to_owned())
     }
 
     pub fn job_depends(&self, job: JobId) -> OResult<Vec<JobDepend>> {
-        let (q, v) = Query::select()
+        self.get_rows(Query::select()
             .from(JobDependDef::Table)
             .columns(JobDepend::columns())
             .order_by(JobDependDef::Name, Order::Asc)
             .and_where(Expr::col(JobDependDef::Job).eq(job))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_rows(q, v)
+            .to_owned())
     }
 
     /**
@@ -833,93 +863,91 @@ impl Database {
      * from the previous job into the new job as input files.
      */
     pub fn job_depend_satisfy(&self, jid: JobId, d: &JobDepend) -> OResult<()> {
-        todo!()
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // use schema::{job, job_depend, job_input};
+        /*
+         * Confirm that this job exists and is still waiting.
+         */
+        let j: Job = self.tx_get_row(&mut tx, Job::find(jid))?;
+        if !j.waiting {
+            conflict!("job not waiting, cannot satisfy dependency");
+        }
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        /*
+         * Confirm that the dependency record still exists and has not yet
+         * been satisfied.
+         */
+        let d: JobDepend =
+            self.tx_get_row(&mut tx, JobDepend::find(j.id, &d.name))?;
+        if d.satisfied {
+            conflict!("job dependency already satisfied");
+        }
 
-        // c.immediate_transaction(|tx| {
-        //     /*
-        //      * Confirm that this job exists and is still waiting.
-        //      */
-        //     let j: Job = job::dsl::job.find(jid).get_result(tx)?;
-        //     if !j.waiting {
-        //         bail!("job not waiting, cannot satisfy dependency");
-        //     }
+        /*
+         * Confirm that the prior job exists and is complete.
+         */
+        let pj: Job = self.tx_get_row(&mut tx, Job::find(d.prior_job))?;
+        if !pj.complete {
+            conflict!("prior job not complete");
+        }
 
-        //     /*
-        //      * Confirm that the dependency record still exists and has not yet
-        //      * been satisfied.
-        //      */
-        //     let d: JobDepend = job_depend::dsl::job_depend
-        //         .find((j.id, &d.name))
-        //         .get_result(tx)?;
-        //     if d.satisfied {
-        //         bail!("job dependency already satisfied");
-        //     }
+        if d.copy_outputs {
+            /*
+             * Resolve the list of output files.
+             */
+            let pjouts = self.i_job_outputs(&mut tx, pj.id)?;
 
-        //     /*
-        //      * Confirm that the prior job exists and is complete.
-        //      */
-        //     let pj: Job = job::dsl::job.find(d.prior_job).get_result(tx)?;
-        //     if !pj.complete {
-        //         bail!("prior job not complete");
-        //     }
+            /*
+             * For each output file produced by the dependency, create an
+             * input record for this job.
+             */
+            for (pjo, pjf) in pjouts {
+                /*
+                 * These input files will be placed under a directory named
+                 * for the dependency; e.g., If the dependency produced a
+                 * file "/work/file.txt", and the dependency was named
+                 * "builds", we want to create an input named
+                 * "builds/work/file.txt", which will result in a file at
+                 * "/input/builds/work/file.txt" in the job runner.
+                 */
+                let mut name = d.name.trim().to_string();
+                if !pjo.path.starts_with('/') {
+                    name.push('/');
+                }
+                name.push_str(&pjo.path);
 
-        //     if d.copy_outputs {
-        //         /*
-        //          * Resolve the list of output files.
-        //          */
-        //         let pjouts = self.i_job_outputs(tx, pj.id)?;
+                /*
+                 * Note that job files are named by a (job ID, file ID)
+                 * tuple.  In the case of a copied output, we need to use
+                 * the "other_job" field to refer to the job which holds the
+                 * output file we are referencing.
+                 */
+                let ji = JobInput {
+                    job: j.id,
+                    name,
+                    id: Some(pjf.id),
+                    other_job: Some(pjf.job),
+                };
 
-        //         /*
-        //          * For each output file produced by the dependency, create an
-        //          * input record for this job.
-        //          */
-        //         for (pjo, pjf) in pjouts {
-        //             /*
-        //              * These input files will be placed under a directory named
-        //              * for the dependency; e.g., If the dependency produced a
-        //              * file "/work/file.txt", and the dependency was named
-        //              * "builds", we want to create an input named
-        //              * "builds/work/file.txt", which will result in a file at
-        //              * "/input/builds/work/file.txt" in the job runner.
-        //              */
-        //             let mut name = d.name.trim().to_string();
-        //             if !pjo.path.starts_with('/') {
-        //                 name.push('/');
-        //             }
-        //             name.push_str(&pjo.path);
+                self.tx_exec_insert(&mut tx, ji.upsert())?;
+            }
+        }
 
-        //             /*
-        //              * Note that job files are named by a (job ID, file ID)
-        //              * tuple.  In the case of a copied output, we need to use
-        //              * the "other_job" field to refer to the job which holds the
-        //              * output file we are referencing.
-        //              */
-        //             let ji = JobInput {
-        //                 job: j.id,
-        //                 name,
-        //                 id: Some(pjf.id),
-        //                 other_job: Some(pjf.job),
-        //             };
+        let uc = self.tx_exec_update(&mut tx, Query::update()
+            .table(JobDependDef::Table)
+            .and_where(Expr::col(JobDependDef::Job).eq(j.id))
+            .and_where(Expr::col(JobDependDef::Name).eq(&d.name))
+            .value(JobDependDef::Satisfied, true)
+            .to_owned()
+            )?;
+        assert_eq!(uc, 1);
 
-        //             diesel::insert_into(job_input::dsl::job_input)
-        //                 .values(ji)
-        //                 .on_conflict_do_nothing()
-        //                 .execute(tx)?;
-        //         }
-        //     }
+        tx.commit()?;
 
-        //     diesel::update(job_depend::dsl::job_depend)
-        //         .set((job_depend::dsl::satisfied.eq(true),))
-        //         .filter(job_depend::dsl::job.eq(j.id))
-        //         .filter(job_depend::dsl::name.eq(&d.name))
-        //         .execute(tx)?;
-
-        //     Ok(())
-        // })
+        Ok(())
     }
 
     pub fn job_inputs(
@@ -1004,15 +1032,7 @@ impl Database {
         job: JobId,
         file: JobFileId,
     ) -> OResult<Option<JobFile>> {
-        todo!()
-
-        // let c = &mut self.1.lock().unwrap().conn;
-        // use schema::job_file::dsl;
-        // Ok(dsl::job_file
-        //     .filter(dsl::job.eq(job))
-        //     .filter(dsl::id.eq(file))
-        //     .get_result(c)
-        //     .optional()?)
+        self.get_row_opt(JobFile::find(job, file))
     }
 
     pub fn job_events(
@@ -1020,28 +1040,21 @@ impl Database {
         job: JobId,
         minseq: usize,
     ) -> OResult<Vec<JobEvent>> {
-        let (q, v) = Query::select()
+        self.get_rows(Query::select()
             .from(JobEventDef::Table)
             .columns(JobEvent::columns())
             .order_by(JobEventDef::Seq, Order::Asc)
             .and_where(Expr::col(JobEventDef::Job).eq(job))
-            .and_where(Expr::col(JobEventDef::Seq).eq(minseq as i64))
-                /*.gte(minseq as i64))*/
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_rows(q, v)
+            .and_where(Expr::col(JobEventDef::Seq).gte(minseq as i64))
+            .to_owned())
     }
 
     pub fn job(&self, job: JobId) -> OResult<Job> {
-        let (q, v) = self.q_job(job);
-
-        self.get_row(q, v)
+        self.get_row(Job::find(job))
     }
 
     pub fn job_opt(&self, job: JobId) -> OResult<Option<Job>> {
-        let (q, v) = self.q_job(job);
-
-        self.get_row_opt(q, v)
+        self.get_row_opt(Job::find(job))
     }
 
     pub fn job_create<I>(
@@ -1059,10 +1072,6 @@ impl Database {
     where
         I: IntoIterator<Item = (String, String)>,
     {
-        // use schema::{
-        //     job, job_depend, job_input, job_output_rule, job_tag, task,
-        // };
-
         if tasks.is_empty() {
             conflict!("a job must have at least one task");
         }
@@ -1117,108 +1126,105 @@ impl Database {
          */
         let start = j.id.datetime();
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // c.immediate_transaction(|tx| {
-        //     let ic =
-        //         diesel::insert_into(job::dsl::job).values(&j).execute(tx)?;
-        //     assert_eq!(ic, 1);
+        let ic = self.tx_exec_insert(&mut tx, j.insert())?;
+        assert_eq!(ic, 1);
 
-        //     self.i_job_time_record(tx, j.id, "submit", start)?;
-        //     if !waiting {
-        //         /*
-        //          * If the job is not waiting, record the submit time as the time
-        //          * at which dependencies are satisfied and the job is ready to
-        //          * run.
-        //          */
-        //         self.i_job_time_record(tx, j.id, "ready", start)?;
-        //     }
+        self.i_job_time_record(&mut tx, j.id, "submit", start)?;
+        if !waiting {
+            /*
+             * If the job is not waiting, record the submit time as the time
+             * at which dependencies are satisfied and the job is ready to
+             * run.
+             */
+            self.i_job_time_record(&mut tx, j.id, "ready", start)?;
+        }
 
-        //     for (i, ct) in tasks.iter().enumerate() {
-        //         let ic = diesel::insert_into(task::dsl::task)
-        //             .values(Task::from_create(ct, j.id, i))
-        //             .execute(tx)?;
-        //         assert_eq!(ic, 1);
-        //     }
+        for (i, ct) in tasks.iter().enumerate() {
+            let ic = self.tx_exec_insert(&mut tx, 
+                Task::from_create(ct, j.id, i).insert())?;
+            assert_eq!(ic, 1);
+        }
 
-        //     for cd in depends.iter() {
-        //         /*
-        //          * Make sure that this job exists in the system and that its
-        //          * owner matches the owner of this job.  By requiring prior jobs
-        //          * to exist already at the time of dependency specification we
-        //          * can avoid the mess of cycles in the dependency graph.
-        //          */
-        //         let pj: Option<Job> = job::dsl::job
-        //             .find(cd.prior_job)
-        //             .get_result(tx)
-        //             .optional()?;
+        for cd in depends.iter() {
+            /*
+             * Make sure that this job exists in the system and that its
+             * owner matches the owner of this job.  By requiring prior jobs
+             * to exist already at the time of dependency specification we
+             * can avoid the mess of cycles in the dependency graph.
+             */
+            let pj: Option<Job> = self.tx_get_row_opt(
+                &mut tx,
+                Job::find(cd.prior_job))?;
 
-        //         if !pj.map(|j| j.owner == owner).unwrap_or(false) {
-        //             /*
-        //              * Try not to leak information about job IDs from other
-        //              * users in the process.
-        //              */
-        //             bail!("prior job does not exist");
-        //         }
+            if !pj.map(|j| j.owner == owner).unwrap_or(false) {
+                /*
+                 * Try not to leak information about job IDs from other
+                 * users in the process.
+                 */
+                conflict!("prior job does not exist");
+            }
 
-        //         let ic = diesel::insert_into(job_depend::dsl::job_depend)
-        //             .values(JobDepend::from_create(cd, j.id))
-        //             .execute(tx)?;
-        //         assert_eq!(ic, 1);
-        //     }
+            let ic = self.tx_exec_insert(&mut tx,
+                JobDepend::from_create(cd, j.id).insert())?;
+            assert_eq!(ic, 1);
+        }
 
-        //     for ci in inputs.iter() {
-        //         let ic = diesel::insert_into(job_input::dsl::job_input)
-        //             .values(JobInput::from_create(ci.as_str(), j.id))
-        //             .execute(tx)?;
-        //         assert_eq!(ic, 1);
-        //     }
+        for ci in inputs.iter() {
+            let ic =self.tx_exec_insert(&mut tx,
+                JobInput::from_create(ci.as_str(), j.id).insert())?;
+            assert_eq!(ic, 1);
+        }
 
-        //     for (i, rule) in output_rules.iter().enumerate() {
-        //         let ic =
-        //             diesel::insert_into(job_output_rule::dsl::job_output_rule)
-        //                 .values(JobOutputRule::from_create(rule, j.id, i))
-        //                 .execute(tx)?;
-        //         assert_eq!(ic, 1);
-        //     }
+        for (i, rule) in output_rules.iter().enumerate() {
+            let ic = self.tx_exec_insert(&mut tx,
+                    JobOutputRule::from_create(rule, j.id, i).insert())?;
+            assert_eq!(ic, 1);
+        }
 
-        //     for (n, v) in tags {
-        //         let ic = diesel::insert_into(job_tag::dsl::job_tag)
-        //             .values((
-        //                 job_tag::dsl::job.eq(j.id),
-        //                 job_tag::dsl::name.eq(n),
-        //                 job_tag::dsl::value.eq(v),
-        //             ))
-        //             .execute(tx)?;
-        //         assert_eq!(ic, 1);
-        //     }
+        for (n, v) in tags {
+            let ic =self.tx_exec_insert(&mut tx,
+                Query::insert()
+                .into_table(JobTagDef::Table)
+                .columns([
+                    JobTagDef::Job,
+                    JobTagDef::Name,
+                    JobTagDef::Value,
+                ])
+                .values_panic([
+                    j.id.into(),
+                    n.into(),
+                    v.into(),
+                ])
+                .to_owned())?;
+            assert_eq!(ic, 1);
+        }
 
-        //     Ok(j)
-        // })
+        tx.commit()?;
 
-        todo!()
+        Ok(j)
     }
 
     pub fn job_input(&self, job: JobId, file: JobFileId) -> OResult<JobInput> {
-        let (q, v) = Query::select()
+        self.get_row(Query::select()
             .from(JobInputDef::Table)
             .columns(JobInput::columns())
             .and_where(Expr::col(JobInputDef::Job).eq(job))
             .and_where(Expr::col(JobInputDef::Id).eq(file))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_row(q, v)
+            .to_owned())
     }
 
     pub fn job_output(&self, job: JobId, file: JobFileId) -> OResult<JobOutput> {
-        let (q, v) = Query::select()
+        self.get_row(Query::select()
             .from(JobOutputDef::Table)
             .columns(JobOutput::columns())
             .and_where(Expr::col(JobOutputDef::Job).eq(job))
             .and_where(Expr::col(JobOutputDef::Id).eq(file))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_row(q, v)
+            .to_owned())
     }
 
     pub fn published_file_by_name(
@@ -1228,16 +1234,7 @@ impl Database {
         version: &str,
         name: &str,
     ) -> OResult<Option<PublishedFile>> {
-        todo!()
-
-        // use schema::published_file;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(published_file::dsl::published_file
-        //     .find((owner, series, version, name))
-        //     .get_result(c)
-        //     .optional()?)
+        self.get_row_opt(PublishedFile::find(owner, series, version, name))
     }
 
     pub fn job_publish_output(
@@ -1393,16 +1390,14 @@ impl Database {
          * Find the oldest completed job that has not yet been archived to long
          * term storage.
          */
-        let (q, v) = Query::select()
+        self.get_row_opt(Query::select()
             .from(JobDef::Table)
             .columns(Job::columns())
             .order_by(JobDef::Id, Order::Asc)
             .and_where(Expr::col(JobDef::Complete).eq(true))
             .and_where(Expr::col(JobDef::TimeArchived).is_null())
             .limit(1)
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_row_opt(q, v)
+            .to_owned())
     }
 
     pub fn job_mark_archived(
@@ -1410,20 +1405,15 @@ impl Database {
         job: JobId,
         time: DateTime<Utc>,
     ) -> OResult<()> {
-        todo!()
+        let uc = self.exec_update(Query::update()
+            .table(JobDef::Table)
+            .and_where(Expr::col(JobDef::Id).eq(job))
+            .and_where(Expr::col(JobDef::TimeArchived).is_null())
+            .value(JobDef::TimeArchived, IsoDate(time))
+            .to_owned())?;
+        assert_eq!(uc, 1);
 
-        // use schema::job;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // let uc = diesel::update(job::dsl::job)
-        //     .filter(job::dsl::id.eq(job))
-        //     .filter(job::dsl::time_archived.is_null())
-        //     .set((job::dsl::time_archived.eq(IsoDate(time)),))
-        //     .execute(c)?;
-        // assert_eq!(uc, 1);
-
-        // Ok(())
+        Ok(())
     }
 
     pub fn job_file_next_unarchived(&self) -> OResult<Option<JobFile>> {
@@ -1431,7 +1421,7 @@ impl Database {
          * Find the most recently uploaded output stored as part of a job that
          * has been completed.
          */
-        let (q, v) = Query::select()
+        self.get_row_opt(Query::select()
             .from(JobDef::Table)
             .inner_join(
                 JobFileDef::Table,
@@ -1445,9 +1435,7 @@ impl Database {
             .and_where(Expr::col(JobDef::Complete).eq(true))
             .and_where(Expr::col(JobFileDef::TimeArchived).is_null())
             .limit(1)
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_row_opt(q, v)
+            .to_owned())
     }
 
     pub fn job_file_mark_archived(
@@ -1455,21 +1443,16 @@ impl Database {
         file: &JobFile,
         time: DateTime<Utc>,
     ) -> OResult<()> {
-        todo!()
+        let uc = self.exec_update(Query::update()
+            .table(JobFileDef::Table)
+            .and_where(Expr::col(JobFileDef::Job).eq(file.job))
+            .and_where(Expr::col(JobFileDef::Id).eq(file.id))
+            .and_where(Expr::col(JobFileDef::TimeArchived).is_null())
+            .value(JobFileDef::TimeArchived, IsoDate(time))
+            .to_owned())?;
+        assert_eq!(uc, 1);
 
-        // use schema::job_file;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // let uc = diesel::update(job_file::dsl::job_file)
-        //     .filter(job_file::dsl::job.eq(&file.job))
-        //     .filter(job_file::dsl::id.eq(&file.id))
-        //     .filter(job_file::dsl::time_archived.is_null())
-        //     .set((job_file::dsl::time_archived.eq(IsoDate(time)),))
-        //     .execute(c)?;
-        // assert_eq!(uc, 1);
-
-        // Ok(())
+        Ok(())
     }
 
     pub fn job_append_events(
@@ -1646,7 +1629,7 @@ impl Database {
         //     }
 
         //     if j.cancelled && !failed {
-        //         bail!("job {} cancelled; cannot succeed", j.id);
+        //         conflict!("job {} cancelled; cannot succeed", j.id);
         //     }
 
         //     /*
@@ -1729,19 +1712,13 @@ impl Database {
         name: &str,
         when: DateTime<Utc>,
     ) -> OResult<()> {
-        todo!()
+        self.exec_insert(JobTime {
+            job,
+            name: name.to_string(),
+            time: IsoDate(when),
+        }.upsert())?;
 
-        // use schema::job_time;
-
-        // diesel::insert_into(job_time::dsl::job_time)
-        //     .values(JobTime {
-        //         job,
-        //         name: name.to_string(),
-        //         time: IsoDate(when),
-        //     })
-        //     .on_conflict_do_nothing()
-        //     .execute(tx)?;
-        // Ok(())
+        Ok(())
     }
 
     pub fn i_job_time_delta(
@@ -1751,69 +1728,47 @@ impl Database {
         from: &str,
         until: &str,
     ) -> OResult<Option<std::time::Duration>> {
-        todo!()
+        let from = if let Some(from) = self.get_row_opt::<JobTime>(JobTime::find(job, from))? {
+            from
+        } else {
+            return Ok(None);
+        };
 
-        // use schema::job_time;
+        let until = if let Some(until) = self.get_row_opt::<JobTime>(JobTime::find(job, until))? {
+            until
+        } else {
+            return Ok(None);
+        };
 
-        // let from: JobTime = if let Some(t) = job_time::dsl::job_time
-        //     .find((job, from))
-        //     .get_result(tx)
-        //     .optional()?
-        // {
-        //     t
-        // } else {
-        //     return Ok(None);
-        // };
+        let dur = until.time.0.signed_duration_since(from.time.0);
+        if dur.num_milliseconds() < 0 {
+            return Ok(None);
+        }
 
-        // let until: JobTime = if let Some(t) = job_time::dsl::job_time
-        //     .find((job, until))
-        //     .get_result(tx)
-        //     .optional()?
-        // {
-        //     t
-        // } else {
-        //     return Ok(None);
-        // };
-
-        // let dur = until.time.0.signed_duration_since(from.time.0);
-        // if dur.num_milliseconds() < 0 {
-        //     return Ok(None);
-        // }
-
-        // Ok(Some(dur.to_std()?))
+        Ok(Some(dur.to_std()?))
     }
 
     pub fn job_times(
         &self,
         job: JobId,
     ) -> OResult<HashMap<String, DateTime<Utc>>> {
-        todo!()
-
-        // use schema::job_time;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(job_time::dsl::job_time
-        //     .filter(job_time::dsl::job.eq(job))
-        //     .get_results::<JobTime>(c)?
-        //     .drain(..)
-        //     .map(|jt| (jt.name, jt.time.0))
-        //     .collect())
+        Ok(self.get_rows::<JobTime>(Query::select()
+            .from(JobTimeDef::Table)
+            .and_where(Expr::col(JobTimeDef::Job).eq(job))
+            .to_owned())?
+            .into_iter()
+            .map(|jt| (jt.name, jt.time.0))
+            .collect())
     }
 
     pub fn job_store(&self, job: JobId) -> OResult<HashMap<String, JobStore>> {
-        todo!()
-
-        // use schema::job_store;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(job_store::dsl::job_store
-        //     .filter(job_store::dsl::job.eq(job))
-        //     .get_results::<JobStore>(c)?
-        //     .into_iter()
-        //     .map(|js| (js.name.to_string(), js))
-        //     .collect())
+        Ok(self.get_rows::<JobStore>(Query::select()
+            .from(JobStoreDef::Table)
+            .and_where(Expr::col(JobStoreDef::Job).eq(job))
+            .to_owned())?
+            .into_iter()
+            .map(|js| (js.name.to_string(), js))
+            .collect())
     }
 
     pub fn job_store_put(
@@ -1986,33 +1941,30 @@ impl Database {
     }
 
     pub fn user_jobs(&self, owner: UserId) -> OResult<Vec<Job>> {
-        let (q, v) = Query::select()
+        self.get_rows(Query::select()
             .from(JobDef::Table)
             .columns(Job::columns())
             .and_where(Expr::col(JobDef::Owner).eq(owner))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_rows(q, v)
+            .to_owned())
     }
 
     pub fn worker_job(&self, worker: WorkerId) -> OResult<Option<Job>> {
-        let (q, v) = Query::select()
+        self.get_row_opt(Query::select()
             .from(JobDef::Table)
             .columns(Job::columns())
             .and_where(Expr::col(JobDef::Worker).eq(worker))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_row_opt(q, v)
+            .to_owned())
     }
 
     pub fn user(&self, id: UserId) -> OResult<Option<AuthUser>> {
-        let (q, v) = Query::select()
+        self.get_row_opt::<User>(
+        Query::select()
             .from(UserDef::Table)
             .columns(User::columns())
             .and_where(Expr::col(UserDef::Id).eq(id))
-            .build_rusqlite(SqliteQueryBuilder);
+            .to_owned()
 
-        self.get_row_opt::<User>(q, v)?
+            )?
             .map(|user| Ok(AuthUser {
                 privileges: self.i_user_privileges(user.id)?,
                 user,
@@ -2021,28 +1973,28 @@ impl Database {
     }
 
     pub fn user_by_name(&self, name: &str) -> OResult<Option<AuthUser>> {
-        let (q, v) = Query::select()
+        self.get_row_opt::<User>(
+        Query::select()
             .from(UserDef::Table)
             .columns(User::columns())
             .and_where(Expr::col(UserDef::Name).eq(name))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_row_opt::<User>(q, v)?
+            .to_owned()
+            )?
             .map(|user| Ok(AuthUser {
                 privileges: self.i_user_privileges(user.id)?,
                 user,
             }))
         .transpose()
-
     }
 
     pub fn users(&self) -> OResult<Vec<AuthUser>> {
-        let (q, v) = Query::select()
+
+        self.get_rows::<User>(
+        Query::select()
             .from(UserDef::Table)
             .columns(User::columns())
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.get_rows::<User>(q, v)?
+            .to_owned()
+            )?
             .into_iter()
             .map(|user| Ok(AuthUser {
                 privileges: self.i_user_privileges(user.id)?,
@@ -2051,22 +2003,23 @@ impl Database {
             .collect::<OResult<_>>()
     }
 
+    fn q_user_privileges(
+        &self,
+        user: UserId,
+    ) -> SelectStatement {
+        Query::select()
+            .from(UserPrivilegeDef::Table)
+            .column(UserPrivilegeDef::Privilege)
+            .and_where(Expr::col(UserPrivilegeDef::User).eq(user))
+            .order_by(UserPrivilegeDef::Privilege, Order::Asc)
+            .to_owned()
+    }
+
     fn i_user_privileges(
         &self,
         user: UserId,
     ) -> OResult<Vec<String>> {
-        todo!()
-
-        // use schema::user_privilege::dsl;
-
-        // Ok(dsl::user_privilege
-        //     .select((dsl::privilege,))
-        //     .filter(dsl::user.eq(user))
-        //     .order_by(dsl::privilege.asc())
-        //     .get_results::<(String,)>(tx)?
-        //     .drain(..)
-        //     .map(|(s,)| s)
-        //     .collect::<Vec<_>>())
+        self.get_strings(self.q_user_privileges(user))
     }
 
     pub fn user_privilege_grant(
@@ -2074,42 +2027,39 @@ impl Database {
         u: UserId,
         privilege: &str,
     ) -> OResult<bool> {
-        todo!()
+        if privilege.is_empty()
+            || !privilege.chars().all(|c| {
+                c.is_ascii_digit()
+                    || c.is_ascii_lowercase()
+                    || c == '-'
+                    || c == '_'
+                    || c == '/'
+                    || c == '.'
+            })
+        {
+            conflict!("invalid privilege name");
+        }
 
-        // use schema::{user, user_privilege};
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        /*
+         * Confirm that the user exists before creating privilege records:
+         */
+        let u: User = self.tx_get_row(&mut tx, User::find(u))?;
 
-        // if privilege.is_empty()
-        //     || !privilege.chars().all(|c| {
-        //         c.is_ascii_digit()
-        //             || c.is_ascii_lowercase()
-        //             || c == '-'
-        //             || c == '_'
-        //             || c == '/'
-        //             || c == '.'
-        //     })
-        // {
-        //     bail!("invalid privilege name");
-        // }
+        let ic = self.tx_exec_insert(&mut tx, 
+            UserPrivilege {
+                user: u.id,
+                privilege: privilege.to_string(),
+            }.upsert())?;
+        assert!(ic == 0 || ic == 1);
 
-        // c.immediate_transaction(|tx| {
-        //     /*
-        //      * Confirm that the user exists before creating privilege records:
-        //      */
-        //     let u: User = user::dsl::user.find(u).get_result(tx)?;
+        tx.commit()?;
 
-        //     let ic = diesel::insert_into(user_privilege::dsl::user_privilege)
-        //         .values(Privilege {
-        //             user: u.id,
-        //             privilege: privilege.to_string(),
-        //         })
-        //         .on_conflict_do_nothing()
-        //         .execute(tx)?;
-        //     assert!(ic == 0 || ic == 1);
-
-        //     Ok(ic != 0)
-        // })
+        Ok(ic != 0)
     }
 
     pub fn user_privilege_revoke(
@@ -2117,44 +2067,43 @@ impl Database {
         u: UserId,
         privilege: &str,
     ) -> OResult<bool> {
-        todo!()
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // use schema::{user, user_privilege};
+        /*
+         * Confirm that the user exists before trying to remove privilege
+         * records:
+         */
+        let u: User = self.tx_get_row(&mut tx, User::find(u))?;
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        let dc = self.tx_exec_delete(&mut tx, Query::delete()
+            .from_table(UserPrivilegeDef::Table)
+            .and_where(Expr::col(UserPrivilegeDef::User).eq(u.id))
+            .and_where(Expr::col(UserPrivilegeDef::Privilege).eq(privilege))
+            .to_owned())?;
+        assert!(dc == 0 || dc == 1);
 
-        // c.immediate_transaction(|tx| {
-        //     /*
-        //      * Confirm that the user exists before trying to remove privilege
-        //      * records:
-        //      */
-        //     let u: User = user::dsl::user.find(u).get_result(tx)?;
+        tx.commit()?;
 
-        //     let dc = diesel::delete(user_privilege::dsl::user_privilege)
-        //         .filter(user_privilege::dsl::user.eq(u.id))
-        //         .filter(user_privilege::dsl::privilege.eq(privilege))
-        //         .execute(tx)?;
-        //     assert!(dc == 0 || dc == 1);
-
-        //     Ok(dc != 0)
-        // })
+        Ok(dc != 0)
     }
 
     fn i_user_create(&self, name: &str, tx: &mut Transaction) -> OResult<User> {
-        todo!()
+        let u = User {
+            id: UserId::generate(),
+            name: name.to_string(),
+            token: genkey(48),
+            time_create: Utc::now().into(),
+        };
 
-        // use schema::user::dsl;
+        let (q, v) = u.insert().build_rusqlite(SqliteQueryBuilder);
 
-        // let u = User {
-        //     id: UserId::generate(),
-        //     name: name.to_string(),
-        //     token: genkey(48),
-        //     time_create: Utc::now().into(),
-        // };
+        let uc = self.tx_exec(tx, q, v)?;
+        assert_eq!(uc, 1);
 
-        // diesel::insert_into(dsl::user).values(&u).execute(tx)?;
-
-        // Ok(u)
+        Ok(u)
     }
 
     pub fn user_create(&self, name: &str) -> OResult<User> {
@@ -2179,227 +2128,211 @@ impl Database {
     }
 
     pub fn user_ensure(&self, name: &str) -> OResult<AuthUser> {
-        todo!()
+        /*
+         * Make sure the requested username is not one we might mistake as a
+         * ULID later.
+         */
+        if looks_like_a_ulid(name) {
+            conflict!("usernames must not look like ULIDs");
+        }
 
-        // use schema::user::dsl;
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        let user = if let Some(user) = self.get_row_opt::<User>(
+        Query::select()
+            .from(UserDef::Table)
+            .columns(User::columns())
+            .and_where(Expr::col(UserDef::Name).eq(name))
+            .to_owned()
+            )? {
+            user
+        } else {
+        /*
+         * The user does not exist already, so a new one must be
+         * created:
+         */
+        self.i_user_create(name, &mut tx)?
+        };
 
-        // c.immediate_transaction(|tx| {
-        //     let user = if let Some(user) = dsl::user
-        //         .filter(dsl::name.eq(name))
-        //         .get_result::<User>(tx)
-        //         .optional()?
-        //     {
-        //         user
-        //     } else {
-        //         /*
-        //          * The user does not exist already, so a new one must be
-        //          * created:
-        //          */
-        //         self.i_user_create(name, tx)?
-        //     };
+         let au = AuthUser {
+             privileges: self.tx_get_strings(&mut tx, self.q_user_privileges(user.id))?,
+             user,
+         };
 
-        //     Ok(AuthUser {
-        //         privileges: self.user_privileges(user.id, tx)?,
-        //         user,
-        //     })
-        // })
+         tx.commit()?;
+
+         Ok(au)
     }
 
     pub fn user_auth(&self, token: &str) -> OResult<AuthUser> {
-        todo!()
+        let mut users: Vec<User> =  self.get_rows::<User>(Query::select()
+            .from(UserDef::Table)
+            .columns(User::columns())
+            .and_where(Expr::col(UserDef::Token).eq(token))
+            .to_owned())?;
 
-        // use schema::user;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // let mut users: Vec<User> = user::dsl::user
-        //     .filter(user::dsl::token.eq(token))
-        //     .get_results(c)?;
-
-        // match (users.pop(), users.pop()) {
-        //     (None, _) => bail!("auth failure"),
-        //     (Some(u), Some(x)) => bail!("token error ({}, {})", u.id, x.id),
-        //     (Some(u), None) => {
-        //         assert_eq!(&u.token, token);
-        //         Ok(AuthUser {
-        //             privileges: self.user_privileges(u.id, c)?,
-        //             user: u,
-        //         })
-        //     }
-        // }
+        match (users.pop(), users.pop()) {
+            (None, _) => conflict!("auth failure"),
+            (Some(u), Some(x)) => conflict!("token error ({}, {})", u.id, x.id),
+            (Some(u), None) => {
+                assert_eq!(&u.token, token);
+                Ok(AuthUser {
+                    privileges: self.i_user_privileges(u.id)?,
+                    user: u,
+                })
+            }
+        }
     }
 
     pub fn factory_create(&self, name: &str) -> OResult<Factory> {
-        todo!()
+        /*
+         * Make sure the requested name is not one we might mistake as a
+         * ULID later.
+         */
+        if looks_like_a_ulid(name) {
+            conflict!("factory names must not look like ULIDs");
+        }
 
-        // let f = Factory {
-        //     id: FactoryId::generate(),
-        //     name: name.to_string(),
-        //     token: genkey(64),
-        //     lastping: None,
-        // };
+        let f = Factory {
+            id: FactoryId::generate(),
+            name: name.to_string(),
+            token: genkey(64),
+            lastping: None,
+        };
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        self.exec_insert(f.insert())?;
 
-        // use schema::factory::dsl;
-
-        // diesel::insert_into(dsl::factory).values(&f).execute(c)?;
-
-        // Ok(f)
+        Ok(f)
     }
 
-    pub fn factory_get(&self, id: FactoryId) -> OResult<Factory> {
-        todo!()
+    pub fn factory(&self, id: FactoryId) -> OResult<Factory> {
+        if id == Worker::legacy_default_factory_id() {
+            /*
+             * Factory records for workers that were created prior to the
+             * existence of factories do not exist.  Return a fake record.
+             */
+            return Ok(Factory {
+                id,
+                name: "legacy".into(),
+                /*
+                 * Authentication checks are done below in factory_auth() where
+                 * we need to guard against accidentally accepting this value:
+                 */
+                token: "".into(),
+                lastping: None,
+            });
+        }
 
-        // use schema::factory::dsl;
-
-        // if id == Worker::legacy_default_factory_id() {
-        //     /*
-        //      * Factory records for workers that were created prior to the
-        //      * existence of factories do not exist.  Return a fake record.
-        //      */
-        //     return Ok(Factory {
-        //         id,
-        //         name: "legacy".into(),
-        //         /*
-        //          * Authentication checks are done below in factory_auth() where
-        //          * we need to guard against accidentally accepting this value:
-        //          */
-        //         token: "".into(),
-        //         lastping: None,
-        //     });
-        // }
-
-        // let c = &mut self.1.lock().unwrap().conn;
-        // Ok(dsl::factory.find(id).get_result(c)?)
+        self.get_row(Factory::find(id))
     }
 
     pub fn factory_auth(&self, token: &str) -> OResult<Factory> {
-        todo!()
+        if token.is_empty() {
+            /*
+             * Make sure this trivially invalid value used in the legacy
+             * sentinel record is never accepted, even if it somehow ends up in
+             * the database by accident.
+             */
+            conflict!("auth failure");
+        }
 
-        // if token.is_empty() {
-        //     /*
-        //      * Make sure this trivially invalid value used in the legacy
-        //      * sentinel record is never accepted, even if it somehow ends up in
-        //      * the database by accident.
-        //      */
-        //     bail!("auth failure");
-        // }
+        let mut rows = self.get_rows::<Factory>(Query::select()
+            .from(FactoryDef::Table)
+            .columns(Factory::columns())
+            .and_where(Expr::col(FactoryDef::Token).eq(token))
+            .to_owned())?;
 
-        // use schema::factory;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // let mut rows: Vec<Factory> = factory::dsl::factory
-        //     .filter(factory::dsl::token.eq(token))
-        //     .get_results(c)?;
-
-        // match (rows.pop(), rows.pop()) {
-        //     (None, _) => bail!("auth failure"),
-        //     (Some(u), Some(x)) => bail!("token error ({}, {})", u.id, x.id),
-        //     (Some(u), None) => {
-        //         assert_eq!(u.token.as_str(), token);
-        //         Ok(u)
-        //     }
-        // }
+        match (rows.pop(), rows.pop()) {
+            (None, _) => conflict!("auth failure"),
+            (Some(u), Some(x)) => conflict!("token error ({}, {})", u.id, x.id),
+            (Some(u), None) => {
+                assert_eq!(u.token.as_str(), token);
+                Ok(u)
+            }
+        }
     }
 
     pub fn factory_ping(&self, id: FactoryId) -> OResult<bool> {
-        todo!()
-
-        // use schema::factory::dsl;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // let now = models::IsoDate(Utc::now());
-        // Ok(diesel::update(dsl::factory)
-        //     .filter(dsl::id.eq(id))
-        //     .set(dsl::lastping.eq(now))
-        //     .execute(c)?
-        //     > 0)
+        Ok(self.exec_update(
+            Query::update()
+            .table(FactoryDef::Table)
+            .and_where(Expr::col(FactoryDef::Id).eq(id))
+            .value(FactoryDef::Lastping, IsoDate::now())
+            .to_owned())? > 0 )
     }
 
     pub fn targets(&self) -> OResult<Vec<Target>> {
-        todo!()
-
-        // use schema::target::dsl;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-        // Ok(dsl::target.order_by(dsl::id.asc()).get_results(c)?)
+        self.get_rows(Query::select()
+            .from(TargetDef::Table)
+            .columns(Target::columns())
+            .order_by(TargetDef::Id, Order::Asc)
+            .to_owned())
     }
 
-    pub fn target_get(&self, id: TargetId) -> OResult<Target> {
-        todo!()
-
-        // use schema::target::dsl;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-        // Ok(dsl::target.find(id).get_result(c)?)
+    pub fn target(&self, id: TargetId) -> OResult<Target> {
+        self.get_row(Target::find(id))
     }
 
     pub fn target_create(&self, name: &str, desc: &str) -> OResult<Target> {
-        todo!()
+        /*
+         * Make sure the requested name is not one we might mistake as a
+         * ULID later.
+         */
+        if looks_like_a_ulid(name) {
+            conflict!("target names must not look like ULIDs");
+        }
 
-        // if name != name.trim() || name.is_empty() {
-        //     bail!("invalid target name");
-        // }
+        if name != name.trim() || name.is_empty() {
+            conflict!("invalid target name");
+        }
 
-        // let t = Target {
-        //     id: TargetId::generate(),
-        //     name: name.to_string(),
-        //     desc: desc.to_string(),
-        //     redirect: None,
-        //     privilege: None,
-        // };
+        let t = Target {
+            id: TargetId::generate(),
+            name: name.to_string(),
+            desc: desc.to_string(),
+            redirect: None,
+            privilege: None,
+        };
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        let (q, v) = t.insert().build_rusqlite(SqliteQueryBuilder);
 
-        // use schema::target::dsl;
-
-        // diesel::insert_into(dsl::target).values(&t).execute(c)?;
-
-        // Ok(t)
+        let ic = self.exec(q, v)?;
+        assert_eq!(ic, 1);
+        Ok(t)
     }
 
     pub fn target_resolve(&self, name: &str) -> OResult<Option<Target>> {
-        todo!()
+        /*
+         * Use the target name to look up the initial target match:
+         */
+        let mut target: Target = if let Some(target) =
+            self.get_row_opt(Target::find_by_name(name))?
+        {
+            target
+        } else {
+            return Ok(None);
+        };
 
-        // use schema::target::dsl;
+        let mut count = 0;
+        loop {
+            if count > 32 {
+                conflict!("too many target redirects starting from {:?}", name);
+            }
+            count += 1;
 
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // /*
-        //  * Use the target name to look up the initial target match:
-        //  */
-        // let mut target: Target = if let Some(target) =
-        //     dsl::target.filter(dsl::name.eq(name)).get_result(c).optional()?
-        // {
-        //     target
-        // } else {
-        //     return Ok(None);
-        // };
-
-        // let mut count = 0;
-        // loop {
-        //     if count > 32 {
-        //         bail!("too many target redirects starting from {:?}", name);
-        //     }
-        //     count += 1;
-
-        //     if let Some(redirect) = &target.redirect {
-        //         target = if let Some(target) =
-        //             dsl::target.find(redirect).get_result(c).optional()?
-        //         {
-        //             target
-        //         } else {
-        //             return Ok(None);
-        //         };
-        //     } else {
-        //         return Ok(Some(target));
-        //     }
-        // }
+            if let Some(redirect) = &target.redirect {
+                target = if let Some(target) = self.get_row_opt(Target::find_by_name(name))?  {
+                     target
+                 } else {
+                     return Ok(None);
+                 };
+             } else {
+                 return Ok(Some(target));
+             }
+         }
     }
 
     pub fn target_require(
@@ -2407,19 +2340,14 @@ impl Database {
         id: TargetId,
         privilege: Option<&str>,
     ) -> OResult<()> {
-        todo!()
+        let uc = self.exec_update(Query::update()
+            .table(TargetDef::Table)
+            .and_where(Expr::col(TargetDef::Id).eq(id))
+            .value(TargetDef::Privilege, privilege)
+            .to_owned())?;
+        assert!(uc == 1);
 
-        // use schema::target::dsl;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // let uc = diesel::update(dsl::target)
-        //     .filter(dsl::id.eq(id))
-        //     .set(dsl::privilege.eq(privilege))
-        //     .execute(c)?;
-        // assert!(uc == 1);
-
-        // Ok(())
+        Ok(())
     }
 
     pub fn target_redirect(
@@ -2427,19 +2355,14 @@ impl Database {
         id: TargetId,
         redirect: Option<TargetId>,
     ) -> OResult<()> {
-        todo!()
+        let uc = self.exec_update(Query::update()
+            .table(TargetDef::Table)
+            .and_where(Expr::col(TargetDef::Id).eq(id))
+            .value(TargetDef::Redirect, redirect)
+            .to_owned())?;
+        assert!(uc == 1);
 
-        // use schema::target::dsl;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // let uc = diesel::update(dsl::target)
-        //     .filter(dsl::id.eq(id))
-        //     .set(dsl::redirect.eq(redirect))
-        //     .execute(c)?;
-        // assert!(uc == 1);
-
-        // Ok(())
+        Ok(())
     }
 
     /**
@@ -2458,6 +2381,14 @@ impl Database {
         new_name: &str,
         signpost_description: &str,
     ) -> OResult<Target> {
+        /*
+         * Make sure the requested name is not one we might mistake as a
+         * ULID later.
+         */
+        if looks_like_a_ulid(new_name) {
+            conflict!("target names must not look like ULIDs");
+        }
+
         todo!()
 
         // use schema::target::dsl;
@@ -2465,7 +2396,7 @@ impl Database {
         // let c = &mut self.1.lock().unwrap().conn;
 
         // if new_name != new_name.trim() || new_name.is_empty() {
-        //     bail!("invalid target name");
+        //     conflict!("invalid target name");
         // }
 
         // c.immediate_transaction(|tx| {
@@ -2483,7 +2414,7 @@ impl Database {
         //         .get_result(tx)
         //         .optional()?;
         //     if let Some(nt) = nt {
-        //         bail!(
+        //         conflict!(
         //             "target {} with name {:?} already exists",
         //             nt.id,
         //             new_name,

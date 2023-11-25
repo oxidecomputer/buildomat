@@ -84,7 +84,7 @@ async fn job_assignment_one(log: &Logger, c: &Central) -> Result<()> {
              * recycle its worker.
              */
             if let Some(wid) = j.worker {
-                let w = c.db.worker_get(wid)?;
+                let w = c.db.worker(wid)?;
                 if !w.deleted && !w.recycle {
                     info!(
                         log,
@@ -109,7 +109,7 @@ async fn job_assignment_one(log: &Logger, c: &Central) -> Result<()> {
              * This job has already been assigned.  Check to see if the worker
              * still exists.
              */
-            let w = c.db.worker_get(wid)?;
+            let w = c.db.worker(wid)?;
             if w.deleted || w.recycle {
                 info!(
                     log,

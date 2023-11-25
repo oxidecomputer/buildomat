@@ -609,7 +609,7 @@ pub(crate) async fn target_require_privilege(
     c.require_admin(log, &rqctx.request, "target.write").await?;
 
     let path = path.into_inner();
-    let t = c.db.target_get(path.target()?).or_500()?;
+    let t = c.db.target(path.target()?).or_500()?;
 
     c.db.target_require(t.id, Some(&path.privilege)).or_500()?;
 
@@ -630,7 +630,7 @@ pub(crate) async fn target_require_no_privilege(
     c.require_admin(log, &rqctx.request, "target.write").await?;
 
     let path = path.into_inner();
-    let t = c.db.target_get(path.target()?).or_500()?;
+    let t = c.db.target(path.target()?).or_500()?;
 
     c.db.target_require(t.id, None).or_500()?;
 
@@ -666,7 +666,7 @@ pub(crate) async fn target_redirect(
     c.require_admin(log, &rqctx.request, "target.write").await?;
 
     let path = path.into_inner();
-    let t = c.db.target_get(path.target()?).or_500()?;
+    let t = c.db.target(path.target()?).or_500()?;
 
     /*
      * Make sure the redirect target, if specified, exists in the database:
@@ -674,7 +674,7 @@ pub(crate) async fn target_redirect(
     let redirect = body
         .into_inner()
         .redirect()?
-        .map(|t| c.db.target_get(t).map(|t| t.id))
+        .map(|t| c.db.target(t).map(|t| t.id))
         .transpose()
         .or_500()?;
 
@@ -704,7 +704,7 @@ pub(crate) async fn target_rename(
     c.require_admin(log, &rqctx.request, "target.write").await?;
 
     let path = path.into_inner();
-    let t = c.db.target_get(path.target()?).or_500()?;
+    let t = c.db.target(path.target()?).or_500()?;
     let body = body.into_inner();
 
     let t =

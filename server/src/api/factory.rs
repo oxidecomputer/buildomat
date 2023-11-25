@@ -136,7 +136,7 @@ pub(crate) async fn factory_worker_get(
     let p = path.into_inner();
 
     let f = c.require_factory(log, &rqctx.request).await?;
-    let w = if let Some(w) = c.db.worker_get_opt(p.worker()?).or_500()? {
+    let w = if let Some(w) = c.db.worker_opt(p.worker()?).or_500()? {
         w
     } else {
         return Ok(HttpResponseOk(FactoryWorkerResult { worker: None }));
@@ -184,7 +184,7 @@ pub(crate) async fn factory_worker_append(
 
     let f = c.require_factory(log, &rqctx.request).await?;
 
-    let w = c.db.worker_get(p.worker()?).or_500()?;
+    let w = c.db.worker(p.worker()?).or_500()?;
     f.owns(log, &w)?;
 
     let job = c.db.worker_job(w.id).or_500()?;
@@ -249,7 +249,7 @@ pub(crate) async fn factory_worker_flush(
 
     let f = c.require_factory(log, &rqctx.request).await?;
 
-    let w = c.db.worker_get(p.worker()?).or_500()?;
+    let w = c.db.worker(p.worker()?).or_500()?;
     f.owns(log, &w)?;
 
     if w.wait_for_flush {
@@ -283,7 +283,7 @@ pub(crate) async fn factory_worker_associate(
 
     let f = c.require_factory(log, &rqctx.request).await?;
 
-    let w = c.db.worker_get(p.worker()?).or_500()?;
+    let w = c.db.worker(p.worker()?).or_500()?;
     f.owns(log, &w)?;
 
     if let Err(e) = c.db.worker_associate(w.id, &b.private, b.metadata.as_ref())
@@ -318,7 +318,7 @@ pub(crate) async fn factory_worker_destroy(
 
     let f = c.require_factory(log, &rqctx.request).await?;
 
-    let w = c.db.worker_get(p.worker()?).or_500()?;
+    let w = c.db.worker(p.worker()?).or_500()?;
     f.owns(log, &w)?;
 
     if let Err(e) = c.db.worker_destroy(w.id) {
@@ -369,7 +369,7 @@ pub(crate) async fn factory_worker_create(
     let b = body.into_inner();
 
     let f = c.require_factory(log, &rqctx.request).await?;
-    let t = c.db.target_get(b.target()?).or_500()?;
+    let t = c.db.target(b.target()?).or_500()?;
     let j = b.job()?;
 
     let w = c.db.worker_create(&f, &t, j, b.wait_for_flush).or_500()?;
@@ -440,7 +440,7 @@ pub(crate) async fn factory_lease(
             continue;
         }
 
-        let t = c.db.target_get(j.target()).or_500()?;
+        let t = c.db.target(j.target()).or_500()?;
 
         if !supported_targets.contains(&t.id) {
             continue;

@@ -656,7 +656,7 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<bool> {
             .collect::<HashMap<String, String>>();
     let target_id = job.target().to_string();
     let (target_resolved_name, target_resolved_desc) = {
-        let t = c.db.target_get(job.target())?;
+        let t = c.db.target(job.target())?;
         (t.name, t.desc)
     };
     let store =
@@ -672,8 +672,8 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<bool> {
     let worker_info = job
         .worker
         .map(|id| {
-            let w = c.db.worker_get(id)?;
-            let f = c.db.factory_get(w.factory())?;
+            let w = c.db.worker(id)?;
+            let f = c.db.factory(w.factory())?;
             Ok::<_, anyhow::Error>(ArchivedWorkerInfo::from((w, f)))
         })
         .transpose()?;
