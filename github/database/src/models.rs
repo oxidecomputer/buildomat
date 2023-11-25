@@ -1,5 +1,8 @@
 use anyhow::{bail, Result};
-use buildomat_database::*;
+use buildomat_database::old::*;
+use buildomat_database::{
+    integer_new_type, json_new_type, sql_for_enum, ulid_new_type,
+};
 use buildomat_github_common::hooktypes;
 use chrono::prelude::*;
 use diesel::deserialize::FromSql;

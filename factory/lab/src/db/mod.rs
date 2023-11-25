@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 use std::collections::HashMap;
@@ -55,7 +55,7 @@ impl Database {
         path: P,
         cache_kb: Option<u32>,
     ) -> Result<Database> {
-        let conn = buildomat_database::sqlite_setup(
+        let conn = buildomat_database::old::sqlite_setup(
             &log,
             path,
             include_str!("../../schema.sql"),

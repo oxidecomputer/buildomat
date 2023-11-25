@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
+use buildomat_common::*;
 use dropshot::{
     endpoint, ApiDescription, ConfigDropshot, HttpError, HttpServerStarter,
     Query as TypedQuery, RequestContext, RequestInfo,
@@ -30,7 +31,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 #[allow(unused_imports)]
 use slog::{error, info, o, warn, Logger};
-use buildomat_common::*;
 
 mod api;
 mod archive;

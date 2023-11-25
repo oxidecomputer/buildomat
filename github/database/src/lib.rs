@@ -4,7 +4,7 @@
 
 use anyhow::{bail, Result};
 use buildomat_common::*;
-use buildomat_database::*;
+use buildomat_database::old::*;
 use chrono::prelude::*;
 use diesel::prelude::*;
 use slog::Logger;
@@ -22,7 +22,7 @@ use models::*;
 
 pub mod types {
     pub use super::models::*;
-    pub use buildomat_database::{IsoDate, JsonValue};
+    pub use buildomat_database::old::{IsoDate, JsonValue};
 }
 
 #[derive(Error, Debug)]
@@ -71,7 +71,7 @@ impl Database {
         path: P,
         cache_kb: Option<u32>,
     ) -> Result<Database> {
-        let conn = buildomat_database::sqlite_setup(
+        let conn = buildomat_database::old::sqlite_setup(
             &log,
             path,
             include_str!("../schema.sql"),
