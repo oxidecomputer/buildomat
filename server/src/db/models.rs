@@ -93,7 +93,7 @@ impl User {
 
     pub fn insert(&self) -> InsertStatement {
         Query::insert()
-            .into_table(JobDef::Table)
+            .into_table(UserDef::Table)
             .columns(Self::bare_columns())
             .values_panic([
                 self.id.into(),
@@ -757,6 +757,7 @@ impl Worker {
                 self.recycle.into(),
                 self.lastping.into(),
                 self.factory.into(),
+                self.target.into(),
                 self.wait_for_flush.into(),
                 self.factory_metadata.clone().into(),
             ])
