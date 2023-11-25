@@ -19,7 +19,7 @@ use sea_query::{
 };
 use sea_query_rusqlite::{RusqliteBinder, RusqliteValues};
 #[allow(unused_imports)]
-use slog::{error, info, warn, Logger};
+use slog::{debug, error, info, warn, Logger};
 use thiserror::Error;
 
 mod models;
@@ -2418,16 +2418,19 @@ impl Database {
     #[allow(unused)]
     pub fn exec_delete(&self, d: DeleteStatement) -> OResult<usize> {
         let (q, v) = d.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
         self.exec(q, v)
     }
 
     pub fn exec_update(&self, u: UpdateStatement) -> OResult<usize> {
         let (q, v) = u.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
         self.exec(q, v)
     }
 
     pub fn exec_insert(&self, i: InsertStatement) -> OResult<usize> {
         let (q, v) = i.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
         self.exec(q, v)
     }
 
@@ -2441,6 +2444,7 @@ impl Database {
 
     pub fn get_strings(&self, s: SelectStatement) -> OResult<Vec<String>> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
         let c = &mut self.1.lock().unwrap().conn;
 
         let mut s = c.prepare(&q)?;
@@ -2451,6 +2455,7 @@ impl Database {
 
     pub fn get_rows<T: FromRow>(&self, s: SelectStatement) -> OResult<Vec<T>> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
         let c = &mut self.1.lock().unwrap().conn;
 
         let mut s = c.prepare(&q)?;
@@ -2461,6 +2466,7 @@ impl Database {
 
     pub fn get_row<T: FromRow>(&self, s: SelectStatement) -> OResult<T> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
         let c = &mut self.1.lock().unwrap().conn;
 
         let mut s = c.prepare(&q)?;
@@ -2478,6 +2484,7 @@ impl Database {
         s: SelectStatement,
     ) -> OResult<Option<T>> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
         let c = &mut self.1.lock().unwrap().conn;
 
         let mut s = c.prepare(&q)?;
@@ -2496,6 +2503,7 @@ impl Database {
         s: SelectStatement,
     ) -> OResult<Option<T>> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
         let mut s = tx.prepare(&q)?;
         let out = s.query_map(&*v.as_params(), T::from_row)?;
         let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
@@ -2512,6 +2520,7 @@ impl Database {
         s: SelectStatement,
     ) -> OResult<Vec<String>> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
         let mut s = tx.prepare(&q)?;
         let out = s.query_map(&*v.as_params(), |row| row.get(0))?;
 
@@ -2524,6 +2533,7 @@ impl Database {
         s: SelectStatement,
     ) -> OResult<Vec<T>> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
         let mut s = tx.prepare(&q)?;
         let out = s.query_map(&*v.as_params(), T::from_row)?;
 
@@ -2536,6 +2546,7 @@ impl Database {
         s: SelectStatement,
     ) -> OResult<T> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
         let mut s = tx.prepare(&q)?;
         let out = s.query_map(&*v.as_params(), T::from_row)?;
         let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
