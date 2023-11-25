@@ -189,7 +189,7 @@ impl Database {
                     Expr::col((JobDef::Table, JobDef::Worker))
                         .eq(Expr::col((WorkerDef::Table, WorkerDef::Id))),
                 )
-                .order_by(WorkerDef::Id, Order::Asc)
+                .order_by((WorkerDef::Table, WorkerDef::Id), Order::Asc)
                 .and_where(Expr::col((JobDef::Table, JobDef::Worker)).is_null())
                 .and_where(
                     Expr::col((WorkerDef::Table, WorkerDef::Deleted)).eq(false),
@@ -206,56 +206,56 @@ impl Database {
     }
 
     pub fn worker_recycle_all(&self) -> OResult<usize> {
-        let (q, v) = Query::update()
-            .table(WorkerDef::Table)
-            .values([(WorkerDef::Recycle, true.into())])
-            .and_where(Expr::col(WorkerDef::Deleted).eq(false))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        self.exec(q, v)
+        self.exec_update(
+            Query::update()
+                .table(WorkerDef::Table)
+                .values([(WorkerDef::Recycle, true.into())])
+                .and_where(Expr::col(WorkerDef::Deleted).eq(false))
+                .to_owned(),
+        )
     }
 
     pub fn worker_recycle(&self, id: WorkerId) -> OResult<bool> {
-        let (q, v) = Query::update()
-            .table(WorkerDef::Table)
-            .values([(WorkerDef::Recycle, true.into())])
-            .and_where(Expr::col(WorkerDef::Id).eq(id))
-            .and_where(Expr::col(WorkerDef::Deleted).eq(false))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        Ok(self.exec(q, v)? > 0)
+        Ok(self.exec_update(
+            Query::update()
+                .table(WorkerDef::Table)
+                .values([(WorkerDef::Recycle, true.into())])
+                .and_where(Expr::col(WorkerDef::Id).eq(id))
+                .and_where(Expr::col(WorkerDef::Deleted).eq(false))
+                .to_owned(),
+        )? > 0)
     }
 
     pub fn worker_flush(&self, id: WorkerId) -> OResult<bool> {
-        let (q, v) = Query::update()
-            .table(WorkerDef::Table)
-            .values([(WorkerDef::WaitForFlush, false.into())])
-            .and_where(Expr::col(WorkerDef::Id).eq(id))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        Ok(self.exec(q, v)? > 0)
+        Ok(self.exec_update(
+            Query::update()
+                .table(WorkerDef::Table)
+                .values([(WorkerDef::WaitForFlush, false.into())])
+                .and_where(Expr::col(WorkerDef::Id).eq(id))
+                .to_owned(),
+        )? > 0)
     }
 
     pub fn worker_destroy(&self, id: WorkerId) -> OResult<bool> {
-        let (q, v) = Query::update()
-            .table(WorkerDef::Table)
-            .values([(WorkerDef::Deleted, true.into())])
-            .and_where(Expr::col(WorkerDef::Id).eq(id))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        Ok(self.exec(q, v)? > 0)
+        Ok(self.exec_update(
+            Query::update()
+                .table(WorkerDef::Table)
+                .values([(WorkerDef::Deleted, true.into())])
+                .and_where(Expr::col(WorkerDef::Id).eq(id))
+                .to_owned(),
+        )? > 0)
     }
 
     pub fn worker_ping(&self, id: WorkerId) -> OResult<bool> {
         let now = IsoDate(Utc::now());
 
-        let (q, v) = Query::update()
-            .table(WorkerDef::Table)
-            .values([(WorkerDef::Lastping, now.into())])
-            .and_where(Expr::col(WorkerDef::Id).eq(id))
-            .build_rusqlite(SqliteQueryBuilder);
-
-        Ok(self.exec(q, v)? > 0)
+        Ok(self.exec_update(
+            Query::update()
+                .table(WorkerDef::Table)
+                .values([(WorkerDef::Lastping, now.into())])
+                .and_where(Expr::col(WorkerDef::Id).eq(id))
+                .to_owned(),
+        )? > 0)
     }
 
     pub fn i_worker_assign_job(
@@ -283,16 +283,15 @@ impl Database {
             conflict!("worker {} already has {} jobs assigned", w.id, c);
         }
 
-        let uc = {
-            let (q, v) = Query::update()
+        let uc = self.tx_exec_update(
+            tx,
+            Query::update()
                 .table(JobDef::Table)
                 .values([(JobDef::Worker, w.id.into())])
                 .and_where(Expr::col(JobDef::Id).eq(j.id))
                 .and_where(Expr::col(JobDef::Worker).is_null())
-                .build_rusqlite(SqliteQueryBuilder);
-
-            self.tx_exec(tx, q, v)?
-        };
+                .to_owned(),
+        )?;
         assert_eq!(uc, 1);
 
         /*
@@ -382,8 +381,9 @@ impl Database {
                 return Ok(None);
             }
         } else {
-            let count = {
-                let (q, v) = Query::update()
+            let count = self.tx_exec_update(
+                &mut tx,
+                Query::update()
                     .table(WorkerDef::Table)
                     .values([
                         (WorkerDef::Token, token.into()),
@@ -392,10 +392,8 @@ impl Database {
                     .and_where(Expr::col(WorkerDef::Id).eq(w.id))
                     .and_where(Expr::col(WorkerDef::Bootstrap).eq(bootstrap))
                     .and_where(Expr::col(WorkerDef::Token).is_null())
-                    .build_rusqlite(SqliteQueryBuilder);
-
-                self.tx_exec(&mut tx, q, v)?
-            };
+                    .to_owned(),
+            )?;
             assert_eq!(count, 1);
         }
 
@@ -568,9 +566,7 @@ impl Database {
             rusqlite::TransactionBehavior::Immediate,
         )?;
 
-        let (q, v) = w.insert().build_rusqlite(SqliteQueryBuilder);
-
-        let count = self.tx_exec(&mut tx, q, v)?;
+        let count = self.tx_exec_insert(&mut tx, w.insert())?;
         assert_eq!(count, 1);
 
         /*
@@ -586,6 +582,7 @@ impl Database {
             self.i_worker_assign_job(&mut tx, &w, job)?;
         }
 
+        tx.commit()?;
         Ok(w)
     }
 
@@ -1161,6 +1158,7 @@ impl Database {
                 /*
                  * The target file is the same, so just succeed.
                  */
+                tx.commit()?;
                 return Ok(());
             } else {
                 conflict!(
@@ -1314,9 +1312,14 @@ impl Database {
                         .eq(Expr::col((JobFileDef::Table, JobFileDef::Job))),
                 )
                 .columns(JobFile::columns())
-                .order_by(JobFileDef::Id, Order::Asc)
-                .and_where(Expr::col(JobDef::Complete).eq(true))
-                .and_where(Expr::col(JobFileDef::TimeArchived).is_null())
+                .order_by((JobFileDef::Table, JobFileDef::Id), Order::Asc)
+                .and_where(
+                    Expr::col((JobDef::Table, JobDef::Complete)).eq(true),
+                )
+                .and_where(
+                    Expr::col((JobFileDef::Table, JobFileDef::TimeArchived))
+                        .is_null(),
+                )
                 .limit(1)
                 .to_owned(),
         )
@@ -1511,6 +1514,7 @@ impl Database {
             /*
              * This job is already complete.
              */
+            tx.commit()?;
             return Ok(false);
         }
 
@@ -1796,6 +1800,7 @@ impl Database {
 
         let t: Task = self.tx_get_row(&mut tx, Task::find(job, seq))?;
         if t.complete {
+            tx.commit()?;
             return Ok(false);
         }
 
@@ -2006,10 +2011,8 @@ impl Database {
             time_create: Utc::now().into(),
         };
 
-        let (q, v) = u.insert().build_rusqlite(SqliteQueryBuilder);
-
-        let uc = self.tx_exec(tx, q, v)?;
-        assert_eq!(uc, 1);
+        let ic = self.tx_exec_insert(tx, u.insert())?;
+        assert_eq!(ic, 1);
 
         Ok(u)
     }
@@ -2211,10 +2214,9 @@ impl Database {
             privilege: None,
         };
 
-        let (q, v) = t.insert().build_rusqlite(SqliteQueryBuilder);
-
-        let ic = self.exec(q, v)?;
+        let ic = self.exec_insert(t.insert())?;
         assert_eq!(ic, 1);
+
         Ok(t)
     }
 
