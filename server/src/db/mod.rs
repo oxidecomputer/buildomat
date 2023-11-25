@@ -22,9 +22,32 @@ use sea_query_rusqlite::{RusqliteBinder, RusqliteValues};
 use slog::{debug, error, info, warn, Logger};
 use thiserror::Error;
 
-mod models;
+mod tables;
 
-pub use models::*;
+mod types {
+    use buildomat_database::sqlite::rusqlite;
+    use buildomat_database::{
+        sqlite_integer_new_type, sqlite_json_new_type, sqlite_ulid_new_type,
+    };
+    use chrono::prelude::*;
+
+    sqlite_integer_new_type!(UnixUid, u32, Unsigned);
+    sqlite_integer_new_type!(UnixGid, u32, Unsigned);
+    sqlite_integer_new_type!(DataSize, u64, BigUnsigned);
+
+    sqlite_ulid_new_type!(UserId);
+    sqlite_ulid_new_type!(JobId);
+    sqlite_ulid_new_type!(JobFileId);
+    sqlite_ulid_new_type!(TaskId);
+    sqlite_ulid_new_type!(WorkerId);
+    sqlite_ulid_new_type!(FactoryId);
+    sqlite_ulid_new_type!(TargetId);
+
+    pub use buildomat_database::sqlite::{Dictionary, IsoDate, JsonValue};
+}
+
+pub use tables::*;
+pub use types::*;
 
 #[derive(Error, Debug)]
 pub enum OperationError {
@@ -100,7 +123,7 @@ impl Database {
         let conn = buildomat_database::sqlite::sqlite_setup(
             &log,
             path,
-            include_str!("../schema.sql"),
+            include_str!("../../schema.sql"),
             cache_kb,
         )?;
 

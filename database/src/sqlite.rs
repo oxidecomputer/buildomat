@@ -56,7 +56,7 @@ macro_rules! sqlite_json_new_type {
         }
 
         impl sea_query::Nullable for $name {
-            fn null() -> Value {
+            fn null() -> sea_query::Value {
                 sea_query::Value::String(None)
             }
         }
@@ -138,7 +138,7 @@ macro_rules! sqlite_integer_new_type {
         }
 
         impl sea_query::Nullable for $name {
-            fn null() -> Value {
+            fn null() -> sea_query::Value {
                 sea_query::Value::$intype(None)
             }
         }
@@ -223,7 +223,7 @@ macro_rules! sqlite_ulid_new_type {
         }
 
         impl sea_query::Nullable for $name {
-            fn null() -> Value {
+            fn null() -> sea_query::Value {
                 sea_query::Value::String(None)
             }
         }
@@ -232,6 +232,8 @@ macro_rules! sqlite_ulid_new_type {
             fn column_result(
                 v: rusqlite::types::ValueRef<'_>,
             ) -> rusqlite::types::FromSqlResult<Self> {
+                use std::str::FromStr;
+
                 if let rusqlite::types::ValueRef::Text(t) = v {
                     if let Ok(s) = String::from_utf8(t.to_vec()) {
                         match rusty_ulid::Ulid::from_str(&s) {
