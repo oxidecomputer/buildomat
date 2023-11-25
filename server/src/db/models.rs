@@ -215,6 +215,15 @@ impl Task {
         }
     }
 
+    pub fn find(job: JobId, seq: u32) -> SelectStatement {
+        Query::select()
+            .from(TaskDef::Table)
+            .columns(Task::columns())
+            .and_where(Expr::col(TaskDef::Job).eq(job))
+            .and_where(Expr::col(TaskDef::Seq).eq(seq))
+            .to_owned()
+    }
+
     pub fn insert(&self) -> InsertStatement {
         Query::insert()
             .into_table(TaskDef::Table)
@@ -259,12 +268,6 @@ pub struct JobEvent {
     pub time_remote: Option<IsoDate>,
 }
 
-impl JobEvent {
-    pub fn age(&self) -> Duration {
-        self.time.age()
-    }
-}
-
 impl FromRow for JobEvent {
     fn columns() -> Vec<ColumnRef> {
         [
@@ -289,6 +292,28 @@ impl FromRow for JobEvent {
     fn from_row(row: &Row) -> rusqlite::Result<JobEvent> {
         todo!()
         //let s = TaskDef::Token.as_str();
+    }
+}
+
+impl JobEvent {
+    pub fn insert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(JobEventDef::Table)
+            .columns(Self::bare_columns())
+            .values_panic([
+                self.job.into(),
+                self.task.into(),
+                self.seq.into(),
+                self.stream.clone().into(),
+                self.time.into(),
+                self.payload.clone().into(),
+                self.time_remote.into(),
+            ])
+            .to_owned()
+    }
+
+    pub fn age(&self) -> Duration {
+        self.time.age()
     }
 }
 
@@ -389,6 +414,29 @@ impl FromRow for JobOutput {
     fn from_row(row: &Row) -> rusqlite::Result<JobOutput> {
         todo!()
         //let s = JobOutputDef::Token.as_str();
+    }
+}
+
+impl JobOutput {
+    pub fn find(job: JobId, file: JobFileId) -> SelectStatement {
+        Query::select()
+            .from(JobOutputDef::Table)
+            .columns(JobOutput::columns())
+            .and_where(Expr::col(JobOutputDef::Job).eq(job))
+            .and_where(Expr::col(JobOutputDef::Id).eq(file))
+            .to_owned()
+    }
+
+    pub fn insert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(JobOutputDef::Table)
+            .columns(Self::bare_columns())
+            .values_panic([
+                self.job.into(),
+                self.path.clone().into(),
+                self.id.into(),
+            ])
+            .to_owned()
     }
 }
 
@@ -506,6 +554,19 @@ impl JobFile {
             .and_where(Expr::col(JobFileDef::Id).eq(file))
             .to_owned()
     }
+
+    pub fn insert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(JobFileDef::Table)
+            .columns(Self::bare_columns())
+            .values_panic([
+                self.job.into(),
+                self.id.into(),
+                self.size.into(),
+                self.time_archived.into(),
+            ])
+            .to_owned()
+    }
 }
 
 #[derive(Debug)]
@@ -561,6 +622,21 @@ impl PublishedFile {
             .and_where(Expr::col(PublishedFileDef::Series).eq(series))
             .and_where(Expr::col(PublishedFileDef::Version).eq(version))
             .and_where(Expr::col(PublishedFileDef::Name).eq(name))
+            .to_owned()
+    }
+
+    pub fn insert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(PublishedFileDef::Table)
+            .columns(Self::bare_columns())
+            .values_panic([
+                self.owner.into(),
+                self.series.clone().into(),
+                self.version.clone().into(),
+                self.name.clone().into(),
+                self.job.into(),
+                self.file.into(),
+            ])
             .to_owned()
     }
 }
@@ -1093,5 +1169,43 @@ impl FromRow for JobStore {
     fn from_row(row: &Row) -> rusqlite::Result<JobStore> {
         todo!()
         //let s = WorkerDef::Token.as_str();
+    }
+}
+
+impl JobStore {
+    pub fn find(job: JobId, name: &str) -> SelectStatement {
+        Query::select()
+            .from(JobStoreDef::Table)
+            .columns(JobStore::columns())
+            .and_where(Expr::col(JobStoreDef::Job).eq(job))
+            .and_where(Expr::col(JobStoreDef::Name).eq(name))
+            .to_owned()
+    }
+
+    pub fn insert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(JobStoreDef::Table)
+            .columns(Self::bare_columns())
+            .values_panic([
+                self.job.into(),
+                self.name.clone().into(),
+                self.value.clone().into(),
+                self.secret.into(),
+                self.source.clone().into(),
+                self.time_update.into(),
+            ])
+            .to_owned()
+    }
+}
+
+/*
+ * This implementation allows us to use the existing tx_get_row() routine to
+ * fish out a MAX() value for the task "seq" column.
+ */
+impl FromRow for Option<i32> {
+    fn columns() -> Vec<ColumnRef> { Default::default() }
+
+    fn from_row(row: &Row) -> rusqlite::Result<Option<i32>> {
+        Ok(row.get(0)?)
     }
 }

@@ -274,6 +274,18 @@ impl Database {
         Ok(out.collect::<rusqlite::Result<_>>()?)
     }
 
+    pub fn tx_get_rows<T: FromRow>(
+        &self,
+        tx: &mut Transaction,
+        s: SelectStatement,
+    ) -> OResult<Vec<T>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        let mut s = tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+
+        Ok(out.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn tx_get_row<T: FromRow>(
         &self,
         tx: &mut Transaction,
@@ -509,7 +521,6 @@ impl Database {
         self.i_worker_assign_job(&mut tx, &w, jid)?;
 
         tx.commit()?;
-
         Ok(())
     }
 
@@ -580,7 +591,6 @@ impl Database {
         let out = self.i_worker(&mut tx, w.id)?;
 
         tx.commit()?;
-
         Ok(Some(out))
     }
 
@@ -810,13 +820,17 @@ impl Database {
         Ok(res)
     }
 
-    pub fn job_tasks(&self, job: JobId) -> OResult<Vec<Task>> {
-        self.get_rows(Query::select()
+    fn q_job_tasks(&self, job: JobId) -> SelectStatement {
+        Query::select()
             .from(TaskDef::Table)
             .columns(Task::columns())
             .order_by(TaskDef::Seq, Order::Asc)
             .and_where(Expr::col(TaskDef::Job).eq(job))
-            .to_owned())
+            .to_owned()
+    }
+
+    pub fn job_tasks(&self, job: JobId) -> OResult<Vec<Task>> {
+        self.get_rows(self.q_job_tasks(job))
     }
 
     pub fn job_tags(&self, job: JobId) -> OResult<HashMap<String, String>> {
@@ -946,7 +960,6 @@ impl Database {
         assert_eq!(uc, 1);
 
         tx.commit()?;
-
         Ok(())
     }
 
@@ -1205,7 +1218,6 @@ impl Database {
         }
 
         tx.commit()?;
-
         Ok(j)
     }
 
@@ -1245,62 +1257,55 @@ impl Database {
         version: &str,
         name: &str,
     ) -> OResult<()> {
-        todo!()
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // use schema::{job, job_output, published_file};
+        let j: Job = self.tx_get_row(&mut tx, Job::find(job))?;
+        if !j.complete {
+            conflict!("job must be complete before files are published");
+        }
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        /*
+         * Make sure this output exists.
+         */
+        let _jo: JobOutput = self.tx_get_row(&mut tx, JobOutput::find(
+                job, file))?;
 
-        // c.immediate_transaction(|tx| {
-        //     let j: Job = job::dsl::job.find(job).get_result(tx)?;
-        //     if !j.complete {
-        //         conflict!("job must be complete before files are published");
-        //     }
+        /*
+         * Determine whether this record has been published already or not.
+         */
+        let pf: Option<PublishedFile> = self.tx_get_row_opt(&mut tx,
+            PublishedFile::find(j.owner, series, version, name))?;
 
-        //     /*
-        //      * Make sure this output exists.
-        //      */
-        //     let _jo: JobOutput = job_output::dsl::job_output
-        //         .filter(job_output::dsl::job.eq(job))
-        //         .filter(job_output::dsl::id.eq(file))
-        //         .get_result(tx)?;
+        if let Some(pf) = pf {
+            if pf.owner == j.owner && pf.job == job && pf.file == file {
+                /*
+                 * The target file is the same, so just succeed.
+                 */
+                return Ok(());
+            } else {
+                conflict!(
+                    "that published file already exists with \
+                    different contents"
+                );
+            }
+        }
 
-        //     /*
-        //      * Determine whether this record has been published already or not.
-        //      */
-        //     let pf: Option<PublishedFile> = published_file::dsl::published_file
-        //         .find((j.owner, series, version, name))
-        //         .get_result(tx)
-        //         .optional()?;
+        let ic = self.tx_exec_insert(&mut tx,
+            PublishedFile {
+                owner: j.owner,
+                job,
+                file,
+                series: series.to_string(),
+                version: version.to_string(),
+                name: name.to_string(),
+            }.insert())?;
+        assert!(ic == 1);
 
-        //     if let Some(pf) = pf {
-        //         if pf.owner == j.owner && pf.job == job && pf.file == file {
-        //             /*
-        //              * The target file is the same, so just succeed.
-        //              */
-        //             return Ok(());
-        //         } else {
-        //             conflict!(
-        //                 "that published file already exists with \
-        //                 different contents"
-        //             );
-        //         }
-        //     }
-
-        //     let ic = diesel::insert_into(published_file::dsl::published_file)
-        //         .values(PublishedFile {
-        //             owner: j.owner,
-        //             job,
-        //             file,
-        //             series: series.to_string(),
-        //             version: version.to_string(),
-        //             name: name.to_string(),
-        //         })
-        //         .execute(tx)?;
-        //     assert!(ic == 1);
-
-        //     Ok(())
-        // })
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn job_add_output(
@@ -1310,35 +1315,31 @@ impl Database {
         id: JobFileId,
         size: u64,
     ) -> OResult<()> {
-        todo!()
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // use schema::{job, job_file, job_output};
+        let j: Job = self.tx_get_row(&mut tx, Job::find(job))?;
+        if j.complete {
+            conflict!("job already complete, cannot add more files");
+        }
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        let ic = self.tx_exec_insert(&mut tx,
+            JobFile {
+                job,
+                id,
+                size: DataSize(size),
+                time_archived: None,
+            }.insert())?;
+        assert_eq!(ic, 1);
 
-        // c.immediate_transaction(|tx| {
-        //     let j: Job = job::dsl::job.find(job).get_result(tx)?;
-        //     if j.complete {
-        //         conflict!("job already complete, cannot add more files");
-        //     }
+        let ic = self.tx_exec_insert(&mut tx,
+            JobOutput { job, path: path.to_string(), id }.insert())?;
+        assert_eq!(ic, 1);
 
-        //     let ic = diesel::insert_into(job_file::dsl::job_file)
-        //         .values(JobFile {
-        //             job,
-        //             id,
-        //             size: DataSize(size),
-        //             time_archived: None,
-        //         })
-        //         .execute(tx)?;
-        //     assert_eq!(ic, 1);
-
-        //     let ic = diesel::insert_into(job_output::dsl::job_output)
-        //         .values(JobOutput { job, path: path.to_string(), id })
-        //         .execute(tx)?;
-        //     assert_eq!(ic, 1);
-
-        //     Ok(())
-        // })
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn job_add_input(
@@ -1348,41 +1349,39 @@ impl Database {
         id: JobFileId,
         size: u64,
     ) -> OResult<()> {
-        todo!()
+        if name.contains('/') {
+            conflict!("name cannot be a path");
+        }
 
-        // use schema::{job, job_file, job_input};
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // if name.contains('/') {
-        //     return Err(anyhow!("name cannot be a path").into());
-        // }
+        let j: Job = self.tx_get_row(&mut tx, Job::find(job))?;
+        if !j.waiting {
+            conflict!("job not waiting, cannot add more inputs");
+        }
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        let ic = self.tx_exec_insert(&mut tx,
+            JobFile {
+                job,
+                id,
+                size: DataSize(size),
+                time_archived: None,
+            }.insert())?;
+        assert_eq!(ic, 1);
 
-        // c.immediate_transaction(|tx| {
-        //     let j: Job = job::dsl::job.find(job).get_result(tx)?;
-        //     if !j.waiting {
-        //         conflict!("job not waiting, cannot add more inputs");
-        //     }
+        let uc = self.tx_exec_update(&mut tx, Query::update()
+            .table(JobInputDef::Table)
+            .and_where(Expr::col(JobInputDef::Job).eq(job))
+            .and_where(Expr::col(JobInputDef::Name).eq(name))
+            .value(JobInputDef::Id, id)
+            .to_owned())?;
+        assert_eq!(uc, 1);
 
-        //     let ic = diesel::insert_into(job_file::dsl::job_file)
-        //         .values(JobFile {
-        //             job,
-        //             id,
-        //             size: DataSize(size),
-        //             time_archived: None,
-        //         })
-        //         .execute(tx)?;
-        //     assert_eq!(ic, 1);
-
-        //     let uc = diesel::update(job_input::dsl::job_input)
-        //         .filter(job_input::dsl::job.eq(job))
-        //         .filter(job_input::dsl::name.eq(name))
-        //         .set((job_input::dsl::id.eq(id),))
-        //         .execute(tx)?;
-        //     assert_eq!(uc, 1);
-
-        //     Ok(())
-        // })
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn job_next_unarchived(&self) -> OResult<Option<Job>> {
@@ -1460,32 +1459,30 @@ impl Database {
         job: JobId,
         events: impl Iterator<Item = JobEventToAppend>,
     ) -> OResult<()> {
-        todo!()
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // use schema::job;
+        let j: Job = self.tx_get_row(&mut tx, Job::find(job))?;
+        if j.complete {
+            conflict!("job already complete, cannot append");
+        }
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        for e in events {
+            self.i_job_event_insert(
+                &mut tx,
+                j.id,
+                e.task,
+                &e.stream,
+                e.time,
+                e.time_remote,
+                &e.payload,
+            )?;
+        }
 
-        // c.immediate_transaction(|tx| {
-        //     let j: Job = job::dsl::job.find(job).get_result(tx)?;
-        //     if j.complete {
-        //         conflict!("job already complete, cannot append");
-        //     }
-
-        //     for e in events {
-        //         self.i_job_event_insert(
-        //             tx,
-        //             j.id,
-        //             e.task,
-        //             &e.stream,
-        //             e.time,
-        //             e.time_remote,
-        //             &e.payload,
-        //         )?;
-        //     }
-
-        //     Ok(())
-        // })
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn job_append_event(
@@ -1497,212 +1494,207 @@ impl Database {
         time_remote: Option<DateTime<Utc>>,
         payload: &str,
     ) -> OResult<()> {
-        todo!()
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // use schema::job;
+        let j: Job = self.tx_get_row(&mut tx, Job::find(job))?;
+        if j.complete {
+            conflict!("job already complete, cannot append");
+        }
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        self.i_job_event_insert(
+            &mut tx,
+            j.id,
+            task,
+            stream,
+            time,
+            time_remote,
+            payload,
+        )?;
 
-        // c.immediate_transaction(|tx| {
-        //     let j: Job = job::dsl::job.find(job).get_result(tx)?;
-        //     if j.complete {
-        //         conflict!("job already complete, cannot append");
-        //     }
-
-        //     Ok(self.i_job_event_insert(
-        //         tx,
-        //         j.id,
-        //         task,
-        //         stream,
-        //         time,
-        //         time_remote,
-        //         payload,
-        //     )?)
-        // })
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn job_wakeup(&self, job: JobId) -> OResult<()> {
-        todo!()
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // use schema::job;
+        let j: Job = self.tx_get_row(&mut tx, Job::find(job))?;
+        if !j.waiting {
+            conflict!("job {} was not waiting, cannot wakeup", j.id);
+        }
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        /*
+         * Record the time at which the job became ready to run.
+         */
+        self.i_job_time_record(&mut tx, j.id, "ready", Utc::now())?;
 
-        // c.immediate_transaction(|tx| {
-        //     let j: Job = job::dsl::job.find(job).get_result(tx)?;
-        //     if !j.waiting {
-        //         conflict!("job {} was not waiting, cannot wakeup", j.id);
-        //     }
+        /*
+         *
+         * Estimate the length of time that we were waiting for dependencies
+         * to complete running.
+         */
+        let mut msg = "job dependencies complete; ready to run".to_string();
+        if let Some(dur) =
+            self.i_job_time_delta(&mut tx, j.id, "submit", "ready")?
+        {
+            msg += &format!(" (waiting for {})", dur.render());
+        }
+        self.i_job_event_insert(
+            &mut tx,
+            j.id,
+            None,
+            "control",
+            Utc::now(),
+            None,
+            &msg,
+        )?;
 
-        //     /*
-        //      * Record the time at which the job became ready to run.
-        //      */
-        //     self.i_job_time_record(tx, j.id, "ready", Utc::now())?;
+        let uc = self.tx_exec_update(&mut tx, Query::update()
+            .table(JobDef::Table)
+            .and_where(Expr::col(JobDef::Id).eq(j.id))
+            .and_where(Expr::col(JobDef::Waiting).eq(true))
+            .value(JobDef::Waiting, false)
+            .to_owned())?;
+        assert_eq!(uc, 1);
 
-        //     /*
-        //      *
-        //      * Estimate the length of time that we were waiting for dependencies
-        //      * to complete running.
-        //      */
-        //     let mut msg = "job dependencies complete; ready to run".to_string();
-        //     if let Some(dur) =
-        //         self.i_job_time_delta(tx, j.id, "submit", "ready")?
-        //     {
-        //         msg += &format!(" (waiting for {})", dur.render());
-        //     }
-        //     self.i_job_event_insert(
-        //         tx,
-        //         j.id,
-        //         None,
-        //         "control",
-        //         Utc::now(),
-        //         None,
-        //         &msg,
-        //     )?;
-
-        //     let uc = diesel::update(job::dsl::job)
-        //         .filter(job::dsl::id.eq(j.id))
-        //         .filter(job::dsl::waiting.eq(true))
-        //         .set((job::dsl::waiting.eq(false),))
-        //         .execute(tx)?;
-        //     assert_eq!(uc, 1);
-
-        //     Ok(())
-        // })
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn job_cancel(&self, job: JobId) -> OResult<bool> {
-        todo!()
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // use schema::job;
+        let j: Job = self.tx_get_row(&mut tx, Job::find(job))?;
+        if j.complete {
+            conflict!("job {} is already complete", j.id);
+        }
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        if j.cancelled {
+            /*
+             * Already cancelled previously.
+             */
+            return Ok(false);
+        }
 
-        // c.immediate_transaction(|tx| {
-        //     let j: Job = job::dsl::job.find(job).get_result(tx)?;
-        //     if j.complete {
-        //         conflict!("job {} is already complete", j.id);
-        //     }
+        self.i_job_event_insert(
+            &mut tx,
+            j.id,
+            None,
+            "control",
+            Utc::now(),
+            None,
+            "job cancelled",
+        )?;
 
-        //     if j.cancelled {
-        //         /*
-        //          * Already cancelled previously.
-        //          */
-        //         return Ok(false);
-        //     }
+        let uc = self.tx_exec_update(&mut tx, Query::update()
+            .table(JobDef::Table)
+            .and_where(Expr::col(JobDef::Id).eq(j.id))
+            .and_where(Expr::col(JobDef::Complete).eq(false))
+            .value(JobDef::Cancelled, true)
+            .to_owned())?;
+        assert_eq!(uc, 1);
 
-        //     self.i_job_event_insert(
-        //         tx,
-        //         j.id,
-        //         None,
-        //         "control",
-        //         Utc::now(),
-        //         None,
-        //         "job cancelled",
-        //     )?;
-
-        //     let uc = diesel::update(job::dsl::job)
-        //         .filter(job::dsl::id.eq(j.id))
-        //         .filter(job::dsl::complete.eq(false))
-        //         .set((job::dsl::cancelled.eq(true),))
-        //         .execute(tx)?;
-        //     assert_eq!(uc, 1);
-
-        //     Ok(true)
-        // })
+        tx.commit()?;
+        Ok(true)
     }
 
     pub fn job_complete(&self, job: JobId, failed: bool) -> OResult<bool> {
-        todo!()
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // use schema::{job, task};
+        let j: Job = self.tx_get_row(&mut tx, Job::find(job))?;
+        if j.complete {
+            /*
+             * This job is already complete.
+             */
+            return Ok(false);
+        }
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        if j.cancelled && !failed {
+            conflict!("job {} cancelled; cannot succeed", j.id);
+        }
 
-        // c.immediate_transaction(|tx| {
-        //     let j: Job = job::dsl::job.find(job).get_result(tx)?;
-        //     if j.complete {
-        //         /*
-        //          * This job is already complete.
-        //          */
-        //         return Ok(false);
-        //     }
+        /*
+         * Mark any tasks that have not yet completed as failed, as they
+         * will not be executed.
+         */
+        let mut tasks_failed = false;
+        let tasks: Vec<Task> =
+            self.tx_get_rows(&mut tx, self.q_job_tasks(j.id))?;
+        for t in tasks {
+            if t.failed {
+                tasks_failed = true;
+            }
+            if t.failed || t.complete || j.cancelled {
+                continue;
+            }
 
-        //     if j.cancelled && !failed {
-        //         conflict!("job {} cancelled; cannot succeed", j.id);
-        //     }
+            self.i_job_event_insert(
+                &mut tx,
+                j.id,
+                None,
+                "control",
+                Utc::now(),
+                None,
+                &format!("task {} was incomplete, marked failed", t.seq),
+            )?;
 
-        //     /*
-        //      * Mark any tasks that have not yet completed as failed, as they
-        //      * will not be executed.
-        //      */
-        //     let mut tasks_failed = false;
-        //     let tasks: Vec<Task> = task::dsl::task
-        //         .filter(task::dsl::job.eq(j.id))
-        //         .order_by(task::dsl::seq.asc())
-        //         .get_results(tx)?;
-        //     for t in tasks {
-        //         if t.failed {
-        //             tasks_failed = true;
-        //         }
-        //         if t.failed || t.complete || j.cancelled {
-        //             continue;
-        //         }
+            let uc = self.tx_exec_update(&mut tx, Query::update()
+                .table(TaskDef::Table)
+                .and_where(Expr::col(TaskDef::Job).eq(j.id))
+                .and_where(Expr::col(TaskDef::Seq).eq(t.seq))
+                .and_where(Expr::col(TaskDef::Complete).eq(false))
+                .value(TaskDef::Failed, true)
+                .value(TaskDef::Complete, true)
+                .to_owned())?;
+            assert_eq!(uc, 1);
+        }
 
-        //         self.i_job_event_insert(
-        //             tx,
-        //             j.id,
-        //             None,
-        //             "control",
-        //             Utc::now(),
-        //             None,
-        //             &format!("task {} was incomplete, marked failed", t.seq),
-        //         )?;
+        let failed = if failed {
+            true
+        } else if tasks_failed {
+            /*
+             * If a task failed, we must report job-level failure even if
+             * the job was for some reason not explicitly failed.
+             */
+            self.i_job_event_insert(
+                &mut tx,
+                j.id,
+                None,
+                "control",
+                Utc::now(),
+                None,
+                "job failed because at least one task failed",
+            )?;
+            true
+        } else {
+            false
+        };
 
-        //         let uc = diesel::update(task::dsl::task)
-        //             .filter(task::dsl::job.eq(j.id))
-        //             .filter(task::dsl::seq.eq(t.seq))
-        //             .filter(task::dsl::complete.eq(false))
-        //             .set((
-        //                 task::dsl::failed.eq(true),
-        //                 task::dsl::complete.eq(true),
-        //             ))
-        //             .execute(tx)?;
-        //         assert_eq!(uc, 1);
-        //     }
+        let uc = self.tx_exec_update(&mut tx, Query::update()
+            .table(JobDef::Table)
+            .and_where(Expr::col(JobDef::Id).eq(j.id))
+            .and_where(Expr::col(JobDef::Complete).eq(false))
+            .value(JobDef::Failed, true)
+            .value(JobDef::Complete, true)
+            .to_owned())?;
+        assert_eq!(uc, 1);
 
-        //     let failed = if failed {
-        //         true
-        //     } else if tasks_failed {
-        //         /*
-        //          * If a task failed, we must report job-level failure even if
-        //          * the job was for some reason not explicitly failed.
-        //          */
-        //         self.i_job_event_insert(
-        //             tx,
-        //             j.id,
-        //             None,
-        //             "control",
-        //             Utc::now(),
-        //             None,
-        //             "job failed because at least one task failed",
-        //         )?;
-        //         true
-        //     } else {
-        //         false
-        //     };
+        self.i_job_time_record(&mut tx, j.id, "complete", Utc::now())?;
 
-        //     let uc = diesel::update(job::dsl::job)
-        //         .filter(job::dsl::id.eq(j.id))
-        //         .filter(job::dsl::complete.eq(false))
-        //         .set((job::dsl::failed.eq(failed), job::dsl::complete.eq(true)))
-        //         .execute(tx)?;
-        //     assert_eq!(uc, 1);
-
-        //     self.i_job_time_record(tx, j.id, "complete", Utc::now())?;
-
-        //     Ok(true)
-        // })
+        tx.commit()?;
+        Ok(true)
     }
 
     pub fn i_job_time_record(
@@ -1796,78 +1788,76 @@ impl Database {
             conflict!("maximum value size is {max_val_kib}KiB");
         }
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // c.immediate_transaction(|tx| {
-        //     /*
-        //      * Make sure the job exists and is not yet completed.  We do not
-        //      * allow store updates after the job is finished.
-        //      */
-        //     let j: Job = job::dsl::job.find(job).get_result(tx)?;
-        //     if j.complete {
-        //         conflict!("job {job} already complete; cannot update store");
-        //     }
+        /*
+         * Make sure the job exists and is not yet completed.  We do not
+         * allow store updates after the job is finished.
+         */
+        let j: Job = self.tx_get_row(&mut tx, Job::find(job))?;
+        if j.complete {
+            conflict!("job {job} already complete; cannot update store");
+        }
 
-        //     /*
-        //      * First, check to see if this value already exists in the store:
-        //      */
-        //     let pre: Option<JobStore> = job_store::dsl::job_store
-        //         .filter(job_store::dsl::job.eq(job))
-        //         .filter(job_store::dsl::name.eq(name))
-        //         .get_result(tx)
-        //         .optional()?;
+        /*
+         * First, check to see if this value already exists in the store:
+         */
+        let pre: Option<JobStore> = self.tx_get_row_opt(&mut tx,
+            JobStore::find(job, name))?;
 
-        //     if let Some(pre) = pre {
-        //         /*
-        //          * Overwrite the existing value.  If the value we are replacing
-        //          * was already marked as a secret, we mark the updated value as
-        //          * secret as well to avoid accidents.
-        //          */
-        //         let new_secret = if pre.secret { true } else { secret };
+        if let Some(pre) = pre {
+            /*
+             * Overwrite the existing value.  If the value we are replacing
+             * was already marked as a secret, we mark the updated value as
+             * secret as well to avoid accidents.
+             */
+            let new_secret = if pre.secret { true } else { secret };
 
-        //         let uc = diesel::update(job_store::dsl::job_store)
-        //             .filter(job_store::dsl::job.eq(job))
-        //             .filter(job_store::dsl::name.eq(name))
-        //             .set((
-        //                 job_store::dsl::value.eq(value),
-        //                 job_store::dsl::secret.eq(new_secret),
-        //                 job_store::dsl::source.eq(source),
-        //                 job_store::dsl::time_update.eq(IsoDate::now()),
-        //             ))
-        //             .execute(tx)?;
-        //         assert_eq!(uc, 1);
-        //         return Ok(());
-        //     }
+            let uc = self.tx_exec_update(&mut tx, Query::update()
+                .table(JobStoreDef::Table)
+                .and_where(Expr::col(JobStoreDef::Job).eq(job))
+                .and_where(Expr::col(JobStoreDef::Name).eq(name))
+                .value(JobStoreDef::Value, value)
+                .value(JobStoreDef::Secret, new_secret)
+                .value(JobStoreDef::Source, source)
+                .value(JobStoreDef::TimeUpdate, IsoDate::now())
+                .to_owned())?;
+            assert_eq!(uc, 1);
 
-        //     /*
-        //      * If the value does not already exist, we need to create it.  We
-        //      * also need to make sure we do not allow values to be stored in
-        //      * excess of the value count cap.
-        //      */
-        //     let count: i64 = job_store::dsl::job_store
-        //         .filter(job_store::dsl::job.eq(job))
-        //         .count()
-        //         .get_result(tx)?;
-        //     if count >= max_val_count {
-        //         conflict!("job {job} already has {count} store values");
-        //     }
+            tx.commit()?;
+            return Ok(());
+        }
 
-        //     let ic = diesel::insert_into(job_store::dsl::job_store)
-        //         .values(JobStore {
-        //             job,
-        //             name: name.to_string(),
-        //             value: value.to_string(),
-        //             secret,
-        //             source: source.to_string(),
-        //             time_update: IsoDate::now(),
-        //         })
-        //         .execute(tx)?;
-        //     assert_eq!(ic, 1);
+        /*
+         * If the value does not already exist, we need to create it.  We
+         * also need to make sure we do not allow values to be stored in
+         * excess of the value count cap.
+         */
+        let count = self.tx_get_count(&mut tx, Query::select()
+            .from(JobStoreDef::Table)
+            .expr(Expr::col(Asterisk).count())
+            .and_where(Expr::col(JobStoreDef::Job).eq(job))
+            .to_owned())?;
+        if count >= max_val_count {
+            conflict!("job {job} already has {count} store values");
+        }
 
-        //     Ok(())
-        // })
+        let ic = self.tx_exec_insert(&mut tx,
+            JobStore {
+                job,
+                name: name.to_string(),
+                value: value.to_string(),
+                secret,
+                source: source.to_string(),
+                time_update: IsoDate::now(),
+            }.insert())?;
+        assert_eq!(ic, 1);
 
-        todo!()
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn task_complete(
@@ -1876,32 +1866,33 @@ impl Database {
         seq: u32,
         failed: bool,
     ) -> OResult<bool> {
-        todo!()
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // use schema::task;
+        let j: Job = self.tx_get_row(&mut tx, Job::find(job))?;
+        if j.complete {
+            conflict!("job {} is already complete", j.id);
+        }
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        let t: Task = self.tx_get_row(&mut tx, Task::find(job, seq))?;
+        if t.complete {
+            return Ok(false);
+        }
 
-        // c.immediate_transaction(|tx| {
-        //     let t: Task =
-        //         task::dsl::task.find((job, seq as i32)).get_result(tx)?;
-        //     if t.complete {
-        //         return Ok(false);
-        //     }
+        let uc = self.tx_exec_update(&mut tx, Query::update()
+            .table(TaskDef::Table)
+            .and_where(Expr::col(TaskDef::Job).eq(job))
+            .and_where(Expr::col(TaskDef::Seq).eq(seq))
+            .and_where(Expr::col(TaskDef::Complete).eq(false))
+            .value(TaskDef::Complete, true)
+            .value(TaskDef::Failed, failed)
+            .to_owned())?;
+        assert_eq!(uc, 1);
 
-        //     let uc = diesel::update(task::dsl::task)
-        //         .filter(task::dsl::job.eq(job))
-        //         .filter(task::dsl::seq.eq(seq as i32))
-        //         .filter(task::dsl::complete.eq(false))
-        //         .set((
-        //             task::dsl::complete.eq(true),
-        //             task::dsl::failed.eq(failed),
-        //         ))
-        //         .execute(tx)?;
-        //     assert_eq!(uc, 1);
-
-        //     Ok(true)
-        // })
+        tx.commit()?;
+        Ok(true)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1915,29 +1906,24 @@ impl Database {
         time_remote: Option<DateTime<Utc>>,
         payload: &str,
     ) -> OResult<()> {
-        todo!()
+        let max: Option<i32> = self.tx_get_row(tx, Query::select()
+            .from(JobEventDef::Table)
+            .and_where(Expr::col(JobEventDef::Job).eq(job))
+            .expr(Expr::col(JobEventDef::Seq).max())
+            .to_owned())?;
 
-        // use schema::job_event;
+        let ic = self.tx_exec_insert(tx, JobEvent {
+                job,
+                task: task.map(|n| n as i32),
+                seq: max.unwrap_or(0) + 1,
+                stream: stream.to_string(),
+                time: IsoDate(time),
+                time_remote: time_remote.map(IsoDate),
+                payload: payload.to_string(),
+            }.insert())?;
+        assert_eq!(ic, 1);
 
-        // let max: Option<i32> = job_event::dsl::job_event
-        //     .select(diesel::dsl::max(job_event::dsl::seq))
-        //     .filter(job_event::dsl::job.eq(job))
-        //     .get_result(tx)?;
-
-        // let ic = diesel::insert_into(job_event::dsl::job_event)
-        //     .values(JobEvent {
-        //         job,
-        //         task: task.map(|n| n as i32),
-        //         seq: max.unwrap_or(0) + 1,
-        //         stream: stream.to_string(),
-        //         time: IsoDate(time),
-        //         time_remote: time_remote.map(IsoDate),
-        //         payload: payload.to_string(),
-        //     })
-        //     .execute(tx)?;
-        // assert_eq!(ic, 1);
-
-        // Ok(())
+        Ok(())
     }
 
     pub fn user_jobs(&self, owner: UserId) -> OResult<Vec<Job>> {
@@ -2058,7 +2044,6 @@ impl Database {
         assert!(ic == 0 || ic == 1);
 
         tx.commit()?;
-
         Ok(ic != 0)
     }
 
@@ -2086,7 +2071,6 @@ impl Database {
         assert!(dc == 0 || dc == 1);
 
         tx.commit()?;
-
         Ok(dc != 0)
     }
 
@@ -2123,7 +2107,6 @@ impl Database {
         let out = self.i_user_create(name, &mut tx)?;
 
         tx.commit()?;
-
         Ok(out)
     }
 
@@ -2163,7 +2146,6 @@ impl Database {
          };
 
          tx.commit()?;
-
          Ok(au)
     }
 
@@ -2389,63 +2371,63 @@ impl Database {
             conflict!("target names must not look like ULIDs");
         }
 
-        todo!()
+        if new_name != new_name.trim() || new_name.is_empty() {
+            conflict!("invalid target name");
+        }
 
-        // use schema::target::dsl;
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        /*
+         * First, load the target to rename from the database.
+         */
+        let t: Target = self.tx_get_row(&mut tx, Target::find(id))?;
+        if t.name == new_name {
+            conflict!("target {} already has name {new_name:?}", t.id);
+        }
 
-        // if new_name != new_name.trim() || new_name.is_empty() {
-        //     conflict!("invalid target name");
-        // }
+        /*
+         * Then, make sure a target with the new name does not yet
+         * exist.
+         */
+        let nt: Option<Target> = 
+            self.tx_get_row_opt(&mut tx, Target::find_by_name(new_name))?;
+        if let Some(nt) = nt {
+            conflict!(
+                "target {} with name {:?} already exists",
+                nt.id,
+                new_name,
+            );
+        }
 
-        // c.immediate_transaction(|tx| {
-        //     /*
-        //      * First, load the target to rename from the database.
-        //      */
-        //     let t: Target = dsl::target.find(id).get_result(tx)?;
+        /*
+         * Rename the target:
+         */
+        let uc = self.tx_exec_update(&mut tx, Query::update()
+            .table(TargetDef::Table)
+            .and_where(Expr::col(TargetDef::Id).eq(id))
+            .and_where(Expr::col(TargetDef::Name).eq(&t.name))
+            .value(TargetDef::Name, new_name)
+            .to_owned())?;
+        assert_eq!(uc, 1);
 
-        //     /*
-        //      * Then, make sure a target with the new name does not yet
-        //      * exist.
-        //      */
-        //     let nt: Option<Target> = dsl::target
-        //         .filter(dsl::name.eq(new_name))
-        //         .get_result(tx)
-        //         .optional()?;
-        //     if let Some(nt) = nt {
-        //         conflict!(
-        //             "target {} with name {:?} already exists",
-        //             nt.id,
-        //             new_name,
-        //         );
-        //     }
+        /*
+         * Create the signpost target record.
+         */
+        let nt = Target {
+            id: TargetId::generate(),
+            name: t.name.to_string(),
+            desc: signpost_description.to_string(),
+            redirect: Some(t.id),
+            privilege: t.privilege,
+        };
 
-        //     /*
-        //      * Rename the target:
-        //      */
-        //     let uc = diesel::update(dsl::target)
-        //         .filter(dsl::id.eq(id))
-        //         .set(dsl::name.eq(new_name))
-        //         .execute(tx)?;
-        //     assert_eq!(uc, 1);
+        let ic = self.tx_exec_insert(&mut tx, nt.insert())?;
+        assert_eq!(ic, 1);
 
-        //     /*
-        //      * Create the signpost target record.
-        //      */
-        //     let nt = Target {
-        //         id: TargetId::generate(),
-        //         name: t.name.to_string(),
-        //         desc: signpost_description.to_string(),
-        //         redirect: Some(t.id),
-        //         privilege: t.privilege,
-        //     };
-
-        //     let ic =
-        //         diesel::insert_into(dsl::target).values(&nt).execute(tx)?;
-        //     assert_eq!(ic, 1);
-
-        //     Ok(nt)
-        // })
+        tx.commit()?;
+        Ok(nt)
     }
 }
