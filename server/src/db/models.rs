@@ -1203,9 +1203,41 @@ impl JobStore {
  * fish out a MAX() value for the task "seq" column.
  */
 impl FromRow for Option<i32> {
-    fn columns() -> Vec<ColumnRef> { Default::default() }
+    fn columns() -> Vec<ColumnRef> {
+        Default::default()
+    }
 
     fn from_row(row: &Row) -> rusqlite::Result<Option<i32>> {
         Ok(row.get(0)?)
+    }
+}
+
+/*
+ * Joins are a bit of a mess, so produced some helper implementations for pairs
+ * of objects we need to return:
+ */
+impl FromRow for (JobInput, Option<JobFile>) {
+    fn columns() -> Vec<ColumnRef> {
+        JobInput::columns()
+            .into_iter()
+            .chain(JobFile::columns().into_iter())
+            .collect()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<Self> {
+        todo!()
+    }
+}
+
+impl FromRow for (JobOutput, JobFile) {
+    fn columns() -> Vec<ColumnRef> {
+        JobOutput::columns()
+            .into_iter()
+            .chain(JobFile::columns().into_iter())
+            .collect()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<Self> {
+        todo!()
     }
 }

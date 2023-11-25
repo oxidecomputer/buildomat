@@ -13,7 +13,7 @@ use buildomat_types::*;
 use chrono::prelude::*;
 use rusqlite::Transaction;
 use rusty_ulid::Ulid;
-use sea_query::{Asterisk, Expr, Order, Query, SqliteQueryBuilder, OnConflict, SelectStatement, UpdateStatement, InsertStatement, DeleteStatement};
+use sea_query::{Asterisk, Expr, Order, Query, SqliteQueryBuilder, OnConflict, SelectStatement, UpdateStatement, InsertStatement, DeleteStatement, Cond};
 use sea_query_rusqlite::{RusqliteBinder, RusqliteValues};
 #[allow(unused_imports)]
 use slog::{error, info, warn, Logger};
@@ -41,7 +41,7 @@ pub type OResult<T> = std::result::Result<T, OperationError>;
 
 macro_rules! conflict {
     ($msg:expr) => {
-        return Err(OperationError::Conflict($msg.to_string()))
+        return Err(OperationError::Conflict(format!($msg)))
     };
     ($fmt:expr, $($arg:tt)*) => {
         return Err(OperationError::Conflict(format!($fmt, $($arg)*)))
@@ -143,6 +143,7 @@ impl Database {
         Ok(out)
     }
 
+    #[allow(unused)]
     pub fn exec_delete(&self, d: DeleteStatement) -> OResult<usize> {
         let (q, v) = d.build_rusqlite(SqliteQueryBuilder);
         self.exec(q, v)
@@ -236,7 +237,7 @@ impl Database {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
         let mut s = tx.prepare(&q)?;
         let out = s.query_map(&*v.as_params(), |row| row.get::<_, i64>(0))?;
-        let mut out = out.collect::<rusqlite::Result<Vec<i64>>>()?;
+        let out = out.collect::<rusqlite::Result<Vec<i64>>>()?;
         match out.len() {
             0 => conflict!("record not found"),
             1 => Ok(out[0].try_into().unwrap()),
@@ -967,41 +968,62 @@ impl Database {
         &self,
         job: JobId,
     ) -> OResult<Vec<(JobInput, Option<JobFile>)>> {
-        todo!()
+            self.get_rows(
+            Query::select()
+            .columns(<(JobInput, Option<JobFile>) as FromRow>::columns())
+            .from(JobInputDef::Table)
+            .left_join(JobFileDef::Table,
+                Cond::all()
+                    /*
+                     * The file ID column must always match:
+                     */
+                    .add(
+                        Expr::col((JobFileDef::Table, JobFileDef::Id))
+                        .eq(Expr::col((JobInputDef::Table, JobInputDef::Id)))
+                    )
+                    .add(Cond::any()
+                        /*
+                         * Either the other_job field is null, and the input
+                         * job ID matches the file job ID directly...
+                         */
+                        .add(
+                            Expr::col((JobInputDef::Table, JobInputDef::OtherJob)).is_null()
+                            .and(Expr::col((JobFileDef::Table, JobFileDef::Job))
+                                .eq(Expr::col((JobInputDef::Table, JobInputDef::Job))))
+                        )
+                        /*
+                         * ... or the other_job field is populated and it
+                         * matches the file job ID instead:
+                         */
+                        .add(
+                            Expr::col((JobInputDef::Table, JobInputDef::OtherJob)).is_not_null()
+                            .and(Expr::col((JobFileDef::Table, JobFileDef::Job))
+                                .eq(Expr::col((JobInputDef::Table, JobInputDef::OtherJob))))
+                            )
+                    )
+                )
+        .and_where(Expr::col((JobInputDef::Table, JobInputDef::Job))
+            .eq(job))
+        .order_by((JobInputDef::Table, JobInputDef::Id), Order::Asc)
+        .to_owned()
+        )
+    }
 
-        // use schema::{job_file, job_input};
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(job_input::dsl::job_input
-        //     .left_outer_join(
-        //         job_file::table.on(
-        //             /*
-        //              * The file ID column must always match:
-        //              */
-        //             job_file::dsl::id.nullable().eq(job_input::dsl::id).and(
-        //                 /*
-        //                  * Either the other_job field is null, and the input
-        //                  * job ID matches the file job ID directly...
-        //                  */
-        //                 (job_input::dsl::other_job
-        //                     .is_null()
-        //                     .and(job_file::dsl::job.eq(job_input::dsl::job)))
-        //                 /*
-        //                  * ... or the other_job field is populated and it
-        //                  * matches the file job ID instead:
-        //                  */
-        //                 .or(job_input::dsl::other_job.is_not_null().and(
-        //                     job_file::dsl::job
-        //                         .nullable()
-        //                         .eq(job_input::dsl::other_job),
-        //                 )),
-        //             ),
-        //         ),
-        //     )
-        //     .filter(job_input::dsl::job.eq(job))
-        //     .order_by(job_input::dsl::id.asc())
-        //     .get_results(c)?)
+    fn q_job_outputs(
+        &self,
+        job: JobId,
+        ) -> SelectStatement {
+        Query::select()
+            .columns(<(JobOutput, JobFile) as FromRow>::columns())
+            .from(JobOutputDef::Table)
+            .inner_join(JobFileDef::Table,
+                Expr::col((JobFileDef::Table, JobFileDef::Job))
+                .eq(Expr::col((JobOutputDef::Table, JobOutputDef::Job)))
+                .and(Expr::col((JobFileDef::Table, JobFileDef::Id))
+                    .eq(Expr::col((JobOutputDef::Table, JobOutputDef::Id)))))
+            .and_where(Expr::col((JobFileDef::Table, JobFileDef::Job)).eq(job))
+            .order_by((JobFileDef::Table, JobFileDef::Id), Order::Asc)
+            .to_owned()
     }
 
     fn i_job_outputs(
@@ -1009,35 +1031,11 @@ impl Database {
         tx: &mut Transaction,
         job: JobId,
     ) -> OResult<Vec<(JobOutput, JobFile)>> {
-        // XXXJOIN let (q, v) = Query::select()
-        // XXXJOIN     .from(JobOutputDef::Table)
-        // XXXJOIN     .columns(JobOutput::columns())
-        // XXXJOIN     .and_where(Expr::col(JobOutputDef::job).eq(job))
-        // XXXJOIN     .build_rusqlite(SqliteQueryBuilder);
-        // XXXJOIN /* XXX */
-
-        // XXXJOIN self.tx_get_row(tx, q, v)
-
-        // use schema::{job_file, job_output};
-
-        // Ok(job_output::dsl::job_output
-        //     .inner_join(
-        //         job_file::table.on(job_file::dsl::job
-        //             .eq(job_output::dsl::job)
-        //             .and(job_file::dsl::id.eq(job_output::dsl::id))),
-        //     )
-        //     .filter(job_file::dsl::job.eq(job))
-        //     .order_by(job_file::dsl::id.asc())
-        //     .get_results(tx)?)
-        todo!()
+        self.tx_get_rows(tx, self.q_job_outputs(job))
     }
 
     pub fn job_outputs(&self, job: JobId) -> OResult<Vec<(JobOutput, JobFile)>> {
-        todo!()
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // self.i_job_outputs(c, job)
+        self.get_rows(self.q_job_outputs(job))
     }
 
     pub fn job_file_opt(
@@ -1686,7 +1684,7 @@ impl Database {
             .table(JobDef::Table)
             .and_where(Expr::col(JobDef::Id).eq(j.id))
             .and_where(Expr::col(JobDef::Complete).eq(false))
-            .value(JobDef::Failed, true)
+            .value(JobDef::Failed, failed)
             .value(JobDef::Complete, true)
             .to_owned())?;
         assert_eq!(uc, 1);
@@ -1704,7 +1702,7 @@ impl Database {
         name: &str,
         when: DateTime<Utc>,
     ) -> OResult<()> {
-        self.exec_insert(JobTime {
+        self.tx_exec_insert(tx, JobTime {
             job,
             name: name.to_string(),
             time: IsoDate(when),
@@ -1720,13 +1718,13 @@ impl Database {
         from: &str,
         until: &str,
     ) -> OResult<Option<std::time::Duration>> {
-        let from = if let Some(from) = self.get_row_opt::<JobTime>(JobTime::find(job, from))? {
+        let from = if let Some(from) = self.tx_get_row_opt::<JobTime>(tx, JobTime::find(job, from))? {
             from
         } else {
             return Ok(None);
         };
 
-        let until = if let Some(until) = self.get_row_opt::<JobTime>(JobTime::find(job, until))? {
+        let until = if let Some(until) = self.tx_get_row_opt::<JobTime>(tx, JobTime::find(job, until))? {
             until
         } else {
             return Ok(None);
@@ -2306,7 +2304,7 @@ impl Database {
             count += 1;
 
             if let Some(redirect) = &target.redirect {
-                target = if let Some(target) = self.get_row_opt(Target::find_by_name(name))?  {
+                target = if let Some(target) = self.get_row_opt(Target::find(*redirect))?  {
                      target
                  } else {
                      return Ok(None);

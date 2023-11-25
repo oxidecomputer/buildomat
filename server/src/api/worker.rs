@@ -49,7 +49,7 @@ impl JobInputPath {
     }
 
     fn input(&self) -> DSResult<db::JobFileId> {
-        self.job.parse::<db::JobFileId>().or_500()
+        self.input.parse::<db::JobFileId>().or_500()
     }
 }
 
