@@ -13,7 +13,10 @@ use buildomat_types::*;
 use chrono::prelude::*;
 use rusqlite::Transaction;
 use rusty_ulid::Ulid;
-use sea_query::{Asterisk, Expr, Order, Query, SqliteQueryBuilder, OnConflict, SelectStatement, UpdateStatement, InsertStatement, DeleteStatement, Cond};
+use sea_query::{
+    Asterisk, Cond, DeleteStatement, Expr, InsertStatement, OnConflict, Order,
+    Query, SelectStatement, SqliteQueryBuilder, UpdateStatement,
+};
 use sea_query_rusqlite::{RusqliteBinder, RusqliteValues};
 #[allow(unused_imports)]
 use slog::{error, info, warn, Logger};
@@ -167,25 +170,17 @@ impl Database {
         Ok(out)
     }
 
-    pub fn get_strings(
-        &self,
-        s: SelectStatement,
-    ) -> OResult<Vec<String>> {
+    pub fn get_strings(&self, s: SelectStatement) -> OResult<Vec<String>> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
         let c = &mut self.1.lock().unwrap().conn;
 
         let mut s = c.prepare(&q)?;
-        let out = s.query_map(&*v.as_params(), |row| {
-            row.get(0)
-        })?;
+        let out = s.query_map(&*v.as_params(), |row| row.get(0))?;
 
         Ok(out.collect::<rusqlite::Result<_>>()?)
     }
 
-    pub fn get_rows<T: FromRow>(
-        &self,
-        s: SelectStatement,
-    ) -> OResult<Vec<T>> {
+    pub fn get_rows<T: FromRow>(&self, s: SelectStatement) -> OResult<Vec<T>> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
         let c = &mut self.1.lock().unwrap().conn;
 
@@ -195,10 +190,7 @@ impl Database {
         Ok(out.collect::<rusqlite::Result<_>>()?)
     }
 
-    pub fn get_row<T: FromRow>(
-        &self,
-        s: SelectStatement,
-    ) -> OResult<T> {
+    pub fn get_row<T: FromRow>(&self, s: SelectStatement) -> OResult<T> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
         let c = &mut self.1.lock().unwrap().conn;
 
@@ -268,9 +260,7 @@ impl Database {
     ) -> OResult<Vec<String>> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
         let mut s = tx.prepare(&q)?;
-        let out = s.query_map(&*v.as_params(), |row| {
-            row.get(0)
-        })?;
+        let out = s.query_map(&*v.as_params(), |row| row.get(0))?;
 
         Ok(out.collect::<rusqlite::Result<_>>()?)
     }
@@ -308,81 +298,97 @@ impl Database {
         tx: &mut Transaction,
         bs: &str,
     ) -> OResult<Worker> {
-        self.tx_get_row(tx, 
-        Query::select()
-            .from(WorkerDef::Table)
-            .columns(Worker::columns())
-            .and_where(Expr::col(WorkerDef::Bootstrap).eq(bs))
-            .to_owned())
+        self.tx_get_row(
+            tx,
+            Query::select()
+                .from(WorkerDef::Table)
+                .columns(Worker::columns())
+                .and_where(Expr::col(WorkerDef::Bootstrap).eq(bs))
+                .to_owned(),
+        )
     }
 
     fn i_worker(&self, tx: &mut Transaction, id: WorkerId) -> OResult<Worker> {
-        self.tx_get_row(tx, Query::select()
-            .from(WorkerDef::Table)
-            .columns(Worker::columns())
-            .and_where(Expr::col(WorkerDef::Id).eq(id))
-            .to_owned())
+        self.tx_get_row(
+            tx,
+            Query::select()
+                .from(WorkerDef::Table)
+                .columns(Worker::columns())
+                .and_where(Expr::col(WorkerDef::Id).eq(id))
+                .to_owned(),
+        )
     }
 
     pub fn workers(&self) -> OResult<Vec<Worker>> {
-        self.get_rows(Query::select()
-            .from(WorkerDef::Table)
-            .columns(Worker::columns())
-            .order_by(WorkerDef::Id, Order::Asc)
-            .to_owned())
+        self.get_rows(
+            Query::select()
+                .from(WorkerDef::Table)
+                .columns(Worker::columns())
+                .order_by(WorkerDef::Id, Order::Asc)
+                .to_owned(),
+        )
     }
 
     pub fn workers_active(&self) -> OResult<Vec<Worker>> {
-        self.get_rows(Query::select()
-            .from(WorkerDef::Table)
-            .columns(Worker::columns())
-            .order_by(WorkerDef::Id, Order::Asc)
-            .and_where(Expr::col(WorkerDef::Deleted).eq(false))
-            .to_owned())
+        self.get_rows(
+            Query::select()
+                .from(WorkerDef::Table)
+                .columns(Worker::columns())
+                .order_by(WorkerDef::Id, Order::Asc)
+                .and_where(Expr::col(WorkerDef::Deleted).eq(false))
+                .to_owned(),
+        )
     }
 
     pub fn workers_for_factory(
         &self,
         factory: &Factory,
     ) -> OResult<Vec<Worker>> {
-        self.get_rows(Query::select()
-            .from(WorkerDef::Table)
-            .columns(Worker::columns())
-            .order_by(WorkerDef::Id, Order::Asc)
-            .and_where(Expr::col(WorkerDef::Factory).eq(factory.id))
-            .and_where(Expr::col(WorkerDef::Deleted).eq(false))
-            .to_owned())
+        self.get_rows(
+            Query::select()
+                .from(WorkerDef::Table)
+                .columns(Worker::columns())
+                .order_by(WorkerDef::Id, Order::Asc)
+                .and_where(Expr::col(WorkerDef::Factory).eq(factory.id))
+                .and_where(Expr::col(WorkerDef::Deleted).eq(false))
+                .to_owned(),
+        )
     }
 
     pub fn worker_jobs(&self, worker: WorkerId) -> OResult<Vec<Job>> {
-        self.get_rows(Query::select()
-            .from(JobDef::Table)
-            .columns(Job::columns())
-            .and_where(Expr::col(JobDef::Worker).eq(worker))
-            .to_owned())
+        self.get_rows(
+            Query::select()
+                .from(JobDef::Table)
+                .columns(Job::columns())
+                .and_where(Expr::col(JobDef::Worker).eq(worker))
+                .to_owned(),
+        )
     }
 
     pub fn free_workers(&self) -> OResult<Vec<Worker>> {
-        self.get_rows(Query::select()
-            .columns(Worker::columns())
-            .from(WorkerDef::Table)
-            .left_join(
-                JobDef::Table,
-                Expr::col((JobDef::Table, JobDef::Worker))
-                    .eq(Expr::col((WorkerDef::Table, WorkerDef::Id))),
-            )
-            .order_by(WorkerDef::Id, Order::Asc)
-            .and_where(Expr::col((JobDef::Table, JobDef::Worker)).is_null())
-            .and_where(
-                Expr::col((WorkerDef::Table, WorkerDef::Deleted)).eq(false),
-            )
-            .and_where(
-                Expr::col((WorkerDef::Table, WorkerDef::Recycle)).eq(false),
-            )
-            .and_where(
-                Expr::col((WorkerDef::Table, WorkerDef::Token)).is_not_null(),
-            )
-            .to_owned())
+        self.get_rows(
+            Query::select()
+                .columns(Worker::columns())
+                .from(WorkerDef::Table)
+                .left_join(
+                    JobDef::Table,
+                    Expr::col((JobDef::Table, JobDef::Worker))
+                        .eq(Expr::col((WorkerDef::Table, WorkerDef::Id))),
+                )
+                .order_by(WorkerDef::Id, Order::Asc)
+                .and_where(Expr::col((JobDef::Table, JobDef::Worker)).is_null())
+                .and_where(
+                    Expr::col((WorkerDef::Table, WorkerDef::Deleted)).eq(false),
+                )
+                .and_where(
+                    Expr::col((WorkerDef::Table, WorkerDef::Recycle)).eq(false),
+                )
+                .and_where(
+                    Expr::col((WorkerDef::Table, WorkerDef::Token))
+                        .is_not_null(),
+                )
+                .to_owned(),
+        )
     }
 
     pub fn worker_recycle_all(&self) -> OResult<usize> {
@@ -454,14 +460,14 @@ impl Database {
         }
 
         let c = {
-
-            self.tx_get_count(tx, 
-            Query::select()
-                .expr(Expr::col(Asterisk).count())
-                .from(JobDef::Table)
-                .and_where(Expr::col(JobDef::Worker).eq(w.id))
-                .to_owned()
-                )?
+            self.tx_get_count(
+                tx,
+                Query::select()
+                    .expr(Expr::col(Asterisk).count())
+                    .from(JobDef::Table)
+                    .and_where(Expr::col(JobDef::Worker).eq(w.id))
+                    .to_owned(),
+            )?
         };
         if c > 0 {
             conflict!("worker {} already has {} jobs assigned", w.id, c);
@@ -538,18 +544,12 @@ impl Database {
 
         let w = self.i_worker_for_bootstrap(&mut tx, bootstrap)?;
         if w.deleted {
-            error!(
-                log,
-                "worker {} already deleted, cannot bootstrap", w.id
-            );
+            error!(log, "worker {} already deleted, cannot bootstrap", w.id);
             return Ok(None);
         }
 
         if w.factory_private.is_none() {
-            error!(
-                log,
-                "worker {} has no instance, cannot bootstrap", w.id
-            );
+            error!(log, "worker {} has no instance, cannot bootstrap", w.id);
             return Ok(None);
         }
 
@@ -643,11 +643,14 @@ impl Database {
             /*
              * The worker is not yet associated with an instance ID.
              */
-            let count = self.tx_exec_update(&mut tx,
+            let count = self.tx_exec_update(
+                &mut tx,
                 Query::update()
-                .table(WorkerDef::Table)
-                .and_where(Expr::col(WorkerDef::Id).eq(w.id))
-                .value(WorkerDef::FactoryPrivate, factory_private).to_owned())?;
+                    .table(WorkerDef::Table)
+                    .and_where(Expr::col(WorkerDef::Id).eq(w.id))
+                    .value(WorkerDef::FactoryPrivate, factory_private)
+                    .to_owned(),
+            )?;
             assert_eq!(count, 1);
         }
 
@@ -674,11 +677,14 @@ impl Database {
             /*
              * Store the factory metadata for this worker:
              */
-            let count = self.tx_exec_update(&mut tx,
+            let count = self.tx_exec_update(
+                &mut tx,
                 Query::update()
-                .table(WorkerDef::Table)
-                .and_where(Expr::col(WorkerDef::Id).eq(w.id))
-                .value(WorkerDef::FactoryMetadata, factory_metadata).to_owned())?;
+                    .table(WorkerDef::Table)
+                    .and_where(Expr::col(WorkerDef::Id).eq(w.id))
+                    .value(WorkerDef::FactoryMetadata, factory_metadata)
+                    .to_owned(),
+            )?;
             assert_eq!(count, 1);
         }
 
@@ -687,28 +693,34 @@ impl Database {
     }
 
     pub fn worker(&self, id: WorkerId) -> OResult<Worker> {
-        self.get_row(Query::select()
-            .from(WorkerDef::Table)
-            .columns(Worker::columns())
-            .and_where(Expr::col(WorkerDef::Id).eq(id))
-            .to_owned())
+        self.get_row(
+            Query::select()
+                .from(WorkerDef::Table)
+                .columns(Worker::columns())
+                .and_where(Expr::col(WorkerDef::Id).eq(id))
+                .to_owned(),
+        )
     }
 
     pub fn worker_opt(&self, id: WorkerId) -> OResult<Option<Worker>> {
-        self.get_row_opt(Query::select()
-            .from(WorkerDef::Table)
-            .columns(Worker::columns())
-            .and_where(Expr::col(WorkerDef::Id).eq(id))
-            .to_owned())
+        self.get_row_opt(
+            Query::select()
+                .from(WorkerDef::Table)
+                .columns(Worker::columns())
+                .and_where(Expr::col(WorkerDef::Id).eq(id))
+                .to_owned(),
+        )
     }
 
     pub fn worker_auth(&self, token: &str) -> OResult<Worker> {
-        let mut workers = self.get_rows::<Worker>(Query::select()
-            .from(WorkerDef::Table)
-            .columns(Worker::columns())
-            .and_where(Expr::col(WorkerDef::Token).eq(token))
-            .and_where(Expr::col(WorkerDef::Deleted).eq(false))
-            .to_owned())?;
+        let mut workers = self.get_rows::<Worker>(
+            Query::select()
+                .from(WorkerDef::Table)
+                .columns(Worker::columns())
+                .and_where(Expr::col(WorkerDef::Token).eq(token))
+                .and_where(Expr::col(WorkerDef::Deleted).eq(false))
+                .to_owned(),
+        )?;
 
         match (workers.pop(), workers.pop()) {
             (None, _) => conflict!("auth failure"),
@@ -771,50 +783,58 @@ impl Database {
      * Enumerate all jobs.
      */
     pub fn jobs_all(&self) -> OResult<Vec<Job>> {
-        self.get_rows(Query::select()
-            .from(JobDef::Table)
-            .columns(Job::columns())
-            .order_by(JobDef::Id, Order::Asc)
-            .to_owned())
+        self.get_rows(
+            Query::select()
+                .from(JobDef::Table)
+                .columns(Job::columns())
+                .order_by(JobDef::Id, Order::Asc)
+                .to_owned(),
+        )
     }
 
     /**
      * Enumerate jobs that are active; i.e., not yet complete, but not waiting.
      */
     pub fn jobs_active(&self) -> OResult<Vec<Job>> {
-        self.get_rows(Query::select()
-            .from(JobDef::Table)
-            .columns(Job::columns())
-            .order_by(JobDef::Id, Order::Asc)
-            .and_where(Expr::col(JobDef::Complete).eq(false))
-            .and_where(Expr::col(JobDef::Waiting).eq(false))
-            .to_owned())
+        self.get_rows(
+            Query::select()
+                .from(JobDef::Table)
+                .columns(Job::columns())
+                .order_by(JobDef::Id, Order::Asc)
+                .and_where(Expr::col(JobDef::Complete).eq(false))
+                .and_where(Expr::col(JobDef::Waiting).eq(false))
+                .to_owned(),
+        )
     }
 
     /**
      * Enumerate jobs that are waiting for inputs, or for dependees to complete.
      */
     pub fn jobs_waiting(&self) -> OResult<Vec<Job>> {
-        self.get_rows(Query::select()
-            .from(JobDef::Table)
-            .columns(Job::columns())
-            .order_by(JobDef::Id, Order::Asc)
-            .and_where(Expr::col(JobDef::Complete).eq(false))
-            .and_where(Expr::col(JobDef::Waiting).eq(true))
-            .to_owned())
+        self.get_rows(
+            Query::select()
+                .from(JobDef::Table)
+                .columns(Job::columns())
+                .order_by(JobDef::Id, Order::Asc)
+                .and_where(Expr::col(JobDef::Complete).eq(false))
+                .and_where(Expr::col(JobDef::Waiting).eq(true))
+                .to_owned(),
+        )
     }
 
     /**
      * Enumerate some number of the most recently complete jobs.
      */
     pub fn jobs_completed(&self, limit: usize) -> OResult<Vec<Job>> {
-        let mut res = self.get_rows(Query::select()
-            .from(JobDef::Table)
-            .columns(Job::columns())
-            .order_by(JobDef::Id, Order::Desc)
-            .and_where(Expr::col(JobDef::Complete).eq(true))
-            .limit(limit.try_into().unwrap())
-            .to_owned())?;
+        let mut res = self.get_rows(
+            Query::select()
+                .from(JobDef::Table)
+                .columns(Job::columns())
+                .order_by(JobDef::Id, Order::Desc)
+                .and_where(Expr::col(JobDef::Complete).eq(true))
+                .limit(limit.try_into().unwrap())
+                .to_owned(),
+        )?;
 
         res.reverse();
 
@@ -837,10 +857,7 @@ impl Database {
     pub fn job_tags(&self, job: JobId) -> OResult<HashMap<String, String>> {
         let (q, v) = Query::select()
             .from(JobTagDef::Table)
-            .columns([
-                JobTagDef::Name,
-                JobTagDef::Value,
-            ])
+            .columns([JobTagDef::Name, JobTagDef::Value])
             .and_where(Expr::col(JobTagDef::Job).eq(job))
             .build_rusqlite(SqliteQueryBuilder);
 
@@ -855,21 +872,25 @@ impl Database {
     }
 
     pub fn job_output_rules(&self, job: JobId) -> OResult<Vec<JobOutputRule>> {
-        self.get_rows(Query::select()
-            .from(JobOutputRuleDef::Table)
-            .columns(JobOutputRule::columns())
-            .order_by(JobOutputRuleDef::Seq, Order::Asc)
-            .and_where(Expr::col(JobOutputRuleDef::Job).eq(job))
-            .to_owned())
+        self.get_rows(
+            Query::select()
+                .from(JobOutputRuleDef::Table)
+                .columns(JobOutputRule::columns())
+                .order_by(JobOutputRuleDef::Seq, Order::Asc)
+                .and_where(Expr::col(JobOutputRuleDef::Job).eq(job))
+                .to_owned(),
+        )
     }
 
     pub fn job_depends(&self, job: JobId) -> OResult<Vec<JobDepend>> {
-        self.get_rows(Query::select()
-            .from(JobDependDef::Table)
-            .columns(JobDepend::columns())
-            .order_by(JobDependDef::Name, Order::Asc)
-            .and_where(Expr::col(JobDependDef::Job).eq(job))
-            .to_owned())
+        self.get_rows(
+            Query::select()
+                .from(JobDependDef::Table)
+                .columns(JobDepend::columns())
+                .order_by(JobDependDef::Name, Order::Asc)
+                .and_where(Expr::col(JobDependDef::Job).eq(job))
+                .to_owned(),
+        )
     }
 
     /**
@@ -951,13 +972,15 @@ impl Database {
             }
         }
 
-        let uc = self.tx_exec_update(&mut tx, Query::update()
-            .table(JobDependDef::Table)
-            .and_where(Expr::col(JobDependDef::Job).eq(j.id))
-            .and_where(Expr::col(JobDependDef::Name).eq(&d.name))
-            .value(JobDependDef::Satisfied, true)
-            .to_owned()
-            )?;
+        let uc = self.tx_exec_update(
+            &mut tx,
+            Query::update()
+                .table(JobDependDef::Table)
+                .and_where(Expr::col(JobDependDef::Job).eq(j.id))
+                .and_where(Expr::col(JobDependDef::Name).eq(&d.name))
+                .value(JobDependDef::Satisfied, true)
+                .to_owned(),
+        )?;
         assert_eq!(uc, 1);
 
         tx.commit()?;
@@ -968,59 +991,85 @@ impl Database {
         &self,
         job: JobId,
     ) -> OResult<Vec<(JobInput, Option<JobFile>)>> {
-            self.get_rows(
+        self.get_rows(
             Query::select()
-            .columns(<(JobInput, Option<JobFile>) as FromRow>::columns())
-            .from(JobInputDef::Table)
-            .left_join(JobFileDef::Table,
-                Cond::all()
-                    /*
-                     * The file ID column must always match:
-                     */
-                    .add(
-                        Expr::col((JobFileDef::Table, JobFileDef::Id))
-                        .eq(Expr::col((JobInputDef::Table, JobInputDef::Id)))
-                    )
-                    .add(Cond::any()
+                .columns(<(JobInput, Option<JobFile>) as FromRow>::columns())
+                .from(JobInputDef::Table)
+                .left_join(
+                    JobFileDef::Table,
+                    Cond::all()
                         /*
-                         * Either the other_job field is null, and the input
-                         * job ID matches the file job ID directly...
+                         * The file ID column must always match:
                          */
+                        .add(Expr::col((JobFileDef::Table, JobFileDef::Id)).eq(
+                            Expr::col((JobInputDef::Table, JobInputDef::Id)),
+                        ))
                         .add(
-                            Expr::col((JobInputDef::Table, JobInputDef::OtherJob)).is_null()
-                            .and(Expr::col((JobFileDef::Table, JobFileDef::Job))
-                                .eq(Expr::col((JobInputDef::Table, JobInputDef::Job))))
-                        )
-                        /*
-                         * ... or the other_job field is populated and it
-                         * matches the file job ID instead:
-                         */
-                        .add(
-                            Expr::col((JobInputDef::Table, JobInputDef::OtherJob)).is_not_null()
-                            .and(Expr::col((JobFileDef::Table, JobFileDef::Job))
-                                .eq(Expr::col((JobInputDef::Table, JobInputDef::OtherJob))))
-                            )
-                    )
+                            Cond::any()
+                                /*
+                                 * Either the other_job field is null, and the input
+                                 * job ID matches the file job ID directly...
+                                 */
+                                .add(
+                                    Expr::col((
+                                        JobInputDef::Table,
+                                        JobInputDef::OtherJob,
+                                    ))
+                                    .is_null()
+                                    .and(
+                                        Expr::col((
+                                            JobFileDef::Table,
+                                            JobFileDef::Job,
+                                        ))
+                                        .eq(Expr::col((
+                                            JobInputDef::Table,
+                                            JobInputDef::Job,
+                                        ))),
+                                    ),
+                                )
+                                /*
+                                 * ... or the other_job field is populated and it
+                                 * matches the file job ID instead:
+                                 */
+                                .add(
+                                    Expr::col((
+                                        JobInputDef::Table,
+                                        JobInputDef::OtherJob,
+                                    ))
+                                    .is_not_null()
+                                    .and(
+                                        Expr::col((
+                                            JobFileDef::Table,
+                                            JobFileDef::Job,
+                                        ))
+                                        .eq(Expr::col((
+                                            JobInputDef::Table,
+                                            JobInputDef::OtherJob,
+                                        ))),
+                                    ),
+                                ),
+                        ),
                 )
-        .and_where(Expr::col((JobInputDef::Table, JobInputDef::Job))
-            .eq(job))
-        .order_by((JobInputDef::Table, JobInputDef::Id), Order::Asc)
-        .to_owned()
+                .and_where(
+                    Expr::col((JobInputDef::Table, JobInputDef::Job)).eq(job),
+                )
+                .order_by((JobInputDef::Table, JobInputDef::Id), Order::Asc)
+                .to_owned(),
         )
     }
 
-    fn q_job_outputs(
-        &self,
-        job: JobId,
-        ) -> SelectStatement {
+    fn q_job_outputs(&self, job: JobId) -> SelectStatement {
         Query::select()
             .columns(<(JobOutput, JobFile) as FromRow>::columns())
             .from(JobOutputDef::Table)
-            .inner_join(JobFileDef::Table,
+            .inner_join(
+                JobFileDef::Table,
                 Expr::col((JobFileDef::Table, JobFileDef::Job))
-                .eq(Expr::col((JobOutputDef::Table, JobOutputDef::Job)))
-                .and(Expr::col((JobFileDef::Table, JobFileDef::Id))
-                    .eq(Expr::col((JobOutputDef::Table, JobOutputDef::Id)))))
+                    .eq(Expr::col((JobOutputDef::Table, JobOutputDef::Job)))
+                    .and(Expr::col((JobFileDef::Table, JobFileDef::Id)).eq(
+                        Expr::col((JobOutputDef::Table, JobOutputDef::Id)),
+                    )),
+            )
             .and_where(Expr::col((JobFileDef::Table, JobFileDef::Job)).eq(job))
             .order_by((JobFileDef::Table, JobFileDef::Id), Order::Asc)
             .to_owned()
@@ -1034,7 +1083,10 @@ impl Database {
         self.tx_get_rows(tx, self.q_job_outputs(job))
     }
 
-    pub fn job_outputs(&self, job: JobId) -> OResult<Vec<(JobOutput, JobFile)>> {
+    pub fn job_outputs(
+        &self,
+        job: JobId,
+    ) -> OResult<Vec<(JobOutput, JobFile)>> {
         self.get_rows(self.q_job_outputs(job))
     }
 
@@ -1051,13 +1103,15 @@ impl Database {
         job: JobId,
         minseq: usize,
     ) -> OResult<Vec<JobEvent>> {
-        self.get_rows(Query::select()
-            .from(JobEventDef::Table)
-            .columns(JobEvent::columns())
-            .order_by(JobEventDef::Seq, Order::Asc)
-            .and_where(Expr::col(JobEventDef::Job).eq(job))
-            .and_where(Expr::col(JobEventDef::Seq).gte(minseq as i64))
-            .to_owned())
+        self.get_rows(
+            Query::select()
+                .from(JobEventDef::Table)
+                .columns(JobEvent::columns())
+                .order_by(JobEventDef::Seq, Order::Asc)
+                .and_where(Expr::col(JobEventDef::Job).eq(job))
+                .and_where(Expr::col(JobEventDef::Seq).gte(minseq as i64))
+                .to_owned(),
+        )
     }
 
     pub fn job(&self, job: JobId) -> OResult<Job> {
@@ -1156,8 +1210,10 @@ impl Database {
         }
 
         for (i, ct) in tasks.iter().enumerate() {
-            let ic = self.tx_exec_insert(&mut tx, 
-                Task::from_create(ct, j.id, i).insert())?;
+            let ic = self.tx_exec_insert(
+                &mut tx,
+                Task::from_create(ct, j.id, i).insert(),
+            )?;
             assert_eq!(ic, 1);
         }
 
@@ -1168,9 +1224,8 @@ impl Database {
              * to exist already at the time of dependency specification we
              * can avoid the mess of cycles in the dependency graph.
              */
-            let pj: Option<Job> = self.tx_get_row_opt(
-                &mut tx,
-                Job::find(cd.prior_job))?;
+            let pj: Option<Job> =
+                self.tx_get_row_opt(&mut tx, Job::find(cd.prior_job))?;
 
             if !pj.map(|j| j.owner == owner).unwrap_or(false) {
                 /*
@@ -1180,38 +1235,42 @@ impl Database {
                 conflict!("prior job does not exist");
             }
 
-            let ic = self.tx_exec_insert(&mut tx,
-                JobDepend::from_create(cd, j.id).insert())?;
+            let ic = self.tx_exec_insert(
+                &mut tx,
+                JobDepend::from_create(cd, j.id).insert(),
+            )?;
             assert_eq!(ic, 1);
         }
 
         for ci in inputs.iter() {
-            let ic =self.tx_exec_insert(&mut tx,
-                JobInput::from_create(ci.as_str(), j.id).insert())?;
+            let ic = self.tx_exec_insert(
+                &mut tx,
+                JobInput::from_create(ci.as_str(), j.id).insert(),
+            )?;
             assert_eq!(ic, 1);
         }
 
         for (i, rule) in output_rules.iter().enumerate() {
-            let ic = self.tx_exec_insert(&mut tx,
-                    JobOutputRule::from_create(rule, j.id, i).insert())?;
+            let ic = self.tx_exec_insert(
+                &mut tx,
+                JobOutputRule::from_create(rule, j.id, i).insert(),
+            )?;
             assert_eq!(ic, 1);
         }
 
         for (n, v) in tags {
-            let ic =self.tx_exec_insert(&mut tx,
+            let ic = self.tx_exec_insert(
+                &mut tx,
                 Query::insert()
-                .into_table(JobTagDef::Table)
-                .columns([
-                    JobTagDef::Job,
-                    JobTagDef::Name,
-                    JobTagDef::Value,
-                ])
-                .values_panic([
-                    j.id.into(),
-                    n.into(),
-                    v.into(),
-                ])
-                .to_owned())?;
+                    .into_table(JobTagDef::Table)
+                    .columns([
+                        JobTagDef::Job,
+                        JobTagDef::Name,
+                        JobTagDef::Value,
+                    ])
+                    .values_panic([j.id.into(), n.into(), v.into()])
+                    .to_owned(),
+            )?;
             assert_eq!(ic, 1);
         }
 
@@ -1220,21 +1279,29 @@ impl Database {
     }
 
     pub fn job_input(&self, job: JobId, file: JobFileId) -> OResult<JobInput> {
-        self.get_row(Query::select()
-            .from(JobInputDef::Table)
-            .columns(JobInput::columns())
-            .and_where(Expr::col(JobInputDef::Job).eq(job))
-            .and_where(Expr::col(JobInputDef::Id).eq(file))
-            .to_owned())
+        self.get_row(
+            Query::select()
+                .from(JobInputDef::Table)
+                .columns(JobInput::columns())
+                .and_where(Expr::col(JobInputDef::Job).eq(job))
+                .and_where(Expr::col(JobInputDef::Id).eq(file))
+                .to_owned(),
+        )
     }
 
-    pub fn job_output(&self, job: JobId, file: JobFileId) -> OResult<JobOutput> {
-        self.get_row(Query::select()
-            .from(JobOutputDef::Table)
-            .columns(JobOutput::columns())
-            .and_where(Expr::col(JobOutputDef::Job).eq(job))
-            .and_where(Expr::col(JobOutputDef::Id).eq(file))
-            .to_owned())
+    pub fn job_output(
+        &self,
+        job: JobId,
+        file: JobFileId,
+    ) -> OResult<JobOutput> {
+        self.get_row(
+            Query::select()
+                .from(JobOutputDef::Table)
+                .columns(JobOutput::columns())
+                .and_where(Expr::col(JobOutputDef::Job).eq(job))
+                .and_where(Expr::col(JobOutputDef::Id).eq(file))
+                .to_owned(),
+        )
     }
 
     pub fn published_file_by_name(
@@ -1268,14 +1335,16 @@ impl Database {
         /*
          * Make sure this output exists.
          */
-        let _jo: JobOutput = self.tx_get_row(&mut tx, JobOutput::find(
-                job, file))?;
+        let _jo: JobOutput =
+            self.tx_get_row(&mut tx, JobOutput::find(job, file))?;
 
         /*
          * Determine whether this record has been published already or not.
          */
-        let pf: Option<PublishedFile> = self.tx_get_row_opt(&mut tx,
-            PublishedFile::find(j.owner, series, version, name))?;
+        let pf: Option<PublishedFile> = self.tx_get_row_opt(
+            &mut tx,
+            PublishedFile::find(j.owner, series, version, name),
+        )?;
 
         if let Some(pf) = pf {
             if pf.owner == j.owner && pf.job == job && pf.file == file {
@@ -1291,7 +1360,8 @@ impl Database {
             }
         }
 
-        let ic = self.tx_exec_insert(&mut tx,
+        let ic = self.tx_exec_insert(
+            &mut tx,
             PublishedFile {
                 owner: j.owner,
                 job,
@@ -1299,7 +1369,9 @@ impl Database {
                 series: series.to_string(),
                 version: version.to_string(),
                 name: name.to_string(),
-            }.insert())?;
+            }
+            .insert(),
+        )?;
         assert!(ic == 1);
 
         tx.commit()?;
@@ -1323,17 +1395,17 @@ impl Database {
             conflict!("job already complete, cannot add more files");
         }
 
-        let ic = self.tx_exec_insert(&mut tx,
-            JobFile {
-                job,
-                id,
-                size: DataSize(size),
-                time_archived: None,
-            }.insert())?;
+        let ic = self.tx_exec_insert(
+            &mut tx,
+            JobFile { job, id, size: DataSize(size), time_archived: None }
+                .insert(),
+        )?;
         assert_eq!(ic, 1);
 
-        let ic = self.tx_exec_insert(&mut tx,
-            JobOutput { job, path: path.to_string(), id }.insert())?;
+        let ic = self.tx_exec_insert(
+            &mut tx,
+            JobOutput { job, path: path.to_string(), id }.insert(),
+        )?;
         assert_eq!(ic, 1);
 
         tx.commit()?;
@@ -1361,21 +1433,22 @@ impl Database {
             conflict!("job not waiting, cannot add more inputs");
         }
 
-        let ic = self.tx_exec_insert(&mut tx,
-            JobFile {
-                job,
-                id,
-                size: DataSize(size),
-                time_archived: None,
-            }.insert())?;
+        let ic = self.tx_exec_insert(
+            &mut tx,
+            JobFile { job, id, size: DataSize(size), time_archived: None }
+                .insert(),
+        )?;
         assert_eq!(ic, 1);
 
-        let uc = self.tx_exec_update(&mut tx, Query::update()
-            .table(JobInputDef::Table)
-            .and_where(Expr::col(JobInputDef::Job).eq(job))
-            .and_where(Expr::col(JobInputDef::Name).eq(name))
-            .value(JobInputDef::Id, id)
-            .to_owned())?;
+        let uc = self.tx_exec_update(
+            &mut tx,
+            Query::update()
+                .table(JobInputDef::Table)
+                .and_where(Expr::col(JobInputDef::Job).eq(job))
+                .and_where(Expr::col(JobInputDef::Name).eq(name))
+                .value(JobInputDef::Id, id)
+                .to_owned(),
+        )?;
         assert_eq!(uc, 1);
 
         tx.commit()?;
@@ -1387,14 +1460,16 @@ impl Database {
          * Find the oldest completed job that has not yet been archived to long
          * term storage.
          */
-        self.get_row_opt(Query::select()
-            .from(JobDef::Table)
-            .columns(Job::columns())
-            .order_by(JobDef::Id, Order::Asc)
-            .and_where(Expr::col(JobDef::Complete).eq(true))
-            .and_where(Expr::col(JobDef::TimeArchived).is_null())
-            .limit(1)
-            .to_owned())
+        self.get_row_opt(
+            Query::select()
+                .from(JobDef::Table)
+                .columns(Job::columns())
+                .order_by(JobDef::Id, Order::Asc)
+                .and_where(Expr::col(JobDef::Complete).eq(true))
+                .and_where(Expr::col(JobDef::TimeArchived).is_null())
+                .limit(1)
+                .to_owned(),
+        )
     }
 
     pub fn job_mark_archived(
@@ -1402,12 +1477,14 @@ impl Database {
         job: JobId,
         time: DateTime<Utc>,
     ) -> OResult<()> {
-        let uc = self.exec_update(Query::update()
-            .table(JobDef::Table)
-            .and_where(Expr::col(JobDef::Id).eq(job))
-            .and_where(Expr::col(JobDef::TimeArchived).is_null())
-            .value(JobDef::TimeArchived, IsoDate(time))
-            .to_owned())?;
+        let uc = self.exec_update(
+            Query::update()
+                .table(JobDef::Table)
+                .and_where(Expr::col(JobDef::Id).eq(job))
+                .and_where(Expr::col(JobDef::TimeArchived).is_null())
+                .value(JobDef::TimeArchived, IsoDate(time))
+                .to_owned(),
+        )?;
         assert_eq!(uc, 1);
 
         Ok(())
@@ -1418,21 +1495,21 @@ impl Database {
          * Find the most recently uploaded output stored as part of a job that
          * has been completed.
          */
-        self.get_row_opt(Query::select()
-            .from(JobDef::Table)
-            .inner_join(
-                JobFileDef::Table,
-                Expr::col((JobDef::Table, JobDef::Id))
-                .eq(
-                    Expr::col((JobFileDef::Table, JobFileDef::Job))
-                ))
-            .columns(JobFile::columns())
-            .order_by(JobFileDef::Id, Order::Asc)
-
-            .and_where(Expr::col(JobDef::Complete).eq(true))
-            .and_where(Expr::col(JobFileDef::TimeArchived).is_null())
-            .limit(1)
-            .to_owned())
+        self.get_row_opt(
+            Query::select()
+                .from(JobDef::Table)
+                .inner_join(
+                    JobFileDef::Table,
+                    Expr::col((JobDef::Table, JobDef::Id))
+                        .eq(Expr::col((JobFileDef::Table, JobFileDef::Job))),
+                )
+                .columns(JobFile::columns())
+                .order_by(JobFileDef::Id, Order::Asc)
+                .and_where(Expr::col(JobDef::Complete).eq(true))
+                .and_where(Expr::col(JobFileDef::TimeArchived).is_null())
+                .limit(1)
+                .to_owned(),
+        )
     }
 
     pub fn job_file_mark_archived(
@@ -1440,13 +1517,15 @@ impl Database {
         file: &JobFile,
         time: DateTime<Utc>,
     ) -> OResult<()> {
-        let uc = self.exec_update(Query::update()
-            .table(JobFileDef::Table)
-            .and_where(Expr::col(JobFileDef::Job).eq(file.job))
-            .and_where(Expr::col(JobFileDef::Id).eq(file.id))
-            .and_where(Expr::col(JobFileDef::TimeArchived).is_null())
-            .value(JobFileDef::TimeArchived, IsoDate(time))
-            .to_owned())?;
+        let uc = self.exec_update(
+            Query::update()
+                .table(JobFileDef::Table)
+                .and_where(Expr::col(JobFileDef::Job).eq(file.job))
+                .and_where(Expr::col(JobFileDef::Id).eq(file.id))
+                .and_where(Expr::col(JobFileDef::TimeArchived).is_null())
+                .value(JobFileDef::TimeArchived, IsoDate(time))
+                .to_owned(),
+        )?;
         assert_eq!(uc, 1);
 
         Ok(())
@@ -1553,12 +1632,15 @@ impl Database {
             &msg,
         )?;
 
-        let uc = self.tx_exec_update(&mut tx, Query::update()
-            .table(JobDef::Table)
-            .and_where(Expr::col(JobDef::Id).eq(j.id))
-            .and_where(Expr::col(JobDef::Waiting).eq(true))
-            .value(JobDef::Waiting, false)
-            .to_owned())?;
+        let uc = self.tx_exec_update(
+            &mut tx,
+            Query::update()
+                .table(JobDef::Table)
+                .and_where(Expr::col(JobDef::Id).eq(j.id))
+                .and_where(Expr::col(JobDef::Waiting).eq(true))
+                .value(JobDef::Waiting, false)
+                .to_owned(),
+        )?;
         assert_eq!(uc, 1);
 
         tx.commit()?;
@@ -1593,12 +1675,15 @@ impl Database {
             "job cancelled",
         )?;
 
-        let uc = self.tx_exec_update(&mut tx, Query::update()
-            .table(JobDef::Table)
-            .and_where(Expr::col(JobDef::Id).eq(j.id))
-            .and_where(Expr::col(JobDef::Complete).eq(false))
-            .value(JobDef::Cancelled, true)
-            .to_owned())?;
+        let uc = self.tx_exec_update(
+            &mut tx,
+            Query::update()
+                .table(JobDef::Table)
+                .and_where(Expr::col(JobDef::Id).eq(j.id))
+                .and_where(Expr::col(JobDef::Complete).eq(false))
+                .value(JobDef::Cancelled, true)
+                .to_owned(),
+        )?;
         assert_eq!(uc, 1);
 
         tx.commit()?;
@@ -1648,14 +1733,17 @@ impl Database {
                 &format!("task {} was incomplete, marked failed", t.seq),
             )?;
 
-            let uc = self.tx_exec_update(&mut tx, Query::update()
-                .table(TaskDef::Table)
-                .and_where(Expr::col(TaskDef::Job).eq(j.id))
-                .and_where(Expr::col(TaskDef::Seq).eq(t.seq))
-                .and_where(Expr::col(TaskDef::Complete).eq(false))
-                .value(TaskDef::Failed, true)
-                .value(TaskDef::Complete, true)
-                .to_owned())?;
+            let uc = self.tx_exec_update(
+                &mut tx,
+                Query::update()
+                    .table(TaskDef::Table)
+                    .and_where(Expr::col(TaskDef::Job).eq(j.id))
+                    .and_where(Expr::col(TaskDef::Seq).eq(t.seq))
+                    .and_where(Expr::col(TaskDef::Complete).eq(false))
+                    .value(TaskDef::Failed, true)
+                    .value(TaskDef::Complete, true)
+                    .to_owned(),
+            )?;
             assert_eq!(uc, 1);
         }
 
@@ -1680,13 +1768,16 @@ impl Database {
             false
         };
 
-        let uc = self.tx_exec_update(&mut tx, Query::update()
-            .table(JobDef::Table)
-            .and_where(Expr::col(JobDef::Id).eq(j.id))
-            .and_where(Expr::col(JobDef::Complete).eq(false))
-            .value(JobDef::Failed, failed)
-            .value(JobDef::Complete, true)
-            .to_owned())?;
+        let uc = self.tx_exec_update(
+            &mut tx,
+            Query::update()
+                .table(JobDef::Table)
+                .and_where(Expr::col(JobDef::Id).eq(j.id))
+                .and_where(Expr::col(JobDef::Complete).eq(false))
+                .value(JobDef::Failed, failed)
+                .value(JobDef::Complete, true)
+                .to_owned(),
+        )?;
         assert_eq!(uc, 1);
 
         self.i_job_time_record(&mut tx, j.id, "complete", Utc::now())?;
@@ -1702,11 +1793,11 @@ impl Database {
         name: &str,
         when: DateTime<Utc>,
     ) -> OResult<()> {
-        self.tx_exec_insert(tx, JobTime {
-            job,
-            name: name.to_string(),
-            time: IsoDate(when),
-        }.upsert())?;
+        self.tx_exec_insert(
+            tx,
+            JobTime { job, name: name.to_string(), time: IsoDate(when) }
+                .upsert(),
+        )?;
 
         Ok(())
     }
@@ -1718,13 +1809,17 @@ impl Database {
         from: &str,
         until: &str,
     ) -> OResult<Option<std::time::Duration>> {
-        let from = if let Some(from) = self.tx_get_row_opt::<JobTime>(tx, JobTime::find(job, from))? {
+        let from = if let Some(from) =
+            self.tx_get_row_opt::<JobTime>(tx, JobTime::find(job, from))?
+        {
             from
         } else {
             return Ok(None);
         };
 
-        let until = if let Some(until) = self.tx_get_row_opt::<JobTime>(tx, JobTime::find(job, until))? {
+        let until = if let Some(until) =
+            self.tx_get_row_opt::<JobTime>(tx, JobTime::find(job, until))?
+        {
             until
         } else {
             return Ok(None);
@@ -1742,20 +1837,26 @@ impl Database {
         &self,
         job: JobId,
     ) -> OResult<HashMap<String, DateTime<Utc>>> {
-        Ok(self.get_rows::<JobTime>(Query::select()
-            .from(JobTimeDef::Table)
-            .and_where(Expr::col(JobTimeDef::Job).eq(job))
-            .to_owned())?
+        Ok(self
+            .get_rows::<JobTime>(
+                Query::select()
+                    .from(JobTimeDef::Table)
+                    .and_where(Expr::col(JobTimeDef::Job).eq(job))
+                    .to_owned(),
+            )?
             .into_iter()
             .map(|jt| (jt.name, jt.time.0))
             .collect())
     }
 
     pub fn job_store(&self, job: JobId) -> OResult<HashMap<String, JobStore>> {
-        Ok(self.get_rows::<JobStore>(Query::select()
-            .from(JobStoreDef::Table)
-            .and_where(Expr::col(JobStoreDef::Job).eq(job))
-            .to_owned())?
+        Ok(self
+            .get_rows::<JobStore>(
+                Query::select()
+                    .from(JobStoreDef::Table)
+                    .and_where(Expr::col(JobStoreDef::Job).eq(job))
+                    .to_owned(),
+            )?
             .into_iter()
             .map(|js| (js.name.to_string(), js))
             .collect())
@@ -1803,8 +1904,8 @@ impl Database {
         /*
          * First, check to see if this value already exists in the store:
          */
-        let pre: Option<JobStore> = self.tx_get_row_opt(&mut tx,
-            JobStore::find(job, name))?;
+        let pre: Option<JobStore> =
+            self.tx_get_row_opt(&mut tx, JobStore::find(job, name))?;
 
         if let Some(pre) = pre {
             /*
@@ -1814,15 +1915,18 @@ impl Database {
              */
             let new_secret = if pre.secret { true } else { secret };
 
-            let uc = self.tx_exec_update(&mut tx, Query::update()
-                .table(JobStoreDef::Table)
-                .and_where(Expr::col(JobStoreDef::Job).eq(job))
-                .and_where(Expr::col(JobStoreDef::Name).eq(name))
-                .value(JobStoreDef::Value, value)
-                .value(JobStoreDef::Secret, new_secret)
-                .value(JobStoreDef::Source, source)
-                .value(JobStoreDef::TimeUpdate, IsoDate::now())
-                .to_owned())?;
+            let uc = self.tx_exec_update(
+                &mut tx,
+                Query::update()
+                    .table(JobStoreDef::Table)
+                    .and_where(Expr::col(JobStoreDef::Job).eq(job))
+                    .and_where(Expr::col(JobStoreDef::Name).eq(name))
+                    .value(JobStoreDef::Value, value)
+                    .value(JobStoreDef::Secret, new_secret)
+                    .value(JobStoreDef::Source, source)
+                    .value(JobStoreDef::TimeUpdate, IsoDate::now())
+                    .to_owned(),
+            )?;
             assert_eq!(uc, 1);
 
             tx.commit()?;
@@ -1834,16 +1938,20 @@ impl Database {
          * also need to make sure we do not allow values to be stored in
          * excess of the value count cap.
          */
-        let count = self.tx_get_count(&mut tx, Query::select()
-            .from(JobStoreDef::Table)
-            .expr(Expr::col(Asterisk).count())
-            .and_where(Expr::col(JobStoreDef::Job).eq(job))
-            .to_owned())?;
+        let count = self.tx_get_count(
+            &mut tx,
+            Query::select()
+                .from(JobStoreDef::Table)
+                .expr(Expr::col(Asterisk).count())
+                .and_where(Expr::col(JobStoreDef::Job).eq(job))
+                .to_owned(),
+        )?;
         if count >= max_val_count {
             conflict!("job {job} already has {count} store values");
         }
 
-        let ic = self.tx_exec_insert(&mut tx,
+        let ic = self.tx_exec_insert(
+            &mut tx,
             JobStore {
                 job,
                 name: name.to_string(),
@@ -1851,7 +1959,9 @@ impl Database {
                 secret,
                 source: source.to_string(),
                 time_update: IsoDate::now(),
-            }.insert())?;
+            }
+            .insert(),
+        )?;
         assert_eq!(ic, 1);
 
         tx.commit()?;
@@ -1879,14 +1989,17 @@ impl Database {
             return Ok(false);
         }
 
-        let uc = self.tx_exec_update(&mut tx, Query::update()
-            .table(TaskDef::Table)
-            .and_where(Expr::col(TaskDef::Job).eq(job))
-            .and_where(Expr::col(TaskDef::Seq).eq(seq))
-            .and_where(Expr::col(TaskDef::Complete).eq(false))
-            .value(TaskDef::Complete, true)
-            .value(TaskDef::Failed, failed)
-            .to_owned())?;
+        let uc = self.tx_exec_update(
+            &mut tx,
+            Query::update()
+                .table(TaskDef::Table)
+                .and_where(Expr::col(TaskDef::Job).eq(job))
+                .and_where(Expr::col(TaskDef::Seq).eq(seq))
+                .and_where(Expr::col(TaskDef::Complete).eq(false))
+                .value(TaskDef::Complete, true)
+                .value(TaskDef::Failed, failed)
+                .to_owned(),
+        )?;
         assert_eq!(uc, 1);
 
         tx.commit()?;
@@ -1904,13 +2017,18 @@ impl Database {
         time_remote: Option<DateTime<Utc>>,
         payload: &str,
     ) -> OResult<()> {
-        let max: Option<i32> = self.tx_get_row(tx, Query::select()
-            .from(JobEventDef::Table)
-            .and_where(Expr::col(JobEventDef::Job).eq(job))
-            .expr(Expr::col(JobEventDef::Seq).max())
-            .to_owned())?;
+        let max: Option<i32> = self.tx_get_row(
+            tx,
+            Query::select()
+                .from(JobEventDef::Table)
+                .and_where(Expr::col(JobEventDef::Job).eq(job))
+                .expr(Expr::col(JobEventDef::Seq).max())
+                .to_owned(),
+        )?;
 
-        let ic = self.tx_exec_insert(tx, JobEvent {
+        let ic = self.tx_exec_insert(
+            tx,
+            JobEvent {
                 job,
                 task: task.map(|n| n as i32),
                 seq: max.unwrap_or(0) + 1,
@@ -1918,79 +2036,77 @@ impl Database {
                 time: IsoDate(time),
                 time_remote: time_remote.map(IsoDate),
                 payload: payload.to_string(),
-            }.insert())?;
+            }
+            .insert(),
+        )?;
         assert_eq!(ic, 1);
 
         Ok(())
     }
 
     pub fn user_jobs(&self, owner: UserId) -> OResult<Vec<Job>> {
-        self.get_rows(Query::select()
-            .from(JobDef::Table)
-            .columns(Job::columns())
-            .and_where(Expr::col(JobDef::Owner).eq(owner))
-            .to_owned())
+        self.get_rows(
+            Query::select()
+                .from(JobDef::Table)
+                .columns(Job::columns())
+                .and_where(Expr::col(JobDef::Owner).eq(owner))
+                .to_owned(),
+        )
     }
 
     pub fn worker_job(&self, worker: WorkerId) -> OResult<Option<Job>> {
-        self.get_row_opt(Query::select()
-            .from(JobDef::Table)
-            .columns(Job::columns())
-            .and_where(Expr::col(JobDef::Worker).eq(worker))
-            .to_owned())
+        self.get_row_opt(
+            Query::select()
+                .from(JobDef::Table)
+                .columns(Job::columns())
+                .and_where(Expr::col(JobDef::Worker).eq(worker))
+                .to_owned(),
+        )
     }
 
     pub fn user(&self, id: UserId) -> OResult<Option<AuthUser>> {
         self.get_row_opt::<User>(
-        Query::select()
-            .from(UserDef::Table)
-            .columns(User::columns())
-            .and_where(Expr::col(UserDef::Id).eq(id))
-            .to_owned()
-
-            )?
-            .map(|user| Ok(AuthUser {
-                privileges: self.i_user_privileges(user.id)?,
-                user,
-            }))
+            Query::select()
+                .from(UserDef::Table)
+                .columns(User::columns())
+                .and_where(Expr::col(UserDef::Id).eq(id))
+                .to_owned(),
+        )?
+        .map(|user| {
+            Ok(AuthUser { privileges: self.i_user_privileges(user.id)?, user })
+        })
         .transpose()
     }
 
     pub fn user_by_name(&self, name: &str) -> OResult<Option<AuthUser>> {
         self.get_row_opt::<User>(
-        Query::select()
-            .from(UserDef::Table)
-            .columns(User::columns())
-            .and_where(Expr::col(UserDef::Name).eq(name))
-            .to_owned()
-            )?
-            .map(|user| Ok(AuthUser {
-                privileges: self.i_user_privileges(user.id)?,
-                user,
-            }))
+            Query::select()
+                .from(UserDef::Table)
+                .columns(User::columns())
+                .and_where(Expr::col(UserDef::Name).eq(name))
+                .to_owned(),
+        )?
+        .map(|user| {
+            Ok(AuthUser { privileges: self.i_user_privileges(user.id)?, user })
+        })
         .transpose()
     }
 
     pub fn users(&self) -> OResult<Vec<AuthUser>> {
-
         self.get_rows::<User>(
-        Query::select()
-            .from(UserDef::Table)
-            .columns(User::columns())
-            .to_owned()
-            )?
-            .into_iter()
-            .map(|user| Ok(AuthUser {
-                privileges: self.i_user_privileges(user.id)?,
-                user,
-            }))
-            .collect::<OResult<_>>()
+            Query::select()
+                .from(UserDef::Table)
+                .columns(User::columns())
+                .to_owned(),
+        )?
+        .into_iter()
+        .map(|user| {
+            Ok(AuthUser { privileges: self.i_user_privileges(user.id)?, user })
+        })
+        .collect::<OResult<_>>()
     }
 
-    fn q_user_privileges(
-        &self,
-        user: UserId,
-    ) -> SelectStatement {
+    fn q_user_privileges(&self, user: UserId) -> SelectStatement {
         Query::select()
             .from(UserPrivilegeDef::Table)
             .column(UserPrivilegeDef::Privilege)
@@ -1999,10 +2115,7 @@ impl Database {
             .to_owned()
     }
 
-    fn i_user_privileges(
-        &self,
-        user: UserId,
-    ) -> OResult<Vec<String>> {
+    fn i_user_privileges(&self, user: UserId) -> OResult<Vec<String>> {
         self.get_strings(self.q_user_privileges(user))
     }
 
@@ -2034,11 +2147,11 @@ impl Database {
          */
         let u: User = self.tx_get_row(&mut tx, User::find(u))?;
 
-        let ic = self.tx_exec_insert(&mut tx, 
-            UserPrivilege {
-                user: u.id,
-                privilege: privilege.to_string(),
-            }.upsert())?;
+        let ic = self.tx_exec_insert(
+            &mut tx,
+            UserPrivilege { user: u.id, privilege: privilege.to_string() }
+                .upsert(),
+        )?;
         assert!(ic == 0 || ic == 1);
 
         tx.commit()?;
@@ -2061,11 +2174,14 @@ impl Database {
          */
         let u: User = self.tx_get_row(&mut tx, User::find(u))?;
 
-        let dc = self.tx_exec_delete(&mut tx, Query::delete()
-            .from_table(UserPrivilegeDef::Table)
-            .and_where(Expr::col(UserPrivilegeDef::User).eq(u.id))
-            .and_where(Expr::col(UserPrivilegeDef::Privilege).eq(privilege))
-            .to_owned())?;
+        let dc = self.tx_exec_delete(
+            &mut tx,
+            Query::delete()
+                .from_table(UserPrivilegeDef::Table)
+                .and_where(Expr::col(UserPrivilegeDef::User).eq(u.id))
+                .and_where(Expr::col(UserPrivilegeDef::Privilege).eq(privilege))
+                .to_owned(),
+        )?;
         assert!(dc == 0 || dc == 1);
 
         tx.commit()?;
@@ -2123,36 +2239,39 @@ impl Database {
         )?;
 
         let user = if let Some(user) = self.get_row_opt::<User>(
-        Query::select()
-            .from(UserDef::Table)
-            .columns(User::columns())
-            .and_where(Expr::col(UserDef::Name).eq(name))
-            .to_owned()
-            )? {
+            Query::select()
+                .from(UserDef::Table)
+                .columns(User::columns())
+                .and_where(Expr::col(UserDef::Name).eq(name))
+                .to_owned(),
+        )? {
             user
         } else {
-        /*
-         * The user does not exist already, so a new one must be
-         * created:
-         */
-        self.i_user_create(name, &mut tx)?
+            /*
+             * The user does not exist already, so a new one must be
+             * created:
+             */
+            self.i_user_create(name, &mut tx)?
         };
 
-         let au = AuthUser {
-             privileges: self.tx_get_strings(&mut tx, self.q_user_privileges(user.id))?,
-             user,
-         };
+        let au = AuthUser {
+            privileges: self
+                .tx_get_strings(&mut tx, self.q_user_privileges(user.id))?,
+            user,
+        };
 
-         tx.commit()?;
-         Ok(au)
+        tx.commit()?;
+        Ok(au)
     }
 
     pub fn user_auth(&self, token: &str) -> OResult<AuthUser> {
-        let mut users: Vec<User> =  self.get_rows::<User>(Query::select()
-            .from(UserDef::Table)
-            .columns(User::columns())
-            .and_where(Expr::col(UserDef::Token).eq(token))
-            .to_owned())?;
+        let mut users: Vec<User> = self.get_rows::<User>(
+            Query::select()
+                .from(UserDef::Table)
+                .columns(User::columns())
+                .and_where(Expr::col(UserDef::Token).eq(token))
+                .to_owned(),
+        )?;
 
         match (users.pop(), users.pop()) {
             (None, _) => conflict!("auth failure"),
@@ -2219,11 +2338,13 @@ impl Database {
             conflict!("auth failure");
         }
 
-        let mut rows = self.get_rows::<Factory>(Query::select()
-            .from(FactoryDef::Table)
-            .columns(Factory::columns())
-            .and_where(Expr::col(FactoryDef::Token).eq(token))
-            .to_owned())?;
+        let mut rows = self.get_rows::<Factory>(
+            Query::select()
+                .from(FactoryDef::Table)
+                .columns(Factory::columns())
+                .and_where(Expr::col(FactoryDef::Token).eq(token))
+                .to_owned(),
+        )?;
 
         match (rows.pop(), rows.pop()) {
             (None, _) => conflict!("auth failure"),
@@ -2238,18 +2359,21 @@ impl Database {
     pub fn factory_ping(&self, id: FactoryId) -> OResult<bool> {
         Ok(self.exec_update(
             Query::update()
-            .table(FactoryDef::Table)
-            .and_where(Expr::col(FactoryDef::Id).eq(id))
-            .value(FactoryDef::Lastping, IsoDate::now())
-            .to_owned())? > 0 )
+                .table(FactoryDef::Table)
+                .and_where(Expr::col(FactoryDef::Id).eq(id))
+                .value(FactoryDef::Lastping, IsoDate::now())
+                .to_owned(),
+        )? > 0)
     }
 
     pub fn targets(&self) -> OResult<Vec<Target>> {
-        self.get_rows(Query::select()
-            .from(TargetDef::Table)
-            .columns(Target::columns())
-            .order_by(TargetDef::Id, Order::Asc)
-            .to_owned())
+        self.get_rows(
+            Query::select()
+                .from(TargetDef::Table)
+                .columns(Target::columns())
+                .order_by(TargetDef::Id, Order::Asc)
+                .to_owned(),
+        )
     }
 
     pub fn target(&self, id: TargetId) -> OResult<Target> {
@@ -2304,15 +2428,17 @@ impl Database {
             count += 1;
 
             if let Some(redirect) = &target.redirect {
-                target = if let Some(target) = self.get_row_opt(Target::find(*redirect))?  {
-                     target
-                 } else {
-                     return Ok(None);
-                 };
-             } else {
-                 return Ok(Some(target));
-             }
-         }
+                target = if let Some(target) =
+                    self.get_row_opt(Target::find(*redirect))?
+                {
+                    target
+                } else {
+                    return Ok(None);
+                };
+            } else {
+                return Ok(Some(target));
+            }
+        }
     }
 
     pub fn target_require(
@@ -2320,11 +2446,13 @@ impl Database {
         id: TargetId,
         privilege: Option<&str>,
     ) -> OResult<()> {
-        let uc = self.exec_update(Query::update()
-            .table(TargetDef::Table)
-            .and_where(Expr::col(TargetDef::Id).eq(id))
-            .value(TargetDef::Privilege, privilege)
-            .to_owned())?;
+        let uc = self.exec_update(
+            Query::update()
+                .table(TargetDef::Table)
+                .and_where(Expr::col(TargetDef::Id).eq(id))
+                .value(TargetDef::Privilege, privilege)
+                .to_owned(),
+        )?;
         assert!(uc == 1);
 
         Ok(())
@@ -2335,11 +2463,13 @@ impl Database {
         id: TargetId,
         redirect: Option<TargetId>,
     ) -> OResult<()> {
-        let uc = self.exec_update(Query::update()
-            .table(TargetDef::Table)
-            .and_where(Expr::col(TargetDef::Id).eq(id))
-            .value(TargetDef::Redirect, redirect)
-            .to_owned())?;
+        let uc = self.exec_update(
+            Query::update()
+                .table(TargetDef::Table)
+                .and_where(Expr::col(TargetDef::Id).eq(id))
+                .value(TargetDef::Redirect, redirect)
+                .to_owned(),
+        )?;
         assert!(uc == 1);
 
         Ok(())
@@ -2390,7 +2520,7 @@ impl Database {
          * Then, make sure a target with the new name does not yet
          * exist.
          */
-        let nt: Option<Target> = 
+        let nt: Option<Target> =
             self.tx_get_row_opt(&mut tx, Target::find_by_name(new_name))?;
         if let Some(nt) = nt {
             conflict!(
@@ -2403,12 +2533,15 @@ impl Database {
         /*
          * Rename the target:
          */
-        let uc = self.tx_exec_update(&mut tx, Query::update()
-            .table(TargetDef::Table)
-            .and_where(Expr::col(TargetDef::Id).eq(id))
-            .and_where(Expr::col(TargetDef::Name).eq(&t.name))
-            .value(TargetDef::Name, new_name)
-            .to_owned())?;
+        let uc = self.tx_exec_update(
+            &mut tx,
+            Query::update()
+                .table(TargetDef::Table)
+                .and_where(Expr::col(TargetDef::Id).eq(id))
+                .and_where(Expr::col(TargetDef::Name).eq(&t.name))
+                .value(TargetDef::Name, new_name)
+                .to_owned(),
+        )?;
         assert_eq!(uc, 1);
 
         /*
