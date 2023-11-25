@@ -2,8 +2,6 @@
  * Copyright 2023 Oxide Computer Company
  */
 
-#![allow(unused_imports)] /* XXX */
-
 #[macro_use]
 extern crate diesel;
 

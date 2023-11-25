@@ -6,16 +6,15 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::Result;
 use buildomat_common::*;
 use buildomat_database::sqlite::rusqlite;
 use buildomat_types::*;
 use chrono::prelude::*;
 use rusqlite::Transaction;
-use rusty_ulid::Ulid;
 use sea_query::{
-    Asterisk, Cond, DeleteStatement, Expr, InsertStatement, OnConflict, Order,
-    Query, SelectStatement, SqliteQueryBuilder, UpdateStatement,
+    Asterisk, Cond, DeleteStatement, Expr, InsertStatement, Order, Query,
+    SelectStatement, SqliteQueryBuilder, UpdateStatement,
 };
 use sea_query_rusqlite::{RusqliteBinder, RusqliteValues};
 #[allow(unused_imports)]
@@ -26,9 +25,7 @@ mod tables;
 
 mod types {
     use buildomat_database::sqlite::rusqlite;
-    use buildomat_database::{
-        sqlite_integer_new_type, sqlite_json_new_type, sqlite_ulid_new_type,
-    };
+    use buildomat_database::{sqlite_integer_new_type, sqlite_ulid_new_type};
     use chrono::prelude::*;
 
     sqlite_integer_new_type!(UnixUid, u32, Unsigned);
@@ -106,7 +103,7 @@ pub struct CreateOutputRule {
     pub require_match: bool,
 }
 
-pub struct JobEventToAppend {
+pub struct CreateJobEvent {
     pub task: Option<u32>,
     pub stream: String,
     pub time: DateTime<Utc>,
@@ -1370,7 +1367,7 @@ impl Database {
     pub fn job_append_events(
         &self,
         job: JobId,
-        events: impl Iterator<Item = JobEventToAppend>,
+        events: impl Iterator<Item = CreateJobEvent>,
     ) -> OResult<()> {
         let c = &mut self.1.lock().unwrap().conn;
         let mut tx = c.transaction_with_behavior(

@@ -326,7 +326,7 @@ pub(crate) async fn worker_job_append(
 
     c.db.job_append_events(
         j.id,
-        a.into_iter().map(|a| db::JobEventToAppend {
+        a.into_iter().map(|a| db::CreateJobEvent {
             task: a.task,
             stream: a.stream,
             time: Utc::now(),

@@ -5,10 +5,10 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use chrono::prelude::*;
 pub use jmclib::sqlite::rusqlite;
-use sea_query::{ArrayType, ColumnType, Nullable, Value};
+use sea_query::{Nullable, Value};
 use slog::{info, Logger};
 
 // #[macro_export]
@@ -78,31 +78,6 @@ macro_rules! sqlite_json_new_type {
             }
         }
 
-        // impl ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite> for $name
-        // where
-        //     String: ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite>,
-        // {
-        //     fn to_sql(
-        //         &self,
-        //         out: &mut diesel::serialize::Output<diesel::sqlite::Sqlite>,
-        //     ) -> diesel::serialize::Result {
-        //         out.set_value(serde_json::to_string(&self.0)?);
-        //         Ok(diesel::serialize::IsNull::No)
-        //     }
-        // }
-
-        // impl<DB> FromSql<diesel::sql_types::Text, DB> for $name
-        // where
-        //     DB: diesel::backend::Backend,
-        //     String: FromSql<diesel::sql_types::Text, DB>,
-        // {
-        //     fn from_sql(
-        //         bytes: diesel::backend::RawValue<DB>,
-        //     ) -> diesel::deserialize::Result<Self> {
-        //         Ok($name(serde_json::from_str(&String::from_sql(bytes)?)?))
-        //     }
-        // }
-
         impl From<$name> for $mytype {
             fn from(t: $name) -> Self {
                 t.0
@@ -159,34 +134,6 @@ macro_rules! sqlite_integer_new_type {
                 }
             }
         }
-
-        // impl ToSql<diesel::sql_types::$sqltype, diesel::sqlite::Sqlite>
-        //     for $name
-        // where
-        //     $intype: ToSql<diesel::sql_types::$sqltype, diesel::sqlite::Sqlite>,
-        // {
-        //     fn to_sql(
-        //         &self,
-        //         out: &mut diesel::serialize::Output<diesel::sqlite::Sqlite>,
-        //     ) -> diesel::serialize::Result {
-        //         assert!(self.0 <= (<$intype>::MAX as $mytype));
-        //         out.set_value((self.0 as $intype));
-        //         Ok(diesel::serialize::IsNull::No)
-        //     }
-        // }
-
-        // impl<DB> FromSql<diesel::sql_types::$sqltype, DB> for $name
-        // where
-        //     DB: diesel::backend::Backend,
-        //     $intype: FromSql<diesel::sql_types::$sqltype, DB>,
-        // {
-        //     fn from_sql(
-        //         bytes: diesel::backend::RawValue<DB>,
-        //     ) -> diesel::deserialize::Result<Self> {
-        //         let n = <$intype>::from_sql(bytes)? as $mytype;
-        //         Ok($name(n))
-        //     }
-        // }
 
         impl std::str::FromStr for $name {
             type Err = std::num::ParseIntError;
@@ -350,74 +297,6 @@ impl rusqlite::types::FromSql for IsoDate {
         }
     }
 }
-
-// SIGH //
-// SIGH // impl ValueType for IsoDate {
-// SIGH //     fn try_from(v: Value) -> std::result::Result<Self, ValueTypeErr> {
-// SIGH //         let Value::String(Some(s)) = v else {
-// SIGH //             return Err(ValueTypeErr);
-// SIGH //         };
-// SIGH //
-// SIGH //         Ok(IsoDate(DateTime::from(match DateTime::parse_from_rfc3339(&s) {
-// SIGH //             Ok(fo) => fo,
-// SIGH //             Err(e1) => {
-// SIGH //                 /*
-// SIGH //                  * Try an older date format from before we switched to diesel:
-// SIGH //                  */
-// SIGH //                 match DateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S%.9f%z") {
-// SIGH //                     Ok(fo) => fo,
-// SIGH //                     Err(_) => {
-// SIGH //                         return Err(ValueTypeErr);
-// SIGH //                     }
-// SIGH //                 }
-// SIGH //             }
-// SIGH //         })))
-// SIGH //     }
-// SIGH //
-// SIGH //     fn type_name() -> String {
-// SIGH //         "IsoDate".to_string()
-// SIGH //     }
-// SIGH //
-// SIGH //     fn array_type() -> sea_query::ArrayType {
-// SIGH //         ArrayType::String
-// SIGH //     }
-// SIGH //
-// SIGH //     fn column_type() -> sea_query::ColumnType {
-// SIGH //         ColumnType::String(None)
-// SIGH //     }
-// SIGH // }
-
-// impl<DB> FromSql<diesel::sql_types::Text, DB> for IsoDate
-// where
-//     DB: diesel::backend::Backend,
-//     String: FromSql<diesel::sql_types::Text, DB>,
-// {
-//     fn from_sql(
-//         bytes: diesel::backend::RawValue<DB>,
-//     ) -> diesel::deserialize::Result<Self> {
-//         let s = String::from_sql(bytes)?;
-//         let fo = match DateTime::parse_from_rfc3339(&s) {
-//             Ok(fo) => fo,
-//             Err(e1) => {
-//                 /*
-//                  * Try an older date format from before we switched to diesel:
-//                  */
-//                 match DateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S%.9f%z") {
-//                     Ok(fo) => fo,
-//                     Err(_) => {
-//                         return Err(
-//                             diesel::result::Error::DeserializationError(
-//                                 e1.into(),
-//                             )
-//                             .into(),
-//                         )
-//                     }
-//                 }
-//             }
-//         };
-//         Ok(IsoDate(DateTime::from(fo)))
-//     }
-// }
 
 impl From<IsoDate> for DateTime<Utc> {
     fn from(val: IsoDate) -> Self {
