@@ -19,9 +19,9 @@ use buildomat_database::{
     sqlite_integer_new_type, sqlite_json_new_type, sqlite_ulid_new_type,
 };
 
-sqlite_integer_new_type!(UnixUid, u32, i32);
-sqlite_integer_new_type!(UnixGid, u32, i32);
-sqlite_integer_new_type!(DataSize, u64, i64);
+sqlite_integer_new_type!(UnixUid, u32, Unsigned);
+sqlite_integer_new_type!(UnixGid, u32, Unsigned);
+sqlite_integer_new_type!(DataSize, u64, BigUnsigned);
 
 sqlite_ulid_new_type!(UserId);
 sqlite_ulid_new_type!(JobId);
@@ -73,8 +73,12 @@ impl FromRow for User {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<User> {
-        todo!()
-        //let s = UserDef::Token.as_str();
+        Ok(User {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            token: row.get(2)?,
+            time_create: row.get(3)?,
+        })
     }
 }
 
@@ -158,7 +162,7 @@ pub enum JobTagDef {
 #[enum_def(prefix = "", suffix = "Def")]
 pub struct Task {
     pub job: JobId,
-    pub seq: i32,
+    pub seq: u32,
     pub name: String,
     pub script: String,
     pub env_clear: bool,
@@ -193,8 +197,19 @@ impl FromRow for Task {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<Task> {
-        todo!()
-        //let s = TaskDef::Token.as_str();
+        Ok(Task {
+            job: row.get(0)?,
+            seq: row.get(1)?,
+            name: row.get(2)?,
+            script: row.get(3)?,
+            env_clear: row.get(4)?,
+            env: row.get(5)?,
+            user_id: row.get(6)?,
+            group_id: row.get(7)?,
+            workdir: row.get(8)?,
+            complete: row.get(9)?,
+            failed: row.get(10)?,
+        })
     }
 }
 
@@ -202,7 +217,7 @@ impl Task {
     pub fn from_create(ct: &super::CreateTask, job: JobId, seq: usize) -> Task {
         Task {
             job,
-            seq: seq as i32,
+            seq: seq.try_into().unwrap(),
             name: ct.name.to_string(),
             script: ct.script.to_string(),
             env_clear: ct.env_clear,
@@ -251,8 +266,8 @@ impl Task {
 #[enum_def(prefix = "", suffix = "Def")]
 pub struct JobEvent {
     pub job: JobId,
-    pub task: Option<i32>,
-    pub seq: i32,
+    pub task: Option<u32>,
+    pub seq: u32,
     pub stream: String,
     /**
      * The time at which the core API server received or generated this event.
@@ -290,8 +305,15 @@ impl FromRow for JobEvent {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<JobEvent> {
-        todo!()
-        //let s = TaskDef::Token.as_str();
+        Ok(JobEvent {
+            job: row.get(0)?,
+            task: row.get(1)?,
+            seq: row.get(2)?,
+            stream: row.get(3)?,
+            time: row.get(4)?,
+            payload: row.get(5)?,
+            time_remote: row.get(6)?,
+        })
     }
 }
 
@@ -323,7 +345,7 @@ impl JobEvent {
 #[enum_def(prefix = "", suffix = "Def")]
 pub struct JobOutputRule {
     pub job: JobId,
-    pub seq: i32,
+    pub seq: u32,
     pub rule: String,
     pub ignore: bool,
     pub size_change_ok: bool,
@@ -351,8 +373,14 @@ impl FromRow for JobOutputRule {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<JobOutputRule> {
-        todo!()
-        //let s = JobOutputRuleDef::Token.as_str();
+        Ok(JobOutputRule {
+            job: row.get(0)?,
+            seq: row.get(1)?,
+            rule: row.get(2)?,
+            ignore: row.get(3)?,
+            size_change_ok: row.get(4)?,
+            require_match: row.get(5)?,
+        })
     }
 }
 
@@ -412,8 +440,7 @@ impl FromRow for JobOutput {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<JobOutput> {
-        todo!()
-        //let s = JobOutputDef::Token.as_str();
+        Ok(JobOutput { job: row.get(0)?, path: row.get(1)?, id: row.get(2)? })
     }
 }
 
@@ -477,8 +504,12 @@ impl FromRow for JobInput {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<JobInput> {
-        todo!()
-        //let s = JobInputDef::Token.as_str();
+        Ok(JobInput {
+            job: row.get(0)?,
+            name: row.get(1)?,
+            id: row.get(2)?,
+            other_job: row.get(3)?,
+        })
     }
 }
 
@@ -540,8 +571,12 @@ impl FromRow for JobFile {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<JobFile> {
-        todo!()
-        //let s = JobFileDef::Token.as_str();
+        Ok(JobFile {
+            job: row.get(0)?,
+            id: row.get(1)?,
+            size: row.get(2)?,
+            time_archived: row.get(3)?,
+        })
     }
 }
 
@@ -603,8 +638,14 @@ impl FromRow for PublishedFile {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<PublishedFile> {
-        todo!()
-        //let s = PublishedFileDef::Token.as_str();
+        Ok(PublishedFile {
+            owner: row.get(0)?,
+            series: row.get(1)?,
+            version: row.get(2)?,
+            name: row.get(3)?,
+            job: row.get(4)?,
+            file: row.get(5)?,
+        })
     }
 }
 
@@ -685,8 +726,19 @@ impl FromRow for Worker {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<Worker> {
-        todo!()
-        //let s = WorkerDef::Token.as_str();
+        Ok(Worker {
+            id: row.get(0)?,
+            bootstrap: row.get(1)?,
+            token: row.get(2)?,
+            factory_private: row.get(3)?,
+            deleted: row.get(4)?,
+            recycle: row.get(5)?,
+            lastping: row.get(6)?,
+            factory: row.get(7)?,
+            target: row.get(8)?,
+            wait_for_flush: row.get(9)?,
+            factory_metadata: row.get(10)?,
+        })
     }
 }
 
@@ -818,8 +870,19 @@ impl FromRow for Job {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<Job> {
-        todo!()
-        //let s = WorkerDef::Token.as_str();
+        Ok(Job {
+            id: row.get(0)?,
+            owner: row.get(1)?,
+            name: row.get(2)?,
+            target: row.get(3)?,
+            complete: row.get(4)?,
+            failed: row.get(5)?,
+            worker: row.get(6)?,
+            waiting: row.get(7)?,
+            target_id: row.get(8)?,
+            cancelled: row.get(9)?,
+            time_archived: row.get(10)?,
+        })
     }
 }
 
@@ -903,8 +966,12 @@ impl FromRow for Factory {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<Factory> {
-        todo!()
-        //let s = WorkerDef::Token.as_str();
+        Ok(Factory {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            token: row.get(2)?,
+            lastping: row.get(3)?,
+        })
     }
 }
 
@@ -963,8 +1030,13 @@ impl FromRow for Target {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<Target> {
-        todo!()
-        //let s = WorkerDef::Token.as_str();
+        Ok(Target {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            desc: row.get(2)?,
+            redirect: row.get(3)?,
+            privilege: row.get(4)?,
+        })
     }
 }
 
@@ -1036,8 +1108,15 @@ impl FromRow for JobDepend {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<JobDepend> {
-        todo!()
-        //let s = WorkerDef::Token.as_str();
+        Ok(JobDepend {
+            job: row.get(0)?,
+            name: row.get(1)?,
+            prior_job: row.get(2)?,
+            copy_outputs: row.get(3)?,
+            on_failed: row.get(4)?,
+            on_completed: row.get(5)?,
+            satisfied: row.get(6)?,
+        })
     }
 }
 
@@ -1104,8 +1183,7 @@ impl FromRow for JobTime {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<JobTime> {
-        todo!()
-        //let s = WorkerDef::Token.as_str();
+        Ok(JobTime { job: row.get(0)?, name: row.get(1)?, time: row.get(2)? })
     }
 }
 
@@ -1167,8 +1245,14 @@ impl FromRow for JobStore {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<JobStore> {
-        todo!()
-        //let s = WorkerDef::Token.as_str();
+        Ok(JobStore {
+            job: row.get(0)?,
+            name: row.get(1)?,
+            value: row.get(2)?,
+            secret: row.get(3)?,
+            source: row.get(4)?,
+            time_update: row.get(5)?,
+        })
     }
 }
 
@@ -1202,12 +1286,12 @@ impl JobStore {
  * This implementation allows us to use the existing tx_get_row() routine to
  * fish out a MAX() value for the task "seq" column.
  */
-impl FromRow for Option<i32> {
+impl FromRow for Option<u32> {
     fn columns() -> Vec<ColumnRef> {
         unimplemented!()
     }
 
-    fn from_row(row: &Row) -> rusqlite::Result<Option<i32>> {
+    fn from_row(row: &Row) -> rusqlite::Result<Option<u32>> {
         Ok(row.get(0)?)
     }
 }
@@ -1239,7 +1323,29 @@ impl FromRow for (JobInput, Option<JobFile>) {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<Self> {
-        todo!()
+        let ji = JobInput {
+            job: row.get(0)?,
+            name: row.get(1)?,
+            id: row.get(2)?,
+            other_job: row.get(3)?,
+        };
+
+        /*
+         * The first column of job_file is the job ID, which will be NULL if
+         * this record did not appear in the LEFT OUTER JOIN.
+         */
+        let jf = if let Some(job) = row.get::<_, Option<JobId>>(4)? {
+            Some(JobFile {
+                job,
+                id: row.get(5)?,
+                size: row.get(6)?,
+                time_archived: row.get(7)?,
+            })
+        } else {
+            None
+        };
+
+        Ok((ji, jf))
     }
 }
 
@@ -1252,6 +1358,14 @@ impl FromRow for (JobOutput, JobFile) {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<Self> {
-        todo!()
+        Ok((
+            JobOutput { job: row.get(0)?, path: row.get(1)?, id: row.get(2)? },
+            JobFile {
+                job: row.get(3)?,
+                id: row.get(4)?,
+                size: row.get(5)?,
+                time_archived: row.get(6)?,
+            },
+        ))
     }
 }

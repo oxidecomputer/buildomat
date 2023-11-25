@@ -1827,7 +1827,7 @@ impl Database {
         time_remote: Option<DateTime<Utc>>,
         payload: &str,
     ) -> OResult<()> {
-        let max: Option<i32> = self.tx_get_row(
+        let max: Option<u32> = self.tx_get_row(
             tx,
             Query::select()
                 .from(JobEventDef::Table)
@@ -1840,7 +1840,7 @@ impl Database {
             tx,
             JobEvent {
                 job,
-                task: task.map(|n| n as i32),
+                task,
                 seq: max.unwrap_or(0) + 1,
                 stream: stream.to_string(),
                 time: IsoDate(time),

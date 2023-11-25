@@ -49,13 +49,32 @@ macro_rules! sqlite_json_new_type {
 
         impl From<$name> for sea_query::Value {
             fn from(value: $name) -> sea_query::Value {
-                todo!()
+                sea_query::Value::String(Some(Box::new(
+                    serde_json::to_string(&value.0).unwrap(),
+                )))
             }
         }
 
         impl sea_query::Nullable for $name {
             fn null() -> Value {
-                Value::String(None)
+                sea_query::Value::String(None)
+            }
+        }
+
+        impl rusqlite::types::FromSql for $name {
+            fn column_result(
+                v: rusqlite::types::ValueRef<'_>,
+            ) -> rusqlite::types::FromSqlResult<Self> {
+                if let rusqlite::types::ValueRef::Text(t) = v {
+                    match serde_json::from_slice(t) {
+                        Ok(o) => Ok(Self(o)),
+                        Err(e) => Err(rusqlite::types::FromSqlError::Other(
+                            format!("invalid JSON: {e}").into(),
+                        )),
+                    }
+                } else {
+                    Err(rusqlite::types::FromSqlError::InvalidType)
+                }
             }
         }
 
@@ -108,19 +127,36 @@ macro_rules! sqlite_json_new_type {
 
 #[macro_export]
 macro_rules! sqlite_integer_new_type {
-    ($name:ident, $mytype:ty, $intype:ty) => {
+    ($name:ident, $mytype:ty, $intype:ident) => {
         #[derive(Clone, Copy, Debug, PartialEq, Hash, Eq)]
         pub struct $name(pub $mytype);
 
         impl From<$name> for sea_query::Value {
             fn from(value: $name) -> sea_query::Value {
-                todo!()
+                sea_query::Value::$intype(Some(value.0))
             }
         }
 
         impl sea_query::Nullable for $name {
             fn null() -> Value {
-                todo!() /* Value::String(None) */
+                sea_query::Value::$intype(None)
+            }
+        }
+
+        impl rusqlite::types::FromSql for $name {
+            fn column_result(
+                v: rusqlite::types::ValueRef<'_>,
+            ) -> rusqlite::types::FromSqlResult<Self> {
+                if let rusqlite::types::ValueRef::Integer(i) = v {
+                    match i.try_into() {
+                        Ok(n) => Ok(Self(n)),
+                        Err(e) => Err(rusqlite::types::FromSqlError::Other(
+                            format!("invalid number: {i}: {e}").into(),
+                        )),
+                    }
+                } else {
+                    Err(rusqlite::types::FromSqlError::InvalidType)
+                }
             }
         }
 
@@ -182,42 +218,40 @@ macro_rules! sqlite_ulid_new_type {
 
         impl From<$name> for sea_query::Value {
             fn from(value: $name) -> sea_query::Value {
-                todo!()
-                //sea_query::Value::from(($name).0.to_string())
+                sea_query::Value::String(Some(Box::new(value.0.to_string())))
             }
         }
 
         impl sea_query::Nullable for $name {
             fn null() -> Value {
-                Value::String(None)
+                sea_query::Value::String(None)
             }
         }
 
-        // impl ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite> for $name
-        // where
-        //     String: ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite>,
-        // {
-        //     fn to_sql(
-        //         &self,
-        //         out: &mut diesel::serialize::Output<diesel::sqlite::Sqlite>,
-        //     ) -> diesel::serialize::Result {
-        //         out.set_value(self.0.to_string());
-        //         Ok(diesel::serialize::IsNull::No)
-        //     }
-        // }
-
-        // impl<DB> FromSql<diesel::sql_types::Text, DB> for $name
-        // where
-        //     DB: diesel::backend::Backend,
-        //     String: FromSql<diesel::sql_types::Text, DB>,
-        // {
-        //     fn from_sql(
-        //         bytes: diesel::backend::RawValue<DB>,
-        //     ) -> diesel::deserialize::Result<Self> {
-        //         let s = String::from_sql(bytes)?;
-        //         Ok($name(rusty_ulid::Ulid::from_str(&s)?))
-        //     }
-        // }
+        impl rusqlite::types::FromSql for $name {
+            fn column_result(
+                v: rusqlite::types::ValueRef<'_>,
+            ) -> rusqlite::types::FromSqlResult<Self> {
+                if let rusqlite::types::ValueRef::Text(t) = v {
+                    if let Ok(s) = String::from_utf8(t.to_vec()) {
+                        match rusty_ulid::Ulid::from_str(&s) {
+                            Ok(id) => Ok($name(id)),
+                            Err(e) => {
+                                Err(rusqlite::types::FromSqlError::Other(
+                                    format!("invalid ULID: {e}").into(),
+                                ))
+                            }
+                        }
+                    } else {
+                        Err(rusqlite::types::FromSqlError::Other(
+                            "invalid UTF-8".into(),
+                        ))
+                    }
+                } else {
+                    Err(rusqlite::types::FromSqlError::InvalidType)
+                }
+            }
+        }
 
         impl std::fmt::Display for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -259,14 +293,6 @@ macro_rules! sqlite_ulid_new_type {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IsoDate(pub DateTime<Utc>);
 
-//impl Into<sea_query::SimpleExpr> for IsoDate {
-//    fn into(self) -> sea_query::SimpleExpr {
-//        sea_query::SimpleExpr::Value(sea_query::Value::String(Some(Box::new(
-//            self.0.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
-//        ))))
-//    }
-//}
-
 impl From<IsoDate> for Value {
     fn from(v: IsoDate) -> Self {
         Value::String(Some(Box::new(
@@ -278,6 +304,48 @@ impl From<IsoDate> for Value {
 impl Nullable for IsoDate {
     fn null() -> Value {
         Value::String(None)
+    }
+}
+
+impl rusqlite::types::FromSql for IsoDate {
+    fn column_result(
+        v: rusqlite::types::ValueRef<'_>,
+    ) -> rusqlite::types::FromSqlResult<Self> {
+        if let rusqlite::types::ValueRef::Text(t) = v {
+            if let Ok(s) = String::from_utf8(t.to_vec()) {
+                Ok(IsoDate(DateTime::from(
+                    match DateTime::parse_from_rfc3339(&s) {
+                        Ok(fo) => fo,
+                        Err(e1) => {
+                            /*
+                             * Try an older date format from before we switched
+                             * to diesel:
+                             */
+                            match DateTime::parse_from_str(
+                                &s,
+                                "%Y-%m-%d %H:%M:%S%.9f%z",
+                            ) {
+                                Ok(fo) => fo,
+                                Err(_) => {
+                                    return Err(
+                                        rusqlite::types::FromSqlError::Other(
+                                            format!("invalid date: {e1}")
+                                                .into(),
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                    },
+                )))
+            } else {
+                Err(rusqlite::types::FromSqlError::Other(
+                    "invalid UTF-8".into(),
+                ))
+            }
+        } else {
+            Err(rusqlite::types::FromSqlError::InvalidType)
+        }
     }
 }
 
