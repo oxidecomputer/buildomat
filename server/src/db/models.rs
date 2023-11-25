@@ -49,8 +49,6 @@ pub trait FromRow: Sized {
 }
 
 #[derive(Debug)]
-//#[diesel(table_name = user)]
-//#[diesel(primary_key(id))]
 #[enum_def(prefix = "", suffix = "Def")]
 pub struct User {
     pub id: UserId,
@@ -106,8 +104,6 @@ impl User {
 }
 
 #[derive(Debug)]
-//#[diesel(table_name = user_privilege)]
-//#[diesel(primary_key(user, privilege))]
 #[enum_def(prefix = "", suffix = "Def")]
 pub struct UserPrivilege {
     pub user: UserId,
@@ -158,8 +154,6 @@ pub enum JobTagDef {
 }
 
 #[derive(Debug)]
-//#[diesel(table_name = task)]
-//#[diesel(primary_key(job, seq))]
 #[enum_def(prefix = "", suffix = "Def")]
 pub struct Task {
     pub job: JobId,
@@ -262,8 +256,6 @@ impl Task {
 }
 
 #[derive(Debug, Clone)]
-//#[diesel(table_name = job_event)]
-//#[diesel(primary_key(job, seq))]
 #[enum_def(prefix = "", suffix = "Def")]
 pub struct JobEvent {
     pub job: JobId,
@@ -341,8 +333,6 @@ impl JobEvent {
 }
 
 #[derive(Debug)]
-//#[diesel(table_name = job_output_rule)]
-//#[diesel(primary_key(job, seq))]
 #[enum_def(prefix = "", suffix = "Def")]
 pub struct JobOutputRule {
     pub job: JobId,
@@ -418,8 +408,6 @@ impl JobOutputRule {
 }
 
 #[derive(Debug)]
-//#[diesel(table_name = job_output)]
-//#[diesel(primary_key(job, path))]
 #[enum_def(prefix = "", suffix = "Def")]
 pub struct JobOutput {
     pub job: JobId,
@@ -469,8 +457,6 @@ impl JobOutput {
 }
 
 #[derive(Debug)]
-//#[diesel(table_name = job_input)]
-//#[diesel(primary_key(job, name))]
 #[enum_def(prefix = "", suffix = "Def")]
 pub struct JobInput {
     pub job: JobId,
@@ -540,8 +526,6 @@ impl JobInput {
 }
 
 #[derive(Debug)]
-//#[diesel(table_name = job_file)]
-//#[diesel(primary_key(job, id))]
 #[enum_def(prefix = "", suffix = "Def")]
 pub struct JobFile {
     pub job: JobId,
@@ -606,8 +590,6 @@ impl JobFile {
 }
 
 #[derive(Debug)]
-//#[diesel(table_name = published_file)]
-//#[diesel(primary_key(owner, series, version, name))]
 #[enum_def(prefix = "", suffix = "Def")]
 pub struct PublishedFile {
     pub owner: UserId,
@@ -684,8 +666,6 @@ impl PublishedFile {
 }
 
 #[derive(Debug, Clone)]
-//#[diesel(table_name = worker)]
-//#[diesel(primary_key(id))]
 #[enum_def(prefix = "", suffix = "Def")]
 pub struct Worker {
     pub id: WorkerId,
@@ -822,8 +802,6 @@ impl Worker {
 }
 
 #[derive(Clone, Debug)]
-//#[diesel(table_name = job)]
-//#[diesel(primary_key(id))]
 #[enum_def(prefix = "", suffix = "Def")]
 pub struct Job {
     pub id: JobId,
@@ -939,8 +917,6 @@ impl Job {
 }
 
 #[derive(Debug, Clone)]
-//#[diesel(table_name = factory)]
-//#[diesel(primary_key(id))]
 #[enum_def(prefix = "", suffix = "Def")]
 pub struct Factory {
     pub id: FactoryId,
@@ -1001,8 +977,6 @@ impl Factory {
 }
 
 #[derive(Debug, Clone)]
-//#[diesel(table_name = target)]
-//#[diesel(primary_key(id))]
 #[enum_def(prefix = "", suffix = "Def")]
 pub struct Target {
     pub id: TargetId,
@@ -1075,8 +1049,6 @@ impl Target {
 }
 
 #[derive(Debug, Clone)]
-//#[diesel(table_name = job_depend)]
-//#[diesel(primary_key(job, name))]
 #[enum_def(prefix = "", suffix = "Def")]
 pub struct JobDepend {
     pub job: JobId,
@@ -1162,8 +1134,6 @@ impl JobDepend {
 }
 
 #[derive(Debug, Clone)]
-//#[diesel(table_name = job_time)]
-//#[diesel(primary_key(job, name))]
 #[enum_def(prefix = "", suffix = "Def")]
 pub struct JobTime {
     pub job: JobId,
@@ -1214,8 +1184,6 @@ impl JobTime {
 }
 
 #[derive(Debug, Clone)]
-//#[diesel(table_name = job_store)]
-//#[diesel(primary_key(job, name))]
 #[enum_def(prefix = "", suffix = "Def")]
 pub struct JobStore {
     pub job: JobId,
@@ -1313,7 +1281,7 @@ impl FromRow for usize {
 }
 
 /*
- * Joins are a bit of a mess, so produced some helper implementations for pairs
+ * Joins are a bit of a mess, so produce some helper implementations for pairs
  * of objects we need to return:
  */
 impl FromRow for (JobInput, Option<JobFile>) {
