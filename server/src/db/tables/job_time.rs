@@ -31,6 +31,15 @@ impl FromRow for JobTime {
 }
 
 impl JobTime {
+    pub fn find(job: JobId, name: &str) -> SelectStatement {
+        Query::select()
+            .from(JobTimeDef::Table)
+            .columns(JobTime::columns())
+            .and_where(Expr::col(JobTimeDef::Job).eq(job))
+            .and_where(Expr::col(JobTimeDef::Name).eq(name))
+            .to_owned()
+    }
+
     pub fn upsert(&self) -> InsertStatement {
         Query::insert()
             .into_table(JobTimeDef::Table)
@@ -41,15 +50,6 @@ impl JobTime {
                 self.time.into(),
             ])
             .on_conflict(OnConflict::new().do_nothing().to_owned())
-            .to_owned()
-    }
-
-    pub fn find(job: JobId, name: &str) -> SelectStatement {
-        Query::select()
-            .from(JobTimeDef::Table)
-            .columns(JobTime::columns())
-            .and_where(Expr::col(JobTimeDef::Job).eq(job))
-            .and_where(Expr::col(JobTimeDef::Name).eq(name))
             .to_owned()
     }
 }

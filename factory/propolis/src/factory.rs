@@ -1,27 +1,8 @@
-use std::{
-    collections::{BTreeSet, HashMap},
-    net::{IpAddr, Ipv6Addr},
-    os::fd::AsRawFd,
-    path::PathBuf,
-    str::FromStr,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::BTreeSet, str::FromStr, sync::Arc, time::Duration};
 
-use crate::{
-    db::types::*,
-    net::{dladm_create_vnic, dladm_delete_vnic, dladm_vnic_get, Vnic},
-    Central,
-};
-use anyhow::{anyhow, bail, Result};
-use buildomat_client::types::{
-    FactoryWhatsNext, FactoryWorkerAssociate, FactoryWorkerCreate,
-};
-use buildomat_common::OutputExt;
-use rusty_ulid::Ulid;
+use crate::{db::types::*, Central};
+use anyhow::Result;
 use slog::{debug, error, info, o, warn, Logger};
-use tokio::process::Command;
-use zone::Zone;
 
 async fn factory_task_one(log: &Logger, c: &Arc<Central>) -> Result<()> {
     let instances = {

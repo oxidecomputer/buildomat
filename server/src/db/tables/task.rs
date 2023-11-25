@@ -60,22 +60,6 @@ impl FromRow for Task {
 }
 
 impl Task {
-    pub fn from_create(ct: &CreateTask, job: JobId, seq: usize) -> Task {
-        Task {
-            job,
-            seq: seq.try_into().unwrap(),
-            name: ct.name.to_string(),
-            script: ct.script.to_string(),
-            env_clear: ct.env_clear,
-            env: Dictionary(ct.env.clone()),
-            user_id: ct.user_id.map(UnixUid),
-            group_id: ct.group_id.map(UnixGid),
-            workdir: ct.workdir.clone(),
-            complete: false,
-            failed: false,
-        }
-    }
-
     pub fn find(job: JobId, seq: u32) -> SelectStatement {
         Query::select()
             .from(TaskDef::Table)
@@ -103,5 +87,21 @@ impl Task {
                 self.failed.into(),
             ])
             .to_owned()
+    }
+
+    pub fn from_create(ct: &CreateTask, job: JobId, seq: usize) -> Task {
+        Task {
+            job,
+            seq: seq.try_into().unwrap(),
+            name: ct.name.to_string(),
+            script: ct.script.to_string(),
+            env_clear: ct.env_clear,
+            env: Dictionary(ct.env.clone()),
+            user_id: ct.user_id.map(UnixUid),
+            group_id: ct.group_id.map(UnixGid),
+            workdir: ct.workdir.clone(),
+            complete: false,
+            failed: false,
+        }
     }
 }

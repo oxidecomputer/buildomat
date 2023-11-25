@@ -1,10 +1,12 @@
+/*
+ * Copyright 2023 Oxide Computer Company
+ */
+
 use std::{
     collections::{HashMap, HashSet},
-    net::{IpAddr, Ipv6Addr},
     os::fd::AsRawFd,
     path::PathBuf,
     process::Command,
-    str::FromStr,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -16,11 +18,7 @@ use crate::{
     Central,
 };
 use anyhow::{anyhow, bail, Result};
-use buildomat_client::types::{
-    FactoryWhatsNext, FactoryWorkerAssociate, FactoryWorkerCreate,
-};
 use buildomat_common::OutputExt;
-use rusty_ulid::Ulid;
 use slog::{debug, error, info, o, warn, Logger};
 use zone::Zone;
 

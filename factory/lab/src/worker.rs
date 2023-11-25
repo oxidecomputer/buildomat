@@ -2,18 +2,15 @@
  * Copyright 2023 Oxide Computer Company
  */
 
-use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
-use buildomat_client::types::*;
 use buildomat_types::metadata;
-use rusty_ulid::Ulid;
 use slog::{debug, error, info, o, trace, warn, Logger};
 
-use super::{config, Central};
+use super::Central;
 
 /*
  * We serialise instance IDs as a string: "nodename/sequencenumber"; e.g.,

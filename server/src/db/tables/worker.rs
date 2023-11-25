@@ -63,6 +63,14 @@ impl FromRow for Worker {
 }
 
 impl Worker {
+    pub fn find(id: WorkerId) -> SelectStatement {
+        Query::select()
+            .from(WorkerDef::Table)
+            .columns(Worker::columns())
+            .and_where(Expr::col(WorkerDef::Id).eq(id))
+            .to_owned()
+    }
+
     pub fn insert(&self) -> InsertStatement {
         Query::insert()
             .into_table(WorkerDef::Table)
@@ -80,14 +88,6 @@ impl Worker {
                 self.wait_for_flush.into(),
                 self.factory_metadata.clone().into(),
             ])
-            .to_owned()
-    }
-
-    pub fn find(id: WorkerId) -> SelectStatement {
-        Query::select()
-            .from(WorkerDef::Table)
-            .columns(Worker::columns())
-            .and_where(Expr::col(WorkerDef::Id).eq(id))
             .to_owned()
     }
 

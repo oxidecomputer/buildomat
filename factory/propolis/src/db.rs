@@ -2,22 +2,17 @@
  * Copyright 2023 Oxide Computer Company
  */
 
-#![allow(unused)]
-
 use std::{collections::HashSet, path::Path};
 
 use anyhow::{bail, Result};
 use jmclib::sqlite::rusqlite;
-use rusqlite::{
-    params, Connection, OptionalExtension, Row, Transaction,
-    TransactionBehavior,
-};
-use rusty_ulid::Ulid;
+use rusqlite::{params, Connection, Transaction, TransactionBehavior};
 use slog::Logger;
 use tokio::sync::{Mutex, MutexGuard};
 use types::*;
 
 pub struct Database {
+    #[allow(unused)]
     log: Logger,
     conn: Mutex<Connection>,
 }
@@ -153,7 +148,7 @@ impl Handle<'_> {
         bootstrap: &str,
         slot: u32,
     ) -> Result<InstanceId> {
-        let mut tx = self
+        let tx = self
             .guard
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
 
@@ -216,13 +211,11 @@ impl Handle<'_> {
 
 pub mod types {
     use anyhow::{anyhow, bail, Result};
-    use chrono::prelude::*;
     use jmclib::sqlite::rusqlite;
     use rusqlite::{
         types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput},
         Row,
     };
-    use rusty_ulid::Ulid;
     use std::{fmt::Display, str::FromStr};
     use strum::{Display, EnumString};
 

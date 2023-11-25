@@ -2,19 +2,13 @@
  * Copyright 2023 Oxide Computer Company
  */
 
-#![allow(unused_imports)]
 #![allow(clippy::many_single_char_names)]
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::env::{args, var};
-use std::fs::{File, OpenOptions};
-use std::future::Future;
-use std::io::{ErrorKind, Read, Write};
+use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::str::FromStr;
-use std::sync::mpsc::Receiver;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::{anyhow, bail, Result};
 use buildomat_client::{ext::*, types::*, Client, ClientBuilder};

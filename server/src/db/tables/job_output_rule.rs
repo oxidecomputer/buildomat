@@ -48,21 +48,6 @@ impl FromRow for JobOutputRule {
 }
 
 impl JobOutputRule {
-    pub fn from_create(
-        cd: &CreateOutputRule,
-        job: JobId,
-        seq: usize,
-    ) -> JobOutputRule {
-        JobOutputRule {
-            job,
-            seq: seq.try_into().unwrap(),
-            rule: cd.rule.to_string(),
-            ignore: cd.ignore,
-            size_change_ok: cd.size_change_ok,
-            require_match: cd.require_match,
-        }
-    }
-
     pub fn insert(&self) -> InsertStatement {
         Query::insert()
             .into_table(JobOutputRuleDef::Table)
@@ -76,5 +61,20 @@ impl JobOutputRule {
                 self.require_match.into(),
             ])
             .to_owned()
+    }
+
+    pub fn from_create(
+        cd: &CreateOutputRule,
+        job: JobId,
+        seq: usize,
+    ) -> JobOutputRule {
+        JobOutputRule {
+            job,
+            seq: seq.try_into().unwrap(),
+            rule: cd.rule.to_string(),
+            ignore: cd.ignore,
+            size_change_ok: cd.size_change_ok,
+            require_match: cd.require_match,
+        }
     }
 }

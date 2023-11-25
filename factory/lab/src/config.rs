@@ -3,9 +3,7 @@
  */
 
 use std::collections::HashMap;
-use std::io::Read;
 
-use anyhow::Result;
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug, Clone)]

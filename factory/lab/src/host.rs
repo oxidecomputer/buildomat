@@ -1,14 +1,12 @@
-use std::io::{BufRead, Read};
-use std::os::unix::prelude::FromRawFd;
+use std::io::Read;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context, Error, Result};
+use anyhow::{bail, Context, Result};
 use buildomat_common::*;
-use serde::Deserialize;
 use slog::{debug, error, info, trace, warn};
 
 use super::{Activity, Central, Message};

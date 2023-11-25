@@ -1,19 +1,20 @@
-use std::collections::HashMap;
-use std::io::Read;
+/*
+ * Copyright 2023 Oxide Computer Company
+ */
+
 use std::path::{Path, PathBuf};
 use std::result::Result as SResult;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, Result};
 
-use buildomat_common::*;
 use dropshot::{HttpError, Path as TypedPath, Query as TypedQuery};
 use hyper::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use slog::{info, warn, Logger};
+use slog::info;
 
-use super::{host, Central, MARKER_BOOT, MARKER_HOLD};
+use super::{Central, MARKER_BOOT, MARKER_HOLD};
 
 type HResult<T> = SResult<T, dropshot::HttpError>;
 

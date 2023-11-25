@@ -1,13 +1,10 @@
 use super::schema::*;
 use anyhow::{bail, Result};
-use chrono::prelude::*;
 use diesel::deserialize::FromSql;
 use diesel::serialize::ToSql;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::str::FromStr;
-use std::time::Duration;
 
-use buildomat_database::old::*;
 pub use buildomat_database::old::{Dictionary, IsoDate};
 use buildomat_database::{integer_new_type, sql_for_enum};
 

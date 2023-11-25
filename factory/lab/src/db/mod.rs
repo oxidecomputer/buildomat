@@ -2,12 +2,10 @@
  * Copyright 2023 Oxide Computer Company
  */
 
-use std::collections::HashMap;
 use std::path::Path;
-use std::str::FromStr;
 use std::sync::Mutex;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::Result;
 use buildomat_common::*;
 use chrono::prelude::*;
 use diesel::prelude::*;

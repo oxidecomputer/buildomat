@@ -70,26 +70,6 @@ impl FromRow for Job {
 }
 
 impl Job {
-    #[allow(dead_code)]
-    pub fn time_submit(&self) -> DateTime<Utc> {
-        self.id.datetime()
-    }
-
-    pub fn target(&self) -> TargetId {
-        self.target_id.unwrap_or_else(|| {
-            /*
-             * XXX No new records should be created without a resolved target
-             * ID, but old records might not have had one.  This is the ID of
-             * the canned "default" target:
-             */
-            TargetId::from_str("00E82MSW0000000000000TT000").unwrap()
-        })
-    }
-
-    pub fn is_archived(&self) -> bool {
-        self.time_archived.is_some()
-    }
-
     pub fn find(id: JobId) -> SelectStatement {
         Query::select()
             .from(JobDef::Table)
@@ -116,5 +96,25 @@ impl Job {
                 self.time_archived.into(),
             ])
             .to_owned()
+    }
+
+    #[allow(dead_code)]
+    pub fn time_submit(&self) -> DateTime<Utc> {
+        self.id.datetime()
+    }
+
+    pub fn target(&self) -> TargetId {
+        self.target_id.unwrap_or_else(|| {
+            /*
+             * XXX No new records should be created without a resolved target
+             * ID, but old records might not have had one.  This is the ID of
+             * the canned "default" target:
+             */
+            TargetId::from_str("00E82MSW0000000000000TT000").unwrap()
+        })
+    }
+
+    pub fn is_archived(&self) -> bool {
+        self.time_archived.is_some()
     }
 }

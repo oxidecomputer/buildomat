@@ -1,9 +1,6 @@
 /*
- * Copyright 2022 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
-
-#![allow(unused_imports)]
-#![allow(unused_macros)]
 
 use std::{
     collections::HashMap,
@@ -14,7 +11,7 @@ use anyhow::{bail, Context, Result};
 use buildomat_common::*;
 use chrono::prelude::*;
 use getopts::Options;
-use slog::{info, o, warn, Drain, Logger};
+use slog::{info, warn, Logger};
 use std::time::{Duration, Instant};
 #[macro_use]
 extern crate diesel;
