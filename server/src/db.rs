@@ -182,8 +182,8 @@ impl Database {
     pub fn free_workers(&self) -> OResult<Vec<Worker>> {
         self.get_rows(
             Query::select()
-                .columns(Worker::columns())
                 .from(WorkerDef::Table)
+                .columns(Worker::columns())
                 .left_join(
                     JobDef::Table,
                     Expr::col((JobDef::Table, JobDef::Worker))
@@ -273,8 +273,8 @@ impl Database {
             self.tx_get_row(
                 tx,
                 Query::select()
-                    .expr(Expr::col(Asterisk).count())
                     .from(JobDef::Table)
+                    .expr(Expr::col(Asterisk).count())
                     .and_where(Expr::col(JobDef::Worker).eq(w.id))
                     .to_owned(),
             )?
@@ -1655,6 +1655,7 @@ impl Database {
             .get_rows::<JobTime>(
                 Query::select()
                     .from(JobTimeDef::Table)
+                    .columns(JobTime::columns())
                     .and_where(Expr::col(JobTimeDef::Job).eq(job))
                     .to_owned(),
             )?
@@ -1668,6 +1669,7 @@ impl Database {
             .get_rows::<JobStore>(
                 Query::select()
                     .from(JobStoreDef::Table)
+                    .columns(JobStore::columns())
                     .and_where(Expr::col(JobStoreDef::Job).eq(job))
                     .to_owned(),
             )?
