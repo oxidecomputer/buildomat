@@ -107,192 +107,6 @@ impl Database {
         Ok(Database(log, Mutex::new(Inner { conn })))
     }
 
-    pub fn tx_exec_delete(
-        &self,
-        tx: &mut Transaction,
-        d: DeleteStatement,
-    ) -> OResult<usize> {
-        let (q, v) = d.build_rusqlite(SqliteQueryBuilder);
-        self.tx_exec(tx, q, v)
-    }
-
-    pub fn tx_exec_update(
-        &self,
-        tx: &mut Transaction,
-        u: UpdateStatement,
-    ) -> OResult<usize> {
-        let (q, v) = u.build_rusqlite(SqliteQueryBuilder);
-        self.tx_exec(tx, q, v)
-    }
-
-    pub fn tx_exec_insert(
-        &self,
-        tx: &mut Transaction,
-        i: InsertStatement,
-    ) -> OResult<usize> {
-        let (q, v) = i.build_rusqlite(SqliteQueryBuilder);
-        self.tx_exec(tx, q, v)
-    }
-
-    pub fn tx_exec(
-        &self,
-        tx: &mut Transaction,
-        q: String,
-        v: RusqliteValues,
-    ) -> OResult<usize> {
-        let mut s = tx.prepare(&q)?;
-        let out = s.execute(&*v.as_params())?;
-
-        Ok(out)
-    }
-
-    #[allow(unused)]
-    pub fn exec_delete(&self, d: DeleteStatement) -> OResult<usize> {
-        let (q, v) = d.build_rusqlite(SqliteQueryBuilder);
-        self.exec(q, v)
-    }
-
-    pub fn exec_update(&self, u: UpdateStatement) -> OResult<usize> {
-        let (q, v) = u.build_rusqlite(SqliteQueryBuilder);
-        self.exec(q, v)
-    }
-
-    pub fn exec_insert(&self, i: InsertStatement) -> OResult<usize> {
-        let (q, v) = i.build_rusqlite(SqliteQueryBuilder);
-        self.exec(q, v)
-    }
-
-    pub fn exec(&self, q: String, v: RusqliteValues) -> OResult<usize> {
-        let c = &mut self.1.lock().unwrap().conn;
-
-        let out = c.prepare(&q)?.execute(&*v.as_params())?;
-
-        Ok(out)
-    }
-
-    pub fn get_strings(&self, s: SelectStatement) -> OResult<Vec<String>> {
-        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
-        let c = &mut self.1.lock().unwrap().conn;
-
-        let mut s = c.prepare(&q)?;
-        let out = s.query_map(&*v.as_params(), |row| row.get(0))?;
-
-        Ok(out.collect::<rusqlite::Result<_>>()?)
-    }
-
-    pub fn get_rows<T: FromRow>(&self, s: SelectStatement) -> OResult<Vec<T>> {
-        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
-        let c = &mut self.1.lock().unwrap().conn;
-
-        let mut s = c.prepare(&q)?;
-        let out = s.query_map(&*v.as_params(), T::from_row)?;
-
-        Ok(out.collect::<rusqlite::Result<_>>()?)
-    }
-
-    pub fn get_row<T: FromRow>(&self, s: SelectStatement) -> OResult<T> {
-        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
-        let c = &mut self.1.lock().unwrap().conn;
-
-        let mut s = c.prepare(&q)?;
-        let out = s.query_map(&*v.as_params(), T::from_row)?;
-        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
-        match out.len() {
-            0 => conflict!("record not found"),
-            1 => Ok(out.pop().unwrap()),
-            n => conflict!("found {n} records when we wanted only 1"),
-        }
-    }
-
-    pub fn get_row_opt<T: FromRow>(
-        &self,
-        s: SelectStatement,
-    ) -> OResult<Option<T>> {
-        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
-        let c = &mut self.1.lock().unwrap().conn;
-
-        let mut s = c.prepare(&q)?;
-        let out = s.query_map(&*v.as_params(), T::from_row)?;
-        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
-        match out.len() {
-            0 => Ok(None),
-            1 => Ok(Some(out.pop().unwrap())),
-            n => conflict!("found {n} records when we wanted only 1"),
-        }
-    }
-
-    pub fn tx_get_count(
-        &self,
-        tx: &mut Transaction,
-        s: SelectStatement,
-    ) -> OResult<usize> {
-        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
-        let mut s = tx.prepare(&q)?;
-        let out = s.query_map(&*v.as_params(), |row| row.get::<_, i64>(0))?;
-        let out = out.collect::<rusqlite::Result<Vec<i64>>>()?;
-        match out.len() {
-            0 => conflict!("record not found"),
-            1 => Ok(out[0].try_into().unwrap()),
-            n => conflict!("found {n} records when we wanted only 1"),
-        } /* XXX what */
-    }
-
-    pub fn tx_get_row_opt<T: FromRow>(
-        &self,
-        tx: &mut Transaction,
-        s: SelectStatement,
-    ) -> OResult<Option<T>> {
-        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
-        let mut s = tx.prepare(&q)?;
-        let out = s.query_map(&*v.as_params(), T::from_row)?;
-        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
-        match out.len() {
-            0 => Ok(None),
-            1 => Ok(Some(out.pop().unwrap())),
-            n => conflict!("found {n} records when we wanted only 1"),
-        }
-    }
-
-    pub fn tx_get_strings(
-        &self,
-        tx: &mut Transaction,
-        s: SelectStatement,
-    ) -> OResult<Vec<String>> {
-        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
-        let mut s = tx.prepare(&q)?;
-        let out = s.query_map(&*v.as_params(), |row| row.get(0))?;
-
-        Ok(out.collect::<rusqlite::Result<_>>()?)
-    }
-
-    pub fn tx_get_rows<T: FromRow>(
-        &self,
-        tx: &mut Transaction,
-        s: SelectStatement,
-    ) -> OResult<Vec<T>> {
-        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
-        let mut s = tx.prepare(&q)?;
-        let out = s.query_map(&*v.as_params(), T::from_row)?;
-
-        Ok(out.collect::<rusqlite::Result<_>>()?)
-    }
-
-    pub fn tx_get_row<T: FromRow>(
-        &self,
-        tx: &mut Transaction,
-        s: SelectStatement,
-    ) -> OResult<T> {
-        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
-        let mut s = tx.prepare(&q)?;
-        let out = s.query_map(&*v.as_params(), T::from_row)?;
-        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
-        match out.len() {
-            0 => conflict!("record not found"),
-            1 => Ok(out.pop().unwrap()),
-            n => conflict!("found {n} records when we wanted only 1"),
-        }
-    }
-
     fn i_worker_for_bootstrap(
         &self,
         tx: &mut Transaction,
@@ -444,17 +258,13 @@ impl Database {
         Ok(self.exec(q, v)? > 0)
     }
 
-    fn i_job(&self, tx: &mut Transaction, jid: JobId) -> OResult<Job> {
-        self.tx_get_row(tx, Job::find(jid))
-    }
-
     pub fn i_worker_assign_job(
         &self,
         tx: &mut Transaction,
         w: &Worker,
         jid: JobId,
     ) -> OResult<()> {
-        let j: Job = self.i_job(tx, jid)?;
+        let j: Job = self.tx_get_row(tx, Job::find(jid))?;
         if let Some(jw) = j.worker.as_ref() {
             conflict!("job {} already assigned to worker {}", j.id, jw);
         }
@@ -2560,5 +2370,195 @@ impl Database {
 
         tx.commit()?;
         Ok(nt)
+    }
+
+    /*
+     * Helper routines for database access:
+     */
+
+    pub fn tx_exec_delete(
+        &self,
+        tx: &mut Transaction,
+        d: DeleteStatement,
+    ) -> OResult<usize> {
+        let (q, v) = d.build_rusqlite(SqliteQueryBuilder);
+        self.tx_exec(tx, q, v)
+    }
+
+    pub fn tx_exec_update(
+        &self,
+        tx: &mut Transaction,
+        u: UpdateStatement,
+    ) -> OResult<usize> {
+        let (q, v) = u.build_rusqlite(SqliteQueryBuilder);
+        self.tx_exec(tx, q, v)
+    }
+
+    pub fn tx_exec_insert(
+        &self,
+        tx: &mut Transaction,
+        i: InsertStatement,
+    ) -> OResult<usize> {
+        let (q, v) = i.build_rusqlite(SqliteQueryBuilder);
+        self.tx_exec(tx, q, v)
+    }
+
+    pub fn tx_exec(
+        &self,
+        tx: &mut Transaction,
+        q: String,
+        v: RusqliteValues,
+    ) -> OResult<usize> {
+        let mut s = tx.prepare(&q)?;
+        let out = s.execute(&*v.as_params())?;
+
+        Ok(out)
+    }
+
+    #[allow(unused)]
+    pub fn exec_delete(&self, d: DeleteStatement) -> OResult<usize> {
+        let (q, v) = d.build_rusqlite(SqliteQueryBuilder);
+        self.exec(q, v)
+    }
+
+    pub fn exec_update(&self, u: UpdateStatement) -> OResult<usize> {
+        let (q, v) = u.build_rusqlite(SqliteQueryBuilder);
+        self.exec(q, v)
+    }
+
+    pub fn exec_insert(&self, i: InsertStatement) -> OResult<usize> {
+        let (q, v) = i.build_rusqlite(SqliteQueryBuilder);
+        self.exec(q, v)
+    }
+
+    pub fn exec(&self, q: String, v: RusqliteValues) -> OResult<usize> {
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let out = c.prepare(&q)?.execute(&*v.as_params())?;
+
+        Ok(out)
+    }
+
+    pub fn get_strings(&self, s: SelectStatement) -> OResult<Vec<String>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let mut s = c.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), |row| row.get(0))?;
+
+        Ok(out.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn get_rows<T: FromRow>(&self, s: SelectStatement) -> OResult<Vec<T>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let mut s = c.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+
+        Ok(out.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn get_row<T: FromRow>(&self, s: SelectStatement) -> OResult<T> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let mut s = c.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
+        match out.len() {
+            0 => conflict!("record not found"),
+            1 => Ok(out.pop().unwrap()),
+            n => conflict!("found {n} records when we wanted only 1"),
+        }
+    }
+
+    pub fn get_row_opt<T: FromRow>(
+        &self,
+        s: SelectStatement,
+    ) -> OResult<Option<T>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let mut s = c.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
+        match out.len() {
+            0 => Ok(None),
+            1 => Ok(Some(out.pop().unwrap())),
+            n => conflict!("found {n} records when we wanted only 1"),
+        }
+    }
+
+    pub fn tx_get_count(
+        &self,
+        tx: &mut Transaction,
+        s: SelectStatement,
+    ) -> OResult<usize> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        let mut s = tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), |row| row.get::<_, i64>(0))?;
+        let out = out.collect::<rusqlite::Result<Vec<i64>>>()?;
+        match out.len() {
+            0 => conflict!("record not found"),
+            1 => Ok(out[0].try_into().unwrap()),
+            n => conflict!("found {n} records when we wanted only 1"),
+        } /* XXX what */
+    }
+
+    pub fn tx_get_row_opt<T: FromRow>(
+        &self,
+        tx: &mut Transaction,
+        s: SelectStatement,
+    ) -> OResult<Option<T>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        let mut s = tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
+        match out.len() {
+            0 => Ok(None),
+            1 => Ok(Some(out.pop().unwrap())),
+            n => conflict!("found {n} records when we wanted only 1"),
+        }
+    }
+
+    pub fn tx_get_strings(
+        &self,
+        tx: &mut Transaction,
+        s: SelectStatement,
+    ) -> OResult<Vec<String>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        let mut s = tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), |row| row.get(0))?;
+
+        Ok(out.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn tx_get_rows<T: FromRow>(
+        &self,
+        tx: &mut Transaction,
+        s: SelectStatement,
+    ) -> OResult<Vec<T>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        let mut s = tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+
+        Ok(out.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn tx_get_row<T: FromRow>(
+        &self,
+        tx: &mut Transaction,
+        s: SelectStatement,
+    ) -> OResult<T> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        let mut s = tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
+        match out.len() {
+            0 => conflict!("record not found"),
+            1 => Ok(out.pop().unwrap()),
+            n => conflict!("found {n} records when we wanted only 1"),
+        }
     }
 }
