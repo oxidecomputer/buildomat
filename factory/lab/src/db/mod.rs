@@ -7,25 +7,43 @@ use std::sync::Mutex;
 
 use anyhow::Result;
 use buildomat_common::*;
+use buildomat_database::sqlite::rusqlite;
 use chrono::prelude::*;
-use diesel::prelude::*;
+use rusqlite::Transaction;
 #[allow(unused_imports)]
 use rusty_ulid::Ulid;
+use sea_query::{
+    DeleteStatement, Expr, InsertStatement, Order, Query, SelectStatement,
+    SqliteQueryBuilder, UpdateStatement,
+};
+use sea_query_rusqlite::{RusqliteBinder, RusqliteValues};
 #[allow(unused_imports)]
-use slog::{error, info, warn, Logger};
+use slog::{debug, error, info, warn, Logger};
 use thiserror::Error;
 
-mod models;
-mod schema;
+mod tables;
 
-pub use models::*;
+mod types {
+    use buildomat_database::sqlite::rusqlite;
+    use buildomat_database::sqlite_integer_new_type;
+
+    sqlite_integer_new_type!(InstanceSeq, u64, BigUnsigned);
+    sqlite_integer_new_type!(EventSeq, u64, BigUnsigned);
+
+    pub use buildomat_database::sqlite::IsoDate;
+}
+
+pub use tables::*;
+pub use types::*;
 
 #[derive(Error, Debug)]
 pub enum OperationError {
     #[error("conflict: {0}")]
     Conflict(String),
     #[error(transparent)]
-    Sql(#[from] diesel::result::Error),
+    Sql(#[from] rusqlite::Error),
+    #[error(transparent)]
+    OutOfRange(#[from] chrono::OutOfRangeError),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -34,7 +52,7 @@ pub type OResult<T> = std::result::Result<T, OperationError>;
 
 macro_rules! conflict {
     ($msg:expr) => {
-        return Err(OperationError::Conflict($msg.to_string()))
+        return Err(OperationError::Conflict(format!($msg)))
     };
     ($fmt:expr, $($arg:tt)*) => {
         return Err(OperationError::Conflict(format!($fmt, $($arg)*)))
@@ -42,7 +60,7 @@ macro_rules! conflict {
 }
 
 struct Inner {
-    conn: diesel::sqlite::SqliteConnection,
+    conn: rusqlite::Connection,
 }
 
 pub struct Database(Logger, Mutex<Inner>);
@@ -53,7 +71,7 @@ impl Database {
         path: P,
         cache_kb: Option<u32>,
     ) -> Result<Database> {
-        let conn = buildomat_database::old::sqlite_setup(
+        let conn = buildomat_database::sqlite::sqlite_setup(
             &log,
             path,
             include_str!("../../schema.sql"),
@@ -63,69 +81,48 @@ impl Database {
         Ok(Database(log, Mutex::new(Inner { conn })))
     }
 
-    pub fn i_instance_for_host(
-        &self,
-        nodename: &str,
-        tx: &mut SqliteConnection,
-    ) -> OResult<Option<Instance>> {
-        use schema::instance::dsl;
-
-        let t: Vec<Instance> = dsl::instance
-            .filter(dsl::nodename.eq(nodename))
-            .filter(dsl::state.ne(InstanceState::Destroyed))
-            .get_results(tx)?;
-
-        match t.len() {
-            0 => Ok(None),
-            1 => Ok(Some(t[0].clone())),
-            n => {
-                conflict!("found {} active instances for host {}", n, nodename)
-            }
-        }
-    }
-
     pub fn i_next_seq_for_host(
         &self,
         nodename: &str,
-        tx: &mut SqliteConnection,
+        tx: &mut Transaction,
     ) -> OResult<InstanceSeq> {
-        use schema::instance::dsl;
+        let max: Option<InstanceSeq> = self.tx_get_row(
+            tx,
+            Query::select()
+                .from(InstanceDef::Table)
+                .expr(Expr::col(InstanceDef::Seq).max())
+                .and_where(Expr::col(InstanceDef::Nodename).eq(nodename))
+                .to_owned(),
+        )?;
 
-        let max: Option<i64> = dsl::instance
-            .select(diesel::dsl::max(dsl::seq))
-            .filter(dsl::nodename.eq(nodename))
-            .get_result(tx)?;
-
-        let next = max.unwrap_or(0).checked_add(1).unwrap();
-
-        Ok(InstanceSeq(next.try_into().unwrap()))
+        Ok(InstanceSeq(max.map(|v| v.0).unwrap_or(0).checked_add(1).unwrap()))
     }
 
     pub fn i_next_seq_for_instance(
         &self,
         i: &Instance,
-        tx: &mut SqliteConnection,
+        tx: &mut Transaction,
     ) -> OResult<EventSeq> {
-        use schema::instance_event::dsl;
+        let max: Option<EventSeq> = self.tx_get_row(
+            tx,
+            Query::select()
+                .from(InstanceEventDef::Table)
+                .expr(Expr::col(InstanceEventDef::Seq).max())
+                .and_where(
+                    Expr::col(InstanceEventDef::Nodename).eq(&i.nodename),
+                )
+                .and_where(Expr::col(InstanceEventDef::Instance).eq(i.seq))
+                .to_owned(),
+        )?;
 
-        let max: Option<i64> = dsl::instance_event
-            .select(diesel::dsl::max(dsl::seq))
-            .filter(dsl::nodename.eq(&i.nodename))
-            .filter(dsl::instance.eq(i.seq))
-            .get_result(tx)?;
-
-        let next = max.unwrap_or(0).checked_add(1).unwrap();
-
-        Ok(EventSeq(next.try_into().unwrap()))
+        Ok(EventSeq(max.map(|v| v.0).unwrap_or(0).checked_add(1).unwrap()))
     }
 
     pub fn instance_for_host(
         &self,
         nodename: &str,
     ) -> OResult<Option<Instance>> {
-        let c = &mut self.1.lock().unwrap().conn;
-
-        c.immediate_transaction(|tx| self.i_instance_for_host(nodename, tx))
+        self.get_row_opt(Instance::find_for_host(nodename))
     }
 
     pub fn instance_get(
@@ -133,11 +130,7 @@ impl Database {
         nodename: &str,
         seq: InstanceSeq,
     ) -> OResult<Option<Instance>> {
-        use schema::instance::dsl;
-
-        let c = &mut self.1.lock().unwrap().conn;
-
-        Ok(dsl::instance.find((&nodename, seq)).get_result(c).optional()?)
+        self.get_row_opt(Instance::find(nodename, seq))
     }
 
     /**
@@ -151,151 +144,164 @@ impl Database {
         bootstrap: &str,
     ) -> OResult<Instance> {
         let key = genkey(32);
+
         let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        c.immediate_transaction(|tx| {
-            use schema::instance::dsl;
+        let existing = self.tx_get_row_opt::<Instance>(
+            &mut tx,
+            Instance::find_for_host(nodename),
+        )?;
+        if existing.is_some() {
+            conflict!("host {nodename} already has an active instance");
+        }
 
-            let existing = self.i_instance_for_host(nodename, tx)?;
-            if existing.is_some() {
-                conflict!("host {} already has an active instance", nodename);
-            }
+        let i = Instance {
+            nodename: nodename.to_string(),
+            seq: self.i_next_seq_for_host(nodename, &mut tx)?,
+            worker: worker.to_string(),
+            target: target.to_string(),
+            state: InstanceState::Preboot,
+            key,
+            bootstrap: bootstrap.to_string(),
+            flushed: false,
+        };
 
-            let i = Instance {
-                nodename: nodename.to_string(),
-                seq: self.i_next_seq_for_host(nodename, tx)?,
-                worker: worker.to_string(),
-                target: target.to_string(),
-                state: InstanceState::Preboot,
-                key,
-                bootstrap: bootstrap.to_string(),
-                flushed: false,
-            };
+        let ic = self.tx_exec_insert(&mut tx, i.insert())?;
+        assert_eq!(ic, 1);
 
-            let ic =
-                diesel::insert_into(dsl::instance).values(&i).execute(tx)?;
-            assert_eq!(ic, 1);
-
-            Ok(i)
-        })
+        tx.commit()?;
+        Ok(i)
     }
 
     pub fn active_instances(&self) -> OResult<Vec<Instance>> {
-        let c = &mut self.1.lock().unwrap().conn;
-
-        use schema::instance::dsl;
-
-        Ok(dsl::instance
-            .filter(dsl::state.ne(InstanceState::Destroyed))
-            .order_by(dsl::nodename.asc())
-            .get_results(c)?)
+        self.get_rows(Instance::find_active())
     }
 
     pub fn instance_destroy(&self, i: &Instance) -> OResult<()> {
         let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        c.immediate_transaction(|tx| {
-            use schema::instance::dsl;
+        /*
+         * Fetch the current instance state:
+         */
+        let i: Instance = self.get_row(Instance::find(&i.nodename, i.seq))?;
 
-            /*
-             * Fetch the current instance state:
-             */
-            let i: Instance =
-                dsl::instance.find((&i.nodename, i.seq)).get_result(tx)?;
-
-            match i.state {
-                InstanceState::Preboot | InstanceState::Booted => {
-                    let uc = diesel::update(dsl::instance)
-                        .filter(dsl::nodename.eq(i.nodename))
-                        .filter(dsl::seq.eq(i.seq))
-                        .set(dsl::state.eq(InstanceState::Destroying))
-                        .execute(tx)?;
-                    assert_eq!(uc, 1);
-                    Ok(())
-                }
-                InstanceState::Destroying => Ok(()),
-                InstanceState::Destroyed => {
-                    conflict!("instance already completely destroyed");
-                }
+        match i.state {
+            InstanceState::Preboot | InstanceState::Booted => {
+                let uc = self.tx_exec_update(
+                    &mut tx,
+                    Query::update()
+                        .table(InstanceDef::Table)
+                        .and_where(
+                            Expr::col(InstanceDef::Nodename).eq(i.nodename),
+                        )
+                        .and_where(Expr::col(InstanceDef::Seq).eq(i.seq))
+                        .value(InstanceDef::State, InstanceState::Destroying)
+                        .to_owned(),
+                )?;
+                assert_eq!(uc, 1);
             }
-        })
+            InstanceState::Destroying => (),
+            InstanceState::Destroyed => {
+                conflict!("instance already completely destroyed");
+            }
+        }
+
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn instance_mark_destroyed(&self, i: &Instance) -> OResult<()> {
         let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        c.immediate_transaction(|tx| {
-            use schema::instance::dsl;
+        /*
+         * Fetch the current instance state:
+         */
+        let i: Instance =
+            self.tx_get_row(&mut tx, Instance::find(&i.nodename, i.seq))?;
 
-            /*
-             * Fetch the current instance state:
-             */
-            let i: Instance =
-                dsl::instance.find((&i.nodename, i.seq)).get_result(tx)?;
-
-            match i.state {
-                InstanceState::Preboot | InstanceState::Booted => {
-                    conflict!("instance was not already being destroyed");
-                }
-                InstanceState::Destroying => {
-                    let uc = diesel::update(dsl::instance)
-                        .filter(dsl::nodename.eq(i.nodename))
-                        .filter(dsl::seq.eq(i.seq))
-                        .set(dsl::state.eq(InstanceState::Destroyed))
-                        .execute(tx)?;
-                    assert_eq!(uc, 1);
-                    Ok(())
-                }
-                InstanceState::Destroyed => Ok(()),
+        match i.state {
+            InstanceState::Preboot | InstanceState::Booted => {
+                conflict!("instance was not already being destroyed");
             }
-        })
+            InstanceState::Destroying => {
+                let uc = self.tx_exec_update(
+                    &mut tx,
+                    Query::update()
+                        .table(InstanceDef::Table)
+                        .and_where(
+                            Expr::col(InstanceDef::Nodename).eq(i.nodename),
+                        )
+                        .and_where(Expr::col(InstanceDef::Seq).eq(i.seq))
+                        .value(InstanceDef::State, InstanceState::Destroyed)
+                        .to_owned(),
+                )?;
+                assert_eq!(uc, 1);
+            }
+            InstanceState::Destroyed => (),
+        }
+
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn instance_mark_flushed(&self, i: &Instance) -> OResult<()> {
-        let c = &mut self.1.lock().unwrap().conn;
+        let uc = self.exec_update(
+            Query::update()
+                .table(InstanceDef::Table)
+                .and_where(Expr::col(InstanceDef::Nodename).eq(&i.nodename))
+                .and_where(Expr::col(InstanceDef::Seq).eq(i.seq))
+                .value(InstanceDef::Flushed, true)
+                .to_owned(),
+        )?;
+        assert_eq!(uc, 1);
 
-        c.immediate_transaction(|tx| {
-            use schema::instance::dsl;
-
-            let uc = diesel::update(dsl::instance)
-                .filter(dsl::nodename.eq(&i.nodename))
-                .filter(dsl::seq.eq(i.seq))
-                .set(dsl::flushed.eq(true))
-                .execute(tx)?;
-            assert_eq!(uc, 1);
-
-            Ok(())
-        })
+        Ok(())
     }
 
     pub fn instance_boot(&self, i: &Instance) -> OResult<()> {
         let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        c.immediate_transaction(|tx| {
-            use schema::instance::dsl;
+        /*
+         * Fetch the current instance state:
+         */
+        let i: Instance =
+            self.tx_get_row(&mut tx, Instance::find(&i.nodename, i.seq))?;
 
-            /*
-             * Fetch the current instance state:
-             */
-            let i: Instance =
-                dsl::instance.find((&i.nodename, i.seq)).get_result(tx)?;
-
-            match i.state {
-                InstanceState::Preboot => {
-                    let uc = diesel::update(dsl::instance)
-                        .filter(dsl::nodename.eq(i.nodename))
-                        .filter(dsl::seq.eq(i.seq))
-                        .set(dsl::state.eq(InstanceState::Booted))
-                        .execute(tx)?;
-                    assert_eq!(uc, 1);
-                    Ok(())
-                }
-                InstanceState::Booted => Ok(()),
-                InstanceState::Destroying | InstanceState::Destroyed => {
-                    conflict!("instance already being destroyed");
-                }
+        match i.state {
+            InstanceState::Preboot => {
+                let uc = self.tx_exec_update(
+                    &mut tx,
+                    Query::update()
+                        .table(InstanceDef::Table)
+                        .and_where(
+                            Expr::col(InstanceDef::Nodename).eq(i.nodename),
+                        )
+                        .and_where(Expr::col(InstanceDef::Seq).eq(i.seq))
+                        .value(InstanceDef::State, InstanceState::Booted)
+                        .to_owned(),
+                )?;
+                assert_eq!(uc, 1);
             }
-        })
+            InstanceState::Booted => (),
+            InstanceState::Destroying | InstanceState::Destroyed => {
+                conflict!("instance already being destroyed");
+            }
+        }
+
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn instance_append(
@@ -306,58 +312,58 @@ impl Database {
         time: DateTime<Utc>,
     ) -> OResult<InstanceEvent> {
         let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        c.immediate_transaction(|tx| {
-            use schema::{instance, instance_event};
+        /*
+         * Fetch the current instance state:
+         */
+        let i: Instance =
+            self.tx_get_row(&mut tx, Instance::find(&i.nodename, i.seq))?;
 
-            /*
-             * Fetch the current instance state:
-             */
-            let i: Instance = instance::dsl::instance
-                .find((&i.nodename, i.seq))
-                .get_result(tx)?;
+        let ie = match i.state {
+            InstanceState::Preboot | InstanceState::Booted => {
+                let ie = InstanceEvent {
+                    nodename: i.nodename.to_string(),
+                    instance: i.seq,
+                    seq: self.i_next_seq_for_instance(&i, &mut tx)?,
+                    stream: stream.to_string(),
+                    payload: msg.to_string(),
+                    uploaded: false,
+                    time: IsoDate(time),
+                };
 
-            match i.state {
-                InstanceState::Preboot | InstanceState::Booted => {
-                    let ie = InstanceEvent {
-                        nodename: i.nodename.to_string(),
-                        instance: i.seq,
-                        seq: self.i_next_seq_for_instance(&i, tx)?,
-                        stream: stream.to_string(),
-                        payload: msg.to_string(),
-                        uploaded: false,
-                        time: IsoDate(time),
-                    };
+                let ic = self.tx_exec_insert(&mut tx, ie.insert())?;
+                assert_eq!(ic, 1);
 
-                    diesel::insert_into(instance_event::dsl::instance_event)
-                        .values(&ie)
-                        .execute(tx)?;
-
-                    Ok(ie)
-                }
-                InstanceState::Destroying | InstanceState::Destroyed => {
-                    conflict!("instance already being destroyed");
-                }
+                ie
             }
-        })
+            InstanceState::Destroying | InstanceState::Destroyed => {
+                conflict!("instance already being destroyed");
+            }
+        };
+
+        tx.commit()?;
+        Ok(ie)
     }
 
     pub fn instance_next_event_to_upload(
         &self,
         i: &Instance,
     ) -> OResult<Option<InstanceEvent>> {
-        use schema::instance_event::dsl;
-
-        let c = &mut self.1.lock().unwrap().conn;
-
-        Ok(dsl::instance_event
-            .filter(dsl::nodename.eq(&i.nodename))
-            .filter(dsl::instance.eq(i.seq))
-            .filter(dsl::uploaded.eq(false))
-            .order_by(dsl::seq.asc())
-            .limit(1)
-            .get_result(c)
-            .optional()?)
+        self.get_row_opt(
+            Query::select()
+                .from(InstanceEventDef::Table)
+                .and_where(
+                    Expr::col(InstanceEventDef::Nodename).eq(&i.nodename),
+                )
+                .and_where(Expr::col(InstanceEventDef::Instance).eq(i.seq))
+                .and_where(Expr::col(InstanceEventDef::Uploaded).eq(false))
+                .order_by(InstanceEventDef::Seq, Order::Asc)
+                .limit(1)
+                .to_owned(),
+        )
     }
 
     pub fn instance_mark_event_uploaded(
@@ -365,19 +371,204 @@ impl Database {
         i: &Instance,
         ie: &InstanceEvent,
     ) -> OResult<()> {
-        use schema::instance_event::dsl;
-
-        let c = &mut self.1.lock().unwrap().conn;
-
-        let uc = diesel::update(dsl::instance_event)
-            .set((dsl::uploaded.eq(true),))
-            .filter(dsl::nodename.eq(&i.nodename))
-            .filter(dsl::instance.eq(i.seq))
-            .filter(dsl::seq.eq(ie.seq))
-            .filter(dsl::uploaded.eq(false))
-            .execute(c)?;
+        let uc = self.exec_update(
+            Query::update()
+                .table(InstanceEventDef::Table)
+                .and_where(
+                    Expr::col(InstanceEventDef::Nodename).eq(&i.nodename),
+                )
+                .and_where(Expr::col(InstanceEventDef::Instance).eq(i.seq))
+                .and_where(Expr::col(InstanceEventDef::Seq).eq(ie.seq))
+                .and_where(Expr::col(InstanceEventDef::Uploaded).eq(false))
+                .to_owned(),
+        )?;
         assert!(uc == 0 || uc == 1);
 
         Ok(())
+    }
+
+    /*
+     * Helper routines for database access:
+     */
+
+    fn tx_exec_delete(
+        &self,
+        tx: &mut Transaction,
+        d: DeleteStatement,
+    ) -> OResult<usize> {
+        let (q, v) = d.build_rusqlite(SqliteQueryBuilder);
+        self.tx_exec(tx, q, v)
+    }
+
+    fn tx_exec_update(
+        &self,
+        tx: &mut Transaction,
+        u: UpdateStatement,
+    ) -> OResult<usize> {
+        let (q, v) = u.build_rusqlite(SqliteQueryBuilder);
+        self.tx_exec(tx, q, v)
+    }
+
+    fn tx_exec_insert(
+        &self,
+        tx: &mut Transaction,
+        i: InsertStatement,
+    ) -> OResult<usize> {
+        let (q, v) = i.build_rusqlite(SqliteQueryBuilder);
+        self.tx_exec(tx, q, v)
+    }
+
+    fn tx_exec(
+        &self,
+        tx: &mut Transaction,
+        q: String,
+        v: RusqliteValues,
+    ) -> OResult<usize> {
+        let mut s = tx.prepare(&q)?;
+        let out = s.execute(&*v.as_params())?;
+
+        Ok(out)
+    }
+
+    #[allow(unused)]
+    fn exec_delete(&self, d: DeleteStatement) -> OResult<usize> {
+        let (q, v) = d.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        self.exec(q, v)
+    }
+
+    fn exec_update(&self, u: UpdateStatement) -> OResult<usize> {
+        let (q, v) = u.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        self.exec(q, v)
+    }
+
+    fn exec_insert(&self, i: InsertStatement) -> OResult<usize> {
+        let (q, v) = i.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        self.exec(q, v)
+    }
+
+    fn exec(&self, q: String, v: RusqliteValues) -> OResult<usize> {
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let out = c.prepare(&q)?.execute(&*v.as_params())?;
+
+        Ok(out)
+    }
+
+    fn get_strings(&self, s: SelectStatement) -> OResult<Vec<String>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let mut s = c.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), |row| row.get(0))?;
+
+        Ok(out.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn get_rows<T: FromRow>(&self, s: SelectStatement) -> OResult<Vec<T>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let mut s = c.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+
+        Ok(out.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn get_row<T: FromRow>(&self, s: SelectStatement) -> OResult<T> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let mut s = c.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
+        match out.len() {
+            0 => conflict!("record not found"),
+            1 => Ok(out.pop().unwrap()),
+            n => conflict!("found {n} records when we wanted only 1"),
+        }
+    }
+
+    fn get_row_opt<T: FromRow>(
+        &self,
+        s: SelectStatement,
+    ) -> OResult<Option<T>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let mut s = c.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
+        match out.len() {
+            0 => Ok(None),
+            1 => Ok(Some(out.pop().unwrap())),
+            n => conflict!("found {n} records when we wanted only 1"),
+        }
+    }
+
+    fn tx_get_row_opt<T: FromRow>(
+        &self,
+        tx: &mut Transaction,
+        s: SelectStatement,
+    ) -> OResult<Option<T>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        let mut s = tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
+        match out.len() {
+            0 => Ok(None),
+            1 => Ok(Some(out.pop().unwrap())),
+            n => conflict!("found {n} records when we wanted only 1"),
+        }
+    }
+
+    fn tx_get_strings(
+        &self,
+        tx: &mut Transaction,
+        s: SelectStatement,
+    ) -> OResult<Vec<String>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        let mut s = tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), |row| row.get(0))?;
+
+        Ok(out.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn tx_get_rows<T: FromRow>(
+        &self,
+        tx: &mut Transaction,
+        s: SelectStatement,
+    ) -> OResult<Vec<T>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        let mut s = tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+
+        Ok(out.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn tx_get_row<T: FromRow>(
+        &self,
+        tx: &mut Transaction,
+        s: SelectStatement,
+    ) -> OResult<T> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        let mut s = tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
+        match out.len() {
+            0 => conflict!("record not found"),
+            1 => Ok(out.pop().unwrap()),
+            n => conflict!("found {n} records when we wanted only 1"),
+        }
     }
 }

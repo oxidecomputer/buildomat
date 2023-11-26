@@ -2400,7 +2400,7 @@ impl Database {
      * Helper routines for database access:
      */
 
-    pub fn tx_exec_delete(
+    fn tx_exec_delete(
         &self,
         tx: &mut Transaction,
         d: DeleteStatement,
@@ -2409,7 +2409,7 @@ impl Database {
         self.tx_exec(tx, q, v)
     }
 
-    pub fn tx_exec_update(
+    fn tx_exec_update(
         &self,
         tx: &mut Transaction,
         u: UpdateStatement,
@@ -2418,7 +2418,7 @@ impl Database {
         self.tx_exec(tx, q, v)
     }
 
-    pub fn tx_exec_insert(
+    fn tx_exec_insert(
         &self,
         tx: &mut Transaction,
         i: InsertStatement,
@@ -2427,7 +2427,7 @@ impl Database {
         self.tx_exec(tx, q, v)
     }
 
-    pub fn tx_exec(
+    fn tx_exec(
         &self,
         tx: &mut Transaction,
         q: String,
@@ -2440,25 +2440,25 @@ impl Database {
     }
 
     #[allow(unused)]
-    pub fn exec_delete(&self, d: DeleteStatement) -> OResult<usize> {
+    fn exec_delete(&self, d: DeleteStatement) -> OResult<usize> {
         let (q, v) = d.build_rusqlite(SqliteQueryBuilder);
         debug!(self.0, "query: {q}"; "sql" => true);
         self.exec(q, v)
     }
 
-    pub fn exec_update(&self, u: UpdateStatement) -> OResult<usize> {
+    fn exec_update(&self, u: UpdateStatement) -> OResult<usize> {
         let (q, v) = u.build_rusqlite(SqliteQueryBuilder);
         debug!(self.0, "query: {q}"; "sql" => true);
         self.exec(q, v)
     }
 
-    pub fn exec_insert(&self, i: InsertStatement) -> OResult<usize> {
+    fn exec_insert(&self, i: InsertStatement) -> OResult<usize> {
         let (q, v) = i.build_rusqlite(SqliteQueryBuilder);
         debug!(self.0, "query: {q}"; "sql" => true);
         self.exec(q, v)
     }
 
-    pub fn exec(&self, q: String, v: RusqliteValues) -> OResult<usize> {
+    fn exec(&self, q: String, v: RusqliteValues) -> OResult<usize> {
         let c = &mut self.1.lock().unwrap().conn;
 
         let out = c.prepare(&q)?.execute(&*v.as_params())?;
@@ -2466,7 +2466,7 @@ impl Database {
         Ok(out)
     }
 
-    pub fn get_strings(&self, s: SelectStatement) -> OResult<Vec<String>> {
+    fn get_strings(&self, s: SelectStatement) -> OResult<Vec<String>> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
         debug!(self.0, "query: {q}"; "sql" => true);
         let c = &mut self.1.lock().unwrap().conn;
@@ -2477,7 +2477,7 @@ impl Database {
         Ok(out.collect::<rusqlite::Result<_>>()?)
     }
 
-    pub fn get_rows<T: FromRow>(&self, s: SelectStatement) -> OResult<Vec<T>> {
+    fn get_rows<T: FromRow>(&self, s: SelectStatement) -> OResult<Vec<T>> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
         debug!(self.0, "query: {q}"; "sql" => true);
         let c = &mut self.1.lock().unwrap().conn;
@@ -2488,7 +2488,7 @@ impl Database {
         Ok(out.collect::<rusqlite::Result<_>>()?)
     }
 
-    pub fn get_row<T: FromRow>(&self, s: SelectStatement) -> OResult<T> {
+    fn get_row<T: FromRow>(&self, s: SelectStatement) -> OResult<T> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
         debug!(self.0, "query: {q}"; "sql" => true);
         let c = &mut self.1.lock().unwrap().conn;
@@ -2503,7 +2503,7 @@ impl Database {
         }
     }
 
-    pub fn get_row_opt<T: FromRow>(
+    fn get_row_opt<T: FromRow>(
         &self,
         s: SelectStatement,
     ) -> OResult<Option<T>> {
@@ -2521,7 +2521,7 @@ impl Database {
         }
     }
 
-    pub fn tx_get_row_opt<T: FromRow>(
+    fn tx_get_row_opt<T: FromRow>(
         &self,
         tx: &mut Transaction,
         s: SelectStatement,
@@ -2538,7 +2538,7 @@ impl Database {
         }
     }
 
-    pub fn tx_get_strings(
+    fn tx_get_strings(
         &self,
         tx: &mut Transaction,
         s: SelectStatement,
@@ -2551,7 +2551,7 @@ impl Database {
         Ok(out.collect::<rusqlite::Result<_>>()?)
     }
 
-    pub fn tx_get_rows<T: FromRow>(
+    fn tx_get_rows<T: FromRow>(
         &self,
         tx: &mut Transaction,
         s: SelectStatement,
@@ -2564,7 +2564,7 @@ impl Database {
         Ok(out.collect::<rusqlite::Result<_>>()?)
     }
 
-    pub fn tx_get_row<T: FromRow>(
+    fn tx_get_row<T: FromRow>(
         &self,
         tx: &mut Transaction,
         s: SelectStatement,

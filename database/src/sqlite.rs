@@ -11,35 +11,61 @@ pub use jmclib::sqlite::rusqlite;
 use sea_query::{Nullable, Value};
 use slog::{info, Logger};
 
-// #[macro_export]
-// macro_rules! sql_for_enum {
-//     ($name:ident) => {
-//         impl ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite> for $name
-//         where
-//             String: ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite>,
-//         {
-//             fn to_sql(
-//                 &self,
-//                 out: &mut diesel::serialize::Output<diesel::sqlite::Sqlite>,
-//             ) -> diesel::serialize::Result {
-//                 out.set_value(self.to_string());
-//                 Ok(diesel::serialize::IsNull::No)
-//             }
-//         }
-//
-//         impl<DB> FromSql<diesel::sql_types::Text, DB> for $name
-//         where
-//             DB: diesel::backend::Backend,
-//             String: FromSql<diesel::sql_types::Text, DB>,
-//         {
-//             fn from_sql(
-//                 bytes: diesel::backend::RawValue<DB>,
-//             ) -> diesel::deserialize::Result<Self> {
-//                 Ok($name::from_str(&String::from_sql(bytes)?)?)
-//             }
-//         }
-//     };
-// }
+#[macro_export]
+macro_rules! sqlite_sql_enum {
+    ($name:ident => { $($arms:tt)* })  => {
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            strum::Display,
+            strum::EnumString
+        )]
+        #[strum(serialize_all = "snake_case")]
+        pub enum $name { $($arms)* }
+
+        impl From<$name> for sea_query::Value {
+            fn from(value: $name) -> sea_query::Value {
+                sea_query::Value::String(Some(Box::new(value.to_string())))
+            }
+        }
+
+        impl sea_query::Nullable for $name {
+            fn null() -> sea_query::Value {
+                sea_query::Value::String(None)
+            }
+        }
+
+        impl rusqlite::types::FromSql for $name {
+            fn column_result(
+                v: rusqlite::types::ValueRef<'_>,
+            ) -> rusqlite::types::FromSqlResult<Self> {
+                use std::str::FromStr;
+
+                if let rusqlite::types::ValueRef::Text(t) = v {
+                    if let Ok(s) = String::from_utf8(t.to_vec()) {
+                        match $name::from_str(&s) {
+                            Ok(v) => Ok(v),
+                            Err(e) => {
+                                Err(rusqlite::types::FromSqlError::Other(
+                                    format!("invalid enum: {e}").into(),
+                                ))
+                            }
+                        }
+                    } else {
+                        Err(rusqlite::types::FromSqlError::Other(
+                            "invalid UTF-8".into(),
+                        ))
+                    }
+                } else {
+                    Err(rusqlite::types::FromSqlError::InvalidType)
+                }
+            }
+        }
+    }
+}
 
 #[macro_export]
 macro_rules! sqlite_json_new_type {

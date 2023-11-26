@@ -13,8 +13,6 @@ use chrono::prelude::*;
 use getopts::Options;
 use slog::{info, warn, Logger};
 use std::time::{Duration, Instant};
-#[macro_use]
-extern crate diesel;
 
 mod config;
 mod db;
