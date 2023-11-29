@@ -6,7 +6,13 @@ use anyhow::{bail, Result};
 use buildomat_common::*;
 use buildomat_database::sqlite::rusqlite;
 use chrono::prelude::*;
-use slog::Logger;
+use rusqlite::Transaction;
+use sea_query::{
+    DeleteStatement, Expr, InsertStatement, OnConflict, Order, Query,
+    SelectStatement, SqliteQueryBuilder, UpdateStatement,
+};
+use sea_query_rusqlite::{RusqliteBinder, RusqliteValues};
+use slog::{debug, Logger};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
@@ -16,9 +22,7 @@ mod tables;
 
 mod itypes {
     use buildomat_database::sqlite::rusqlite;
-    use buildomat_database::{
-        sqlite_integer_new_type, sqlite_ulid_new_type,
-    };
+    use buildomat_database::{sqlite_integer_new_type, sqlite_ulid_new_type};
 
     sqlite_integer_new_type!(DeliverySeq, usize, BigUnsigned);
 
@@ -29,8 +33,8 @@ mod itypes {
 }
 
 pub mod types {
-    pub use buildomat_database::sqlite::{IsoDate, JsonValue};
     pub use crate::tables::*;
+    pub use buildomat_database::sqlite::{IsoDate, JsonValue};
 }
 
 use itypes::*;
@@ -104,181 +108,171 @@ impl Database {
         payload: &serde_json::Value,
         recvtime: DateTime<Utc>,
     ) -> DBResult<(DeliverySeq, bool)> {
-        // use schema::delivery;
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        /*
+         * In the event of a delivery failure, an operator may direct GitHub
+         * to replay a prior delivery.  Use the GitHub-provided unique UUID
+         * to locate our existing record of a replayed delivery if one
+         * exists.
+         */
+        let old: Option<Delivery> = self.tx_get_row_opt(
+            &mut tx,
+            Query::select()
+                .from(DeliveryDef::Table)
+                .columns(Delivery::columns())
+                .and_where(Expr::col(DeliveryDef::Uuid).eq(uuid))
+                .to_owned(),
+        )?;
 
-        // c.immediate_transaction(|tx| {
-        //     /*
-        //      * In the event of a delivery failure, an operator may direct GitHub
-        //      * to replay a prior delivery.  Use the GitHub-provided unique UUID
-        //      * to locate our existing record of a replayed delivery if one
-        //      * exists.
-        //      */
-        //     let old: Option<Delivery> = delivery::dsl::delivery
-        //         .filter(delivery::dsl::uuid.eq(uuid))
-        //         .get_result(tx)
-        //         .optional()?;
+        if let Some(old) = old {
+            let Delivery {
+                seq: oldseq,
+                uuid: olduuid,
+                event: oldevent,
+                payload: oldpayload,
 
-        //     if let Some(old) = old {
-        //         let Delivery {
-        //             seq: oldseq,
-        //             uuid: olduuid,
-        //             event: oldevent,
-        //             payload: oldpayload,
+                /*
+                 * Ignore fields that are specific to our internal handling
+                 * of the incoming request and any subsequent processing:
+                 */
+                headers: _,
+                recvtime: _,
+                ack: _,
+            } = old;
 
-        //             /*
-        //              * Ignore fields that are specific to our internal handling
-        //              * of the incoming request and any subsequent processing:
-        //              */
-        //             headers: _,
-        //             recvtime: _,
-        //             ack: _,
-        //         } = old;
+            assert_eq!(&olduuid, uuid);
+            if event != oldevent || payload != &oldpayload.0 {
+                conflict!(
+                    "delivery {oldseq} exists for {uuid} with different \
+                    payload"
+                );
+            }
 
-        //         assert_eq!(&olduuid, uuid);
-        //         if event != oldevent || payload != &oldpayload.0 {
-        //             conflict!(
-        //                 "delivery {seq} exists for {uuid} with different \
-        //                 payload"
-        //             );
-        //         }
+            return Ok((oldseq, false));
+        }
 
-        //         return Ok((oldseq, false));
-        //     }
+        let max: Option<DeliverySeq> = self.tx_get_row(
+            &mut tx,
+            Query::select()
+                .from(DeliveryDef::Table)
+                .expr(Expr::col(DeliveryDef::Seq).max())
+                .to_owned(),
+        )?;
 
-        //     let max: Option<DeliverySeq> = delivery::dsl::delivery
-        //         .select(diesel::dsl::max(delivery::dsl::seq))
-        //         .get_result(tx)?;
+        /*
+         * Make the next ID one after the current maximum ID, or start at
+         * zero if there are no deliveries thus far.
+         */
+        let seq =
+            max.map(|seq| DeliverySeq(seq.0 + 1)).unwrap_or(DeliverySeq(0));
 
-        //     /*
-        //      * Make the next ID one after the current maximum ID, or start at
-        //      * zero if there are no deliveries thus far.
-        //      */
-        //     let seq =
-        //         max.map(|seq| DeliverySeq(seq.0 + 1)).unwrap_or(DeliverySeq(0));
+        let ic = self.tx_exec_insert(
+            &mut tx,
+            Delivery {
+                seq,
+                uuid: uuid.to_string(),
+                event: event.to_string(),
+                headers: Dictionary(headers.clone()),
+                payload: JsonValue(payload.clone()),
+                recvtime: IsoDate(recvtime),
+                ack: None,
+            }
+            .insert(),
+        )?;
+        assert_eq!(ic, 1);
 
-        //     let ic = diesel::insert_into(delivery::dsl::delivery)
-        //         .values(Delivery {
-        //             seq,
-        //             uuid: uuid.to_string(),
-        //             event: event.to_string(),
-        //             headers: Dictionary(headers.clone()),
-        //             payload: JsonValue(payload.clone()),
-        //             recvtime: IsoDate(recvtime),
-        //             ack: None,
-        //         })
-        //         .execute(tx)?;
-        //     assert_eq!(ic, 1);
-
-        //     Ok((seq, true))
-        // })
-
-        todo!()
+        tx.commit()?;
+        Ok((seq, true))
     }
 
-    pub fn delivery_load(&self, seq: DeliverySeq) -> Result<Delivery> {
-        // use schema::delivery;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(delivery::dsl::delivery.find(seq).get_result(c)?)
-
-        todo!()
+    pub fn delivery_load(&self, seq: DeliverySeq) -> DBResult<Delivery> {
+        self.get_row(Delivery::find(seq))
     }
 
-    pub fn delivery_ack(&self, seq: DeliverySeq, ack: u64) -> Result<()> {
-        // use schema::delivery;
+    pub fn delivery_ack(&self, seq: DeliverySeq, ack: u64) -> DBResult<()> {
+        let ic = self.exec_update(
+            Query::update()
+                .table(DeliveryDef::Table)
+                .and_where(Expr::col(DeliveryDef::Seq).eq(seq))
+                .value(DeliveryDef::Ack, ack)
+                .to_owned(),
+        )?;
+        assert!(ic < 2);
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        if ic == 0 {
+            conflict!("delivery {seq} not found");
+        }
 
-        // let ic = diesel::update(delivery::dsl::delivery)
-        //     .filter(delivery::dsl::seq.eq(seq))
-        //     .set(delivery::dsl::ack.eq(Some(ack as i64)))
-        //     .execute(c)?;
-        // assert!(ic < 2);
-
-        // if ic == 0 {
-        //     bail!("delivery {} not found", seq);
-        // }
-
-        // Ok(())
-
-        todo!()
+        Ok(())
     }
 
-    pub fn delivery_unack(&self, seq: DeliverySeq) -> Result<()> {
-        // use schema::delivery;
+    pub fn delivery_unack(&self, seq: DeliverySeq) -> DBResult<()> {
+        let ic = self.exec_update(
+            Query::update()
+                .table(DeliveryDef::Table)
+                .and_where(Expr::col(DeliveryDef::Seq).eq(seq))
+                .value(DeliveryDef::Ack, None::<DeliverySeq>)
+                .to_owned(),
+        )?;
+        assert!(ic < 2);
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        if ic == 0 {
+            conflict!("delivery {seq} not found");
+        }
 
-        // let ic = diesel::update(delivery::dsl::delivery)
-        //     .filter(delivery::dsl::seq.eq(seq))
-        //     .set(delivery::dsl::ack.eq(None::<i64>))
-        //     .execute(c)?;
-        // assert!(ic < 2);
-
-        // if ic == 0 {
-        //     bail!("delivery {} not found", seq);
-        // }
-
-        // Ok(())
-
-        todo!()
+        Ok(())
     }
 
-    pub fn list_deliveries_unacked(&self) -> Result<Vec<Delivery>> {
-        // use schema::delivery;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(delivery::dsl::delivery
-        //     .filter(delivery::dsl::ack.is_null())
-        //     .order_by(delivery::dsl::seq.asc())
-        //     .get_results(c)?)
-
-        todo!()
+    pub fn list_deliveries_unacked(&self) -> DBResult<Vec<Delivery>> {
+        self.get_rows(
+            Query::select()
+                .from(DeliveryDef::Table)
+                .columns(Delivery::columns())
+                .and_where(Expr::col(DeliveryDef::Ack).is_null())
+                .order_by(DeliveryDef::Seq, Order::Asc)
+                .to_owned(),
+        )
     }
 
     /**
      * Get the delivery with the earliest receive time, if one exists.  This is
      * used for archiving.
      */
-    pub fn delivery_earliest(&self) -> Result<Option<Delivery>> {
-        // use schema::delivery;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(delivery::dsl::delivery
-        //     .order_by(delivery::dsl::recvtime.asc())
-        //     .limit(1)
-        //     .get_result(c)
-        //     .optional()?)
-
-        todo!()
+    pub fn delivery_earliest(&self) -> DBResult<Option<Delivery>> {
+        self.get_row_opt(
+            Query::select()
+                .from(DeliveryDef::Table)
+                .columns(Delivery::columns())
+                .order_by(DeliveryDef::Recvtime, Order::Asc)
+                .limit(1)
+                .to_owned(),
+        )
     }
 
     /**
      * Load all deliveries that occur on the same day as this delivery.
      */
-    pub fn same_day_deliveries(&self, d: &Delivery) -> Result<Vec<Delivery>> {
-        // use schema::delivery;
+    pub fn same_day_deliveries(&self, d: &Delivery) -> DBResult<Vec<Delivery>> {
+        /*
+         * IsoDate fields should be in RFC3339 format, but some records written
+         * in the past had a slightly different format.  Both formats are
+         * prefixed with "%Y-%m-%d", though, so we can produce a LIKE clause
+         * that will find all the records on the same day as this one.
+         */
+        let prefix = d.recvtime.0.format("%Y-%m-%d%%").to_string();
 
-        // /*
-        //  * IsoDate fields should be in RFC3339 format, but some records written
-        //  * in the past had a slightly different format.  Both formats are
-        //  * prefixed with "%Y-%m-%d", though, so we can produce a LIKE clause
-        //  * that will find all the records on the same day as this one.
-        //  */
-        // let prefix = d.recvtime.0.format("%Y-%m-%d%%").to_string();
-
-        // let c = &mut self.1.lock().unwrap().conn;
-        // Ok(delivery::dsl::delivery
-        //     .filter(delivery::dsl::recvtime.like(&prefix))
-        //     .order_by(delivery::dsl::recvtime.asc())
-        //     .get_results(c)?)
-
-        todo!()
+        self.get_rows(
+            Query::select()
+                .from(DeliveryDef::Table)
+                .columns(Delivery::columns())
+                .and_where(Expr::col(DeliveryDef::Recvtime).like(prefix))
+                .order_by(DeliveryDef::Recvtime, Order::Asc)
+                .to_owned(),
+        )
     }
 
     pub fn remove_deliveries(
@@ -305,92 +299,56 @@ impl Database {
         todo!()
     }
 
-    pub fn list_deliveries_recent(&self, n: usize) -> Result<Vec<DeliverySeq>> {
-        // use schema::delivery;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // let res: Vec<(DeliverySeq,)> = delivery::dsl::delivery
-        //     .select((delivery::dsl::seq,))
-        //     .order_by(delivery::dsl::seq.desc())
-        //     .limit(n.try_into().unwrap())
-        //     .get_results(c)?;
-
-        // Ok(res.iter().map(|r| r.0).rev().collect())
-
-        todo!()
+    pub fn list_deliveries_recent(
+        &self,
+        n: usize,
+    ) -> DBResult<Vec<DeliverySeq>> {
+        Ok(self
+            .get_rows(
+                Query::select()
+                    .from(DeliveryDef::Table)
+                    .column(DeliveryDef::Seq)
+                    .order_by(DeliveryDef::Seq, Order::Desc)
+                    .limit(n.try_into().unwrap())
+                    .to_owned(),
+            )?
+            .into_iter()
+            .rev()
+            .collect())
     }
 
-    pub fn list_deliveries(&self) -> Result<Vec<DeliverySeq>> {
-        // use schema::delivery;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // let res: Vec<(DeliverySeq,)> = delivery::dsl::delivery
-        //     .select((delivery::dsl::seq,))
-        //     .order_by(delivery::dsl::seq.asc())
-        //     .get_results(c)?;
-
-        // Ok(res.iter().map(|r| r.0).collect())
-
-        todo!()
+    pub fn list_deliveries(&self) -> DBResult<Vec<DeliverySeq>> {
+        self.get_rows(
+            Query::select()
+                .from(DeliveryDef::Table)
+                .column(DeliveryDef::Seq)
+                .order_by(DeliveryDef::Seq, Order::Asc)
+                .to_owned(),
+        )
     }
 
-    pub fn load_check_run(&self, id: &CheckRunId) -> Result<CheckRun> {
-        // use schema::check_run;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(check_run::dsl::check_run.find(id).get_result(c)?)
-
-        todo!()
+    pub fn load_check_run(&self, id: CheckRunId) -> DBResult<CheckRun> {
+        self.get_row(CheckRun::find(id))
     }
 
-    pub fn load_check_suite(&self, id: &CheckSuiteId) -> Result<CheckSuite> {
-        // use schema::check_suite;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(check_suite::dsl::check_suite.find(id).get_result(c)?)
-
-        todo!()
+    pub fn load_check_suite(&self, id: CheckSuiteId) -> DBResult<CheckSuite> {
+        self.get_row(CheckSuite::find(id))
     }
 
     pub fn load_check_suite_by_github_id(
         &self,
         repo: i64,
         github_id: i64,
-    ) -> Result<CheckSuite> {
-        // use schema::check_suite;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(check_suite::dsl::check_suite
-        //     .filter(check_suite::dsl::repo.eq(repo))
-        //     .filter(check_suite::dsl::github_id.eq(github_id))
-        //     .get_result(c)?)
-
-        todo!()
+    ) -> DBResult<CheckSuite> {
+        self.get_row(CheckSuite::find_by_github_id(repo, github_id))
     }
 
-    pub fn load_delivery(&self, seq: DeliverySeq) -> Result<Delivery> {
-        // use schema::delivery;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(delivery::dsl::delivery.find(seq).get_result(c)?)
-
-        todo!()
+    pub fn load_delivery(&self, seq: DeliverySeq) -> DBResult<Delivery> {
+        self.get_row(Delivery::find(seq))
     }
 
     pub fn load_repository(&self, id: i64) -> DBResult<Repository> {
-        // use schema::repository;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(repository::dsl::repository.find(id).get_result(c)?)
-
-        todo!()
+        self.get_row(Repository::find(id))
     }
 
     pub fn lookup_repository(
@@ -398,17 +356,14 @@ impl Database {
         owner: &str,
         name: &str,
     ) -> DBResult<Option<Repository>> {
-        // use schema::repository;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(repository::dsl::repository
-        //     .filter(repository::dsl::owner.eq(owner))
-        //     .filter(repository::dsl::name.eq(name))
-        //     .get_result(c)
-        //     .optional()?)
-
-        todo!()
+        self.get_row_opt(
+            Query::select()
+                .from(RepositoryDef::Table)
+                .columns(Repository::columns())
+                .and_where(Expr::col(RepositoryDef::Owner).eq(owner))
+                .and_where(Expr::col(RepositoryDef::Name).eq(name))
+                .to_owned(),
+        )
     }
 
     pub fn store_repository(
@@ -439,16 +394,14 @@ impl Database {
         todo!()
     }
 
-    pub fn list_repositories(&self) -> Result<Vec<Repository>> {
-        // use schema::repository;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(repository::dsl::repository
-        //     .order_by(repository::dsl::id.asc())
-        //     .get_results(c)?)
-
-        todo!()
+    pub fn list_repositories(&self) -> DBResult<Vec<Repository>> {
+        self.get_rows(
+            Query::select()
+                .from(RepositoryDef::Table)
+                .columns(Repository::columns())
+                .order_by(RepositoryDef::Id, Order::Asc)
+                .to_owned(),
+        )
     }
 
     pub fn repo_to_install(&self, repo: &Repository) -> DBResult<Install> {
@@ -479,42 +432,27 @@ impl Database {
     }
 
     pub fn load_install(&self, id: i64) -> DBResult<Install> {
-        // use schema::install;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(install::dsl::install.find(id).get_result(c)?)
-
-        todo!()
+        self.get_row(Install::find(id))
     }
 
     pub fn store_install(&self, id: i64, owner: i64) -> DBResult<()> {
-        // use schema::install;
+        let i = Install { id, owner };
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        self.exec_insert(
+            i.insert()
+                .on_conflict(
+                    OnConflict::column(InstallDef::Id)
+                        .update_column(InstallDef::Owner)
+                        .to_owned(),
+                )
+                .to_owned(),
+        )?;
 
-        // let i = Install { id, owner };
-
-        // diesel::insert_into(install::dsl::install)
-        //     .values(&i)
-        //     .on_conflict(install::dsl::id)
-        //     .do_update()
-        //     .set((install::dsl::owner.eq(i.owner),))
-        //     .execute(c)?;
-
-        // Ok(())
-
-        todo!()
+        Ok(())
     }
 
     pub fn load_user(&self, id: i64) -> DBResult<User> {
-        // use schema::user;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(user::dsl::user.find(id).get_result(c)?)
-
-        todo!()
+        self.get_row(User::find(id))
     }
 
     pub fn store_user(
@@ -525,146 +463,133 @@ impl Database {
         name: Option<&str>,
         email: Option<&str>,
     ) -> DBResult<()> {
-        // use schema::user;
+        let u = User {
+            id,
+            login: login.to_string(),
+            usertype,
+            name: name.map(|s| s.to_string()),
+            email: email.map(|s| s.to_string()),
+        };
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        self.exec_insert(
+            u.insert()
+                .on_conflict(
+                    OnConflict::column(UserDef::Id)
+                        .update_column(UserDef::Login)
+                        .update_column(UserDef::Name)
+                        .update_column(UserDef::Email)
+                        .update_column(UserDef::Usertype)
+                        .to_owned(),
+                )
+                .to_owned(),
+        )?;
 
-        // let u = User {
-        //     id,
-        //     login: login.to_string(),
-        //     usertype,
-        //     name: name.map(|s| s.to_string()),
-        //     email: email.map(|s| s.to_string()),
-        // };
-
-        // diesel::insert_into(user::dsl::user)
-        //     .values(&u)
-        //     .on_conflict(user::dsl::id)
-        //     .do_update()
-        //     .set((
-        //         user::dsl::login.eq(&u.login),
-        //         user::dsl::name.eq(&u.name),
-        //         user::dsl::email.eq(&u.email),
-        //         user::dsl::usertype.eq(u.usertype),
-        //     ))
-        //     .execute(c)?;
-
-        // Ok(())
-
-        todo!()
+        Ok(())
     }
 
-    pub fn list_check_suites(&self) -> Result<Vec<CheckSuite>> {
-        // use schema::check_suite;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(check_suite::dsl::check_suite
-        //     .order_by(check_suite::dsl::id.asc())
-        //     .get_results(c)?)
-
-        todo!()
+    pub fn list_check_suites(&self) -> DBResult<Vec<CheckSuite>> {
+        self.get_rows(
+            Query::select()
+                .from(CheckSuiteDef::Table)
+                .columns(CheckSuite::columns())
+                .order_by(CheckSuiteDef::Id, Order::Asc)
+                .to_owned(),
+        )
     }
 
-    pub fn list_check_suite_ids(&self) -> Result<Vec<CheckSuiteId>> {
-        // use schema::check_suite;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(check_suite::dsl::check_suite
-        //     .select(check_suite::dsl::id)
-        //     .order_by(check_suite::dsl::id.asc())
-        //     .get_results(c)?)
-
-        todo!()
+    pub fn list_check_suite_ids(&self) -> DBResult<Vec<CheckSuiteId>> {
+        self.get_rows(
+            Query::select()
+                .from(CheckSuiteDef::Table)
+                .column(CheckSuiteDef::Id)
+                .order_by(CheckSuiteDef::Id, Order::Asc)
+                .to_owned(),
+        )
     }
 
-    pub fn list_check_suites_active(&self) -> Result<Vec<CheckSuite>> {
-        // use schema::check_suite;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(check_suite::dsl::check_suite
-        //     .filter(check_suite::dsl::state.is_not(CheckSuiteState::Parked))
-        //     .filter(check_suite::dsl::state.is_not(CheckSuiteState::Complete))
-        //     .filter(check_suite::dsl::state.is_not(CheckSuiteState::Retired))
-        //     .order_by(check_suite::dsl::id.asc())
-        //     .get_results(c)?)
-
-        todo!()
+    pub fn list_check_suites_active(&self) -> DBResult<Vec<CheckSuite>> {
+        self.get_rows(
+            Query::select()
+                .from(CheckSuiteDef::Table)
+                .columns(CheckSuite::columns())
+                .and_where(
+                    Expr::col(CheckSuiteDef::State)
+                        .is_not(CheckSuiteState::Parked),
+                )
+                .and_where(
+                    Expr::col(CheckSuiteDef::State)
+                        .is_not(CheckSuiteState::Complete),
+                )
+                .and_where(
+                    Expr::col(CheckSuiteDef::State)
+                        .is_not(CheckSuiteState::Retired),
+                )
+                .order_by(CheckSuiteDef::Id, Order::Asc)
+                .to_owned(),
+        )
     }
 
     pub fn list_check_runs_for_suite(
         &self,
-        check_suite: &CheckSuiteId,
-    ) -> Result<Vec<CheckRun>> {
-        // use schema::check_run;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(check_run::dsl::check_run
-        //     .filter(check_run::dsl::check_suite.eq(check_suite))
-        //     .order_by(check_run::dsl::id.asc())
-        //     .get_results(c)?)
-
-        todo!()
+        check_suite: CheckSuiteId,
+    ) -> DBResult<Vec<CheckRun>> {
+        self.get_rows(
+            Query::select()
+                .from(CheckRunDef::Table)
+                .columns(CheckRun::columns())
+                .and_where(Expr::col(CheckRunDef::CheckSuite).eq(check_suite))
+                .order_by(CheckRunDef::Id, Order::Asc)
+                .to_owned(),
+        )
     }
 
     pub fn find_check_runs_from_github_id(
         &self,
         repo: i64,
         github_id: i64,
-    ) -> Result<Vec<(CheckSuite, CheckRun)>> {
-        // use schema::check_run;
+    ) -> DBResult<Vec<(CheckSuite, CheckRun)>> {
+        /*
+         * First, locate any check runs that have this GitHub ID:
+         */
+        let runs: Vec<CheckRun> = self.get_rows(
+            Query::select()
+                .from(CheckRunDef::Table)
+                .columns(CheckRun::columns())
+                .and_where(Expr::col(CheckRunDef::GithubId).eq(github_id))
+                .to_owned(),
+        )?;
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        Ok(runs
+            .into_iter()
+            .filter_map(|run| {
+                let res = self
+                    .get_row::<CheckSuite>(CheckSuite::find(run.check_suite));
 
-        // /*
-        //  * First, locate any check runs that have this GitHub ID:
-        //  */
-        // let runs: Vec<CheckRun> = check_run::dsl::check_run
-        //     .filter(check_run::dsl::github_id.eq(github_id))
-        //     .get_results(c)?;
+                if let Ok(cs) = res {
+                    if cs.repo == repo {
+                        return Some((cs, run));
+                    }
+                }
 
-        // Ok(runs
-        //     .into_iter()
-        //     .filter_map(|run| {
-        //         use schema::check_suite;
-
-        //         let res = check_suite::dsl::check_suite
-        //             .find(run.check_suite)
-        //             .get_result::<CheckSuite>(c);
-
-        //         if let Ok(cs) = res {
-        //             if cs.repo == repo {
-        //                 return Some((cs, run));
-        //             }
-        //         }
-
-        //         None
-        //     })
-        //     .collect())
-
-        todo!()
+                None
+            })
+            .collect())
     }
 
     pub fn load_check_run_for_suite_by_name(
         &self,
-        check_suite: &CheckSuiteId,
+        check_suite: CheckSuiteId,
         check_run_name: &str,
-    ) -> Result<Option<CheckRun>> {
-        // use schema::check_run;
-
-        // let c = &mut self.1.lock().unwrap().conn;
-
-        // Ok(check_run::dsl::check_run
-        //     .filter(check_run::dsl::check_suite.eq(check_suite))
-        //     .filter(check_run::dsl::active.eq(true))
-        //     .filter(check_run::dsl::name.eq(check_run_name))
-        //     .get_result(c)
-        //     .optional()?)
-
-        todo!()
+    ) -> DBResult<Option<CheckRun>> {
+        self.get_row_opt(
+            Query::select()
+                .from(CheckRunDef::Table)
+                .columns(CheckRun::columns())
+                .and_where(Expr::col(CheckRunDef::CheckSuite).eq(check_suite))
+                .and_where(Expr::col(CheckRunDef::Active).eq(true))
+                .and_where(Expr::col(CheckRunDef::Name).eq(check_run_name))
+                .to_owned(),
+        )
     }
 
     pub fn ensure_check_suite(
@@ -723,7 +648,7 @@ impl Database {
         todo!()
     }
 
-    pub fn update_check_suite(&self, check_suite: &CheckSuite) -> DBResult<()> {
+    pub fn update_check_suite(&self, check_suite: CheckSuite) -> DBResult<()> {
         // let c = &mut self.1.lock().unwrap().conn;
 
         // c.immediate_transaction(|tx| {
@@ -765,9 +690,9 @@ impl Database {
 
     pub fn ensure_check_run(
         &self,
-        check_suite: &CheckSuiteId,
+        check_suite: CheckSuiteId,
         name: &str,
-        variety: &CheckRunVariety,
+        variety: CheckRunVariety,
         dependencies: &HashMap<String, JobFileDepend>,
     ) -> DBResult<CheckRun> {
         // let c = &mut self.1.lock().unwrap().conn;
@@ -846,7 +771,7 @@ impl Database {
         todo!()
     }
 
-    pub fn update_check_run(&self, check_run: &CheckRun) -> DBResult<()> {
+    pub fn update_check_run(&self, check_run: CheckRun) -> DBResult<()> {
         // let c = &mut self.1.lock().unwrap().conn;
 
         // c.immediate_transaction(|tx| {
@@ -885,5 +810,189 @@ impl Database {
         // })
 
         todo!()
+    }
+
+    /*
+     * Helper routines for database access:
+     */
+
+    fn tx_exec_delete(
+        &self,
+        tx: &mut Transaction,
+        d: DeleteStatement,
+    ) -> DBResult<usize> {
+        let (q, v) = d.build_rusqlite(SqliteQueryBuilder);
+        self.tx_exec(tx, q, v)
+    }
+
+    fn tx_exec_update(
+        &self,
+        tx: &mut Transaction,
+        u: UpdateStatement,
+    ) -> DBResult<usize> {
+        let (q, v) = u.build_rusqlite(SqliteQueryBuilder);
+        self.tx_exec(tx, q, v)
+    }
+
+    fn tx_exec_insert(
+        &self,
+        tx: &mut Transaction,
+        i: InsertStatement,
+    ) -> DBResult<usize> {
+        let (q, v) = i.build_rusqlite(SqliteQueryBuilder);
+        self.tx_exec(tx, q, v)
+    }
+
+    fn tx_exec(
+        &self,
+        tx: &mut Transaction,
+        q: String,
+        v: RusqliteValues,
+    ) -> DBResult<usize> {
+        let mut s = tx.prepare(&q)?;
+        let out = s.execute(&*v.as_params())?;
+
+        Ok(out)
+    }
+
+    fn exec_delete(&self, d: DeleteStatement) -> DBResult<usize> {
+        let (q, v) = d.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        self.exec(q, v)
+    }
+
+    fn exec_update(&self, u: UpdateStatement) -> DBResult<usize> {
+        let (q, v) = u.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        self.exec(q, v)
+    }
+
+    fn exec_insert(&self, i: InsertStatement) -> DBResult<usize> {
+        let (q, v) = i.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        self.exec(q, v)
+    }
+
+    fn exec(&self, q: String, v: RusqliteValues) -> DBResult<usize> {
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let out = c.prepare(&q)?.execute(&*v.as_params())?;
+
+        Ok(out)
+    }
+
+    fn get_strings(&self, s: SelectStatement) -> DBResult<Vec<String>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let mut s = c.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), |row| row.get(0))?;
+
+        Ok(out.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn get_rows<T: FromRow>(&self, s: SelectStatement) -> DBResult<Vec<T>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let mut s = c.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+
+        Ok(out.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn get_row<T: FromRow>(&self, s: SelectStatement) -> DBResult<T> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let mut s = c.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
+        match out.len() {
+            0 => conflict!("record not found"),
+            1 => Ok(out.pop().unwrap()),
+            n => conflict!("found {n} records when we wanted only 1"),
+        }
+    }
+
+    fn get_row_opt<T: FromRow>(
+        &self,
+        s: SelectStatement,
+    ) -> DBResult<Option<T>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        let c = &mut self.1.lock().unwrap().conn;
+
+        let mut s = c.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
+        match out.len() {
+            0 => Ok(None),
+            1 => Ok(Some(out.pop().unwrap())),
+            n => conflict!("found {n} records when we wanted only 1"),
+        }
+    }
+
+    fn tx_get_row_opt<T: FromRow>(
+        &self,
+        tx: &mut Transaction,
+        s: SelectStatement,
+    ) -> DBResult<Option<T>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        let mut s = tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
+        match out.len() {
+            0 => Ok(None),
+            1 => Ok(Some(out.pop().unwrap())),
+            n => conflict!("found {n} records when we wanted only 1"),
+        }
+    }
+
+    fn tx_get_strings(
+        &self,
+        tx: &mut Transaction,
+        s: SelectStatement,
+    ) -> DBResult<Vec<String>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        let mut s = tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), |row| row.get(0))?;
+
+        Ok(out.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn tx_get_rows<T: FromRow>(
+        &self,
+        tx: &mut Transaction,
+        s: SelectStatement,
+    ) -> DBResult<Vec<T>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        let mut s = tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+
+        Ok(out.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn tx_get_row<T: FromRow>(
+        &self,
+        tx: &mut Transaction,
+        s: SelectStatement,
+    ) -> DBResult<T> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
+        let mut s = tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
+        match out.len() {
+            0 => conflict!("record not found"),
+            1 => Ok(out.pop().unwrap()),
+            n => conflict!("found {n} records when we wanted only 1"),
+        }
     }
 }

@@ -56,3 +56,41 @@ pub use install::*;
 pub use user::*;
 pub use check_suite::*;
 pub use check_run::*;
+
+impl<T: FromRow + rusqlite::types::FromSql> FromRow for Option<T> {
+    fn columns() -> Vec<ColumnRef> {
+        unimplemented!()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<Option<T>> {
+        Ok(row.get(0)?)
+    }
+}
+
+/*
+ * This implementation allows us to use the existing tx_get_rows() routine to
+ * fish out a list of delivery "seq" values.
+ */
+impl FromRow for DeliverySeq {
+    fn columns() -> Vec<ColumnRef> {
+        unimplemented!()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<DeliverySeq> {
+        Ok(row.get(0)?)
+    }
+}
+
+/*
+ * This implementation allows us to use the existing tx_get_rows() routine to
+ * fish out a list of check suite ID values.
+ */
+impl FromRow for CheckSuiteId {
+    fn columns() -> Vec<ColumnRef> {
+        unimplemented!()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<CheckSuiteId> {
+        Ok(row.get(0)?)
+    }
+}

@@ -71,6 +71,30 @@ impl FromRow for User {
     }
 }
 
+impl User {
+    pub fn find(id: i64) -> SelectStatement {
+        Query::select()
+            .from(UserDef::Table)
+            .columns(User::columns())
+            .and_where(Expr::col(UserDef::Id).eq(id))
+            .to_owned()
+    }
+
+    pub fn insert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(UserDef::Table)
+            .columns(Self::bare_columns())
+            .values_panic([
+                self.id.into(),
+                self.login.clone().into(),
+                self.usertype.into(),
+                self.name.clone().into(),
+                self.email.clone().into(),
+            ])
+            .to_owned()
+    }
+}
+
 /*
  * These tests attempt to ensure that the concrete representation of the enum
  * does not change, as that would make the database unuseable.

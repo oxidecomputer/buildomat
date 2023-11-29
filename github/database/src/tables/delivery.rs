@@ -51,6 +51,30 @@ impl FromRow for Delivery {
 }
 
 impl Delivery {
+    pub fn find(seq: DeliverySeq) -> SelectStatement {
+        Query::select()
+            .from(DeliveryDef::Table)
+            .columns(Delivery::columns())
+            .and_where(Expr::col(DeliveryDef::Seq).eq(seq))
+            .to_owned()
+    }
+
+    pub fn insert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(DeliveryDef::Table)
+            .columns(Self::bare_columns())
+            .values_panic([
+                self.seq.into(),
+                self.uuid.clone().into(),
+                self.event.clone().into(),
+                self.headers.clone().into(),
+                self.payload.clone().into(),
+                self.recvtime.into(),
+                self.ack.into(),
+            ])
+            .to_owned()
+    }
+
     pub fn recvtime_day_prefix(&self) -> String {
         self.recvtime.0.format("%Y-%m-%d").to_string()
     }

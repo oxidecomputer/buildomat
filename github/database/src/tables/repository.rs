@@ -33,3 +33,25 @@ impl FromRow for Repository {
         })
     }
 }
+
+impl Repository {
+    pub fn find(id: i64) -> SelectStatement {
+        Query::select()
+            .from(RepositoryDef::Table)
+            .columns(Repository::columns())
+            .and_where(Expr::col(RepositoryDef::Id).eq(id))
+            .to_owned()
+    }
+
+    pub fn insert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(RepositoryDef::Table)
+            .columns(Self::bare_columns())
+            .values_panic([
+                self.id.into(),
+                self.owner.clone().into(),
+                self.name.clone().into(),
+            ])
+            .to_owned()
+    }
+}

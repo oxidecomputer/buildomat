@@ -101,3 +101,22 @@ impl FromRow for CheckSuite {
         })
     }
 }
+
+impl CheckSuite {
+    pub fn find(id: CheckSuiteId) -> SelectStatement {
+        Query::select()
+            .from(CheckSuiteDef::Table)
+            .columns(CheckSuite::columns())
+            .and_where(Expr::col(CheckSuiteDef::Id).eq(id))
+            .to_owned()
+    }
+
+    pub fn find_by_github_id(repo: i64, github_id: i64) -> SelectStatement {
+        Query::select()
+            .from(CheckSuiteDef::Table)
+            .columns(CheckSuite::columns())
+            .and_where(Expr::col(CheckSuiteDef::Repo).eq(repo))
+            .and_where(Expr::col(CheckSuiteDef::GithubId).eq(github_id))
+            .to_owned()
+    }
+}

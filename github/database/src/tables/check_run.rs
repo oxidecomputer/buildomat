@@ -107,6 +107,14 @@ impl FromRow for CheckRun {
 }
 
 impl CheckRun {
+    pub fn find(id: CheckRunId) -> SelectStatement {
+        Query::select()
+            .from(CheckRunDef::Table)
+            .columns(CheckRun::columns())
+            .and_where(Expr::col(CheckRunDef::Id).eq(id))
+            .to_owned()
+    }
+
     pub fn get_config<T>(&self) -> Result<T>
     where
         for<'de> T: Deserialize<'de>,
