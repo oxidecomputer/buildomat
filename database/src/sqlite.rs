@@ -13,7 +13,7 @@ use slog::{info, Logger};
 
 #[macro_export]
 macro_rules! sqlite_sql_enum {
-    ($name:ident => { $($arms:tt)* })  => {
+    ($name:ident ( $($derives:ident),* ) => { $($arms:tt)* }) => {
         #[derive(
             Debug,
             Clone,
@@ -21,7 +21,8 @@ macro_rules! sqlite_sql_enum {
             PartialEq,
             Eq,
             strum::Display,
-            strum::EnumString
+            strum::EnumString,
+            $($derives),*
         )]
         #[strum(serialize_all = "snake_case")]
         pub enum $name { $($arms)* }
@@ -64,7 +65,11 @@ macro_rules! sqlite_sql_enum {
                 }
             }
         }
-    }
+    };
+
+    ($name:ident => { $($arms:tt)* }) => {
+        $crate::sqlite_sql_enum!($name () => { $($arms)* });
+    };
 }
 
 #[macro_export]
@@ -134,7 +139,7 @@ macro_rules! sqlite_integer_new_type {
 
         impl From<$name> for sea_query::Value {
             fn from(value: $name) -> sea_query::Value {
-                sea_query::Value::$intype(Some(value.0))
+                sea_query::Value::$intype(Some(value.0.try_into().unwrap()))
             }
         }
 

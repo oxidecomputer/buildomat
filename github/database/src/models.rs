@@ -1,27 +1,23 @@
 use anyhow::{bail, Result};
-use buildomat_database::old::*;
+use buildomat_database::sqlite::rusqlite;
+use buildomat_database::sqlite::{Dictionary, IsoDate, JsonValue};
 use buildomat_database::{
-    integer_new_type, json_new_type, sql_for_enum, ulid_new_type,
+    sqlite_integer_new_type, sqlite_json_new_type, sqlite_sql_enum,
+    sqlite_ulid_new_type,
 };
 use buildomat_github_common::hooktypes;
 use chrono::prelude::*;
-use diesel::deserialize::FromSql;
-use diesel::prelude::*;
-use diesel::serialize::ToSql;
 use serde::{Deserialize, Serialize};
-use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::{collections::HashMap, str::FromStr};
 
-use super::schema::*;
+sqlite_integer_new_type!(DeliverySeq, usize, BigUnsigned);
 
-integer_new_type!(DeliverySeq, usize, i64, BigInt, diesel::sql_types::BigInt);
+sqlite_ulid_new_type!(CheckSuiteId);
+sqlite_ulid_new_type!(CheckRunId);
 
-ulid_new_type!(CheckSuiteId);
-ulid_new_type!(CheckRunId);
-
-#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = delivery)]
-#[diesel(primary_key(seq))]
+#[derive(Debug, Clone)]
+//#[diesel(table_name = delivery)]
+//#[diesel(primary_key(seq))]
 pub struct Delivery {
     pub seq: DeliverySeq,
     pub uuid: String,
@@ -38,26 +34,26 @@ impl Delivery {
     }
 }
 
-#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = repository)]
-#[diesel(primary_key(id))]
+#[derive(Debug, Clone)]
+//#[diesel(table_name = repository)]
+//#[diesel(primary_key(id))]
 pub struct Repository {
     pub id: i64,
     pub owner: String,
     pub name: String,
 }
 
-#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = install)]
-#[diesel(primary_key(id))]
+#[derive(Debug, Clone)]
+//#[diesel(table_name = install)]
+//#[diesel(primary_key(id))]
 pub struct Install {
     pub id: i64,
     pub owner: i64,
 }
 
-#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = user)]
-#[diesel(primary_key(id))]
+#[derive(Debug, Clone)]
+//#[diesel(table_name = user)]
+//#[diesel(primary_key(id))]
 pub struct User {
     pub id: i64,
     pub login: String,
@@ -66,23 +62,12 @@ pub struct User {
     pub email: Option<String>,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    DeserializeFromStr,
-    SerializeDisplay,
-    FromSqlRow,
-    diesel::expression::AsExpression,
-)]
-#[diesel(sql_type = diesel::sql_types::Text)]
-pub enum UserType {
+sqlite_sql_enum!(UserType => {
     User,
     Bot,
+    #[strum(serialize = "org")]
     Organisation,
-}
-sql_for_enum!(UserType);
+});
 
 impl UserType {
     pub fn is_org(&self) -> bool {
@@ -107,53 +92,12 @@ impl UserType {
     }
 }
 
-impl FromStr for UserType {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            "user" => UserType::User,
-            "bot" => UserType::Bot,
-            "org" => UserType::Organisation,
-            x => bail!("unknown user type: {:?}", x),
-        })
-    }
-}
-
-impl std::fmt::Display for UserType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use UserType::*;
-
-        write!(
-            f,
-            "{}",
-            match self {
-                User => "user",
-                Bot => "bot",
-                Organisation => "org",
-            }
-        )
-    }
-}
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    DeserializeFromStr,
-    SerializeDisplay,
-    FromSqlRow,
-    diesel::expression::AsExpression,
-)]
-#[diesel(sql_type = diesel::sql_types::Text)]
-pub enum CheckRunVariety {
+sqlite_sql_enum!(CheckRunVariety (Serialize, Deserialize) => {
     Control,
     AlwaysPass,
     FailFirst,
     Basic,
-}
-sql_for_enum!(CheckRunVariety);
+});
 
 impl CheckRunVariety {
     pub fn is_control(&self) -> bool {
@@ -161,84 +105,69 @@ impl CheckRunVariety {
     }
 }
 
-impl FromStr for CheckRunVariety {
-    type Err = anyhow::Error;
+/*
+ * These tests attempt to ensure that the concrete representation of the enum
+ * does not change, as that would make the database unuseable.
+ */
+#[cfg(test)]
+mod test {
+    use super::{UserType, CheckRunVariety};
+    use std::str::FromStr;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            "control" => CheckRunVariety::Control,
-            "always_pass" => CheckRunVariety::AlwaysPass,
-            "fail_first" => CheckRunVariety::FailFirst,
-            "basic" => CheckRunVariety::Basic,
-            x => bail!("unknown check run class: {:?}", x),
-        })
+    const CHECK_RUN_VARIETIES: &'static [(&'static str, CheckRunVariety)] = &[
+        ("control", CheckRunVariety::Control),
+        ("always_pass", CheckRunVariety::AlwaysPass),
+        ("fail_first", CheckRunVariety::FailFirst),
+        ("basic", CheckRunVariety::Basic),
+    ];
+
+    #[test]
+    fn check_run_variety_forward() {
+        for (s, e) in CHECK_RUN_VARIETIES {
+            assert_eq!(*s, e.to_string());
+        }
+    }
+
+    #[test]
+    fn check_run_variety_backward() {
+        for (s, e) in CHECK_RUN_VARIETIES {
+            assert_eq!(CheckRunVariety::from_str(s).unwrap(), *e);
+        }
+    }
+
+    const USER_TYPES: &'static [(&'static str, UserType)] = &[
+        ("user", UserType::User),
+        ("bot", UserType::Bot),
+        ("org", UserType::Organisation),
+    ];
+
+    #[test]
+    fn user_type_forward() {
+        for (s, e) in USER_TYPES {
+            assert_eq!(*s, e.to_string());
+        }
+    }
+
+    #[test]
+    fn user_type_backward() {
+        for (s, e) in USER_TYPES {
+            assert_eq!(UserType::from_str(s).unwrap(), *e);
+        }
     }
 }
 
-impl std::fmt::Display for CheckRunVariety {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use CheckRunVariety::*;
-
-        write!(
-            f,
-            "{}",
-            match self {
-                Control => "control",
-                AlwaysPass => "always_pass",
-                FailFirst => "fail_first",
-                Basic => "basic",
-            }
-        )
-    }
-}
-
-#[derive(Debug, Clone, Copy, FromSqlRow, diesel::expression::AsExpression)]
-#[diesel(sql_type = diesel::sql_types::Text)]
-pub enum CheckSuiteState {
+sqlite_sql_enum!(CheckSuiteState => {
     Created,
     Parked,
     Planned,
     Running,
     Complete,
     Retired,
-}
-sql_for_enum!(CheckSuiteState);
+});
 
 impl CheckSuiteState {
     pub fn is_parked(&self) -> bool {
         matches!(self, CheckSuiteState::Parked)
-    }
-}
-
-impl FromStr for CheckSuiteState {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            "created" => CheckSuiteState::Created,
-            "parked" => CheckSuiteState::Parked,
-            "planned" => CheckSuiteState::Planned,
-            "running" => CheckSuiteState::Running,
-            "complete" => CheckSuiteState::Complete,
-            "retired" => CheckSuiteState::Retired,
-            x => bail!("unknown check suite state: {:?}", x),
-        })
-    }
-}
-
-impl ToString for CheckSuiteState {
-    fn to_string(&self) -> String {
-        use CheckSuiteState::*;
-
-        match self {
-            Created => "created",
-            Parked => "parked",
-            Planned => "planned",
-            Running => "running",
-            Complete => "complete",
-            Retired => "retired",
-        }
-        .to_string()
     }
 }
 
@@ -264,11 +193,11 @@ pub struct Plan {
     pub jobfiles: Vec<JobFile>,
 }
 
-json_new_type!(JsonPlan, Plan);
+sqlite_json_new_type!(JsonPlan, Plan);
 
-#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = check_suite)]
-#[diesel(primary_key(id))]
+#[derive(Debug, Clone)]
+//#[diesel(table_name = check_suite)]
+//#[diesel(primary_key(id))]
 pub struct CheckSuite {
     pub id: CheckSuiteId,
     pub repo: i64,
@@ -285,9 +214,9 @@ pub struct CheckSuite {
     pub approved_by: Option<i64>,
 }
 
-#[derive(Debug, Clone, Queryable, Insertable, Identifiable)]
-#[diesel(table_name = check_run)]
-#[diesel(primary_key(id))]
+#[derive(Debug, Clone)]
+//#[diesel(table_name = check_run)]
+//#[diesel(primary_key(id))]
 pub struct CheckRun {
     pub id: CheckRunId,
     pub check_suite: CheckSuiteId,

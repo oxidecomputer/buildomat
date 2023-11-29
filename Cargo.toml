@@ -31,7 +31,6 @@ aws-types = "0.55.3"
 base64 = "0.13"
 bytes = "1.1"
 chrono = { version = "0.4", features = [ "serde" ] }
-diesel = { version = "2.0.2", features = [ "sqlite", "extras", "serde_json" ] }
 dirs-next = "2"
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "x-forwarded-for" }
 futures = "0.3"
