@@ -93,6 +93,99 @@ impl Stuff {
     }
 }
 
+async fn do_job_join(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("JOB..."));
+
+    l.optflag("v", "", "verbose output");
+
+    let a = args!(l);
+    let verbose = a.opts().opt_present("v");
+
+    /*
+     * Try to make sure the job IDs are actually job IDs before we get started
+     * polling.
+     */
+    for id in a.args() {
+        Ulid::from_str(id.as_str())?;
+    }
+
+    let mut last_state: HashMap<String, String> = Default::default();
+    let mut waiting_for: HashSet<String> =
+        a.args().iter().map(String::to_string).collect();
+
+    loop {
+        let mut failed = false;
+
+        if waiting_for.is_empty() {
+            break;
+        }
+
+        for jid in waiting_for.clone().into_iter() {
+            match l.context().user().job_get().job(&jid).send().await {
+                Ok(rv) => {
+                    let job = rv.into_inner();
+
+                    if verbose {
+                        if let Some(old) = last_state.get(&job.id) {
+                            if &job.state != old {
+                                eprintln!(
+                                    "INFO: job {} state change: {:?} -> {:?}",
+                                    job.id, old, job.state,
+                                );
+                            }
+                        } else {
+                            if job.state != "completed" {
+                                eprintln!(
+                                    "INFO: job {} in state {:?}",
+                                    job.id, job.state,
+                                );
+                            }
+                        }
+                    }
+                    last_state
+                        .insert(job.id.to_string(), job.state.to_string());
+
+                    match job.state.as_str() {
+                        "completed" => {
+                            if verbose {
+                                eprintln!(
+                                    "job {} completed successfully",
+                                    job.id
+                                );
+                            }
+                            assert!(waiting_for.remove(&job.id));
+                        }
+                        "failed" | "cancelled" => {
+                            eprintln!("ERROR: job {} failed", job.id);
+                            failed = true;
+                        }
+                        _ => (),
+                    }
+                }
+                Err(e) => {
+                    eprintln!("WARNING: polling {jid:?} failed: {e}");
+                }
+            }
+
+            if failed {
+                bail!("some jobs failed to complete successfully");
+            }
+        }
+
+        if waiting_for.is_empty() {
+            break;
+        }
+
+        sleep_ms(5000).await;
+    }
+
+    if verbose {
+        eprintln!("all specified jobs completed successfully");
+    }
+
+    Ok(())
+}
+
 async fn do_job_tail(mut l: Level<Stuff>) -> Result<()> {
     l.usage_args(Some("JOB"));
 
@@ -986,6 +1079,7 @@ async fn do_job(mut l: Level<Stuff>) -> Result<()> {
     l.cmd("run", "run a job", cmd!(do_job_run))?;
     l.cmd("cancel", "cancel a job", cmd!(do_job_cancel))?;
     l.cmd("tail", "listen for events from a job", cmd!(do_job_tail))?;
+    l.cmd("join", "wait for completion of jobs", cmd!(do_job_join))?;
     l.cmd("store", "manage the job store", cmd!(do_job_store))?;
     l.cmd("outputs", "list job outputs", cmd!(do_job_outputs))?;
     l.cmd("dump", "dump information about jobs", cmd!(do_job_dump))?;
