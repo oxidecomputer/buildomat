@@ -4,22 +4,37 @@
 
 use anyhow::{bail, Result};
 use buildomat_common::*;
+use buildomat_database::sqlite::rusqlite;
 use chrono::prelude::*;
 use slog::Logger;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 use thiserror::Error;
-use buildomat_database::sqlite::rusqlite;
 
-mod models;
+mod tables;
 
-use models::*;
+mod itypes {
+    use buildomat_database::sqlite::rusqlite;
+    use buildomat_database::{
+        sqlite_integer_new_type, sqlite_ulid_new_type,
+    };
+
+    sqlite_integer_new_type!(DeliverySeq, usize, BigUnsigned);
+
+    sqlite_ulid_new_type!(CheckSuiteId);
+    sqlite_ulid_new_type!(CheckRunId);
+
+    pub use buildomat_database::sqlite::{Dictionary, IsoDate, JsonValue};
+}
 
 pub mod types {
-    pub use super::models::*;
     pub use buildomat_database::sqlite::{IsoDate, JsonValue};
+    pub use crate::tables::*;
 }
+
+use itypes::*;
+use types::*;
 
 #[derive(Error, Debug)]
 pub enum DatabaseError {
@@ -392,7 +407,7 @@ impl Database {
         //     .filter(repository::dsl::name.eq(name))
         //     .get_result(c)
         //     .optional()?)
-        
+
         todo!()
     }
 
@@ -649,7 +664,7 @@ impl Database {
         //     .get_result(c)
         //     .optional()?)
 
-            todo!()
+        todo!()
     }
 
     pub fn ensure_check_suite(

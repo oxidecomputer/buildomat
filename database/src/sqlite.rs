@@ -252,12 +252,12 @@ macro_rules! sqlite_ulid_new_type {
                 $name(rusty_ulid::Ulid::generate())
             }
 
-            pub fn datetime(&self) -> DateTime<Utc> {
+            pub fn datetime(&self) -> chrono::DateTime<chrono::Utc> {
                 self.0.datetime()
             }
 
             pub fn age(&self) -> std::time::Duration {
-                Utc::now()
+                chrono::Utc::now()
                     .signed_duration_since(self.0.datetime())
                     .to_std()
                     .unwrap_or_else(|_| std::time::Duration::from_secs(0))

@@ -26,7 +26,6 @@ mod tables;
 mod types {
     use buildomat_database::sqlite::rusqlite;
     use buildomat_database::{sqlite_integer_new_type, sqlite_ulid_new_type};
-    use chrono::prelude::*;
 
     sqlite_integer_new_type!(UnixUid, u32, Unsigned);
     sqlite_integer_new_type!(UnixGid, u32, Unsigned);
