@@ -189,7 +189,8 @@ impl Database {
         /*
          * Fetch the current instance state:
          */
-        let i: Instance = self.get_row(Instance::find(&i.nodename, i.seq))?;
+        let i: Instance =
+            self.tx_get_row(&mut tx, Instance::find(&i.nodename, i.seq))?;
 
         match i.state {
             InstanceState::Preboot | InstanceState::Booted => {
@@ -355,6 +356,7 @@ impl Database {
         self.get_row_opt(
             Query::select()
                 .from(InstanceEventDef::Table)
+                .columns(InstanceEvent::columns())
                 .and_where(
                     Expr::col(InstanceEventDef::Nodename).eq(&i.nodename),
                 )
@@ -380,6 +382,7 @@ impl Database {
                 .and_where(Expr::col(InstanceEventDef::Instance).eq(i.seq))
                 .and_where(Expr::col(InstanceEventDef::Seq).eq(ie.seq))
                 .and_where(Expr::col(InstanceEventDef::Uploaded).eq(false))
+                .value(InstanceEventDef::Uploaded, true)
                 .to_owned(),
         )?;
         assert!(uc == 0 || uc == 1);
