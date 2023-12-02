@@ -295,7 +295,7 @@ pub mod types {
     }
 
     impl Instance {
-        pub const ALL: &str =
+        pub const ALL: &'static str =
             "nodename, seq, worker, lease, target, state, bootstrap, slot";
 
         pub fn from_row(row: &Row) -> rusqlite::Result<Self> {
