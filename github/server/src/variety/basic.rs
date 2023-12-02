@@ -535,7 +535,7 @@ pub(crate) async fn run(
         let mut depends: HashMap<_, _> = Default::default();
         for (name, crd) in cr.get_dependencies()? {
             if let Some(ocr) =
-                db.load_check_run_for_suite_by_name(&cs.id, crd.job())?
+                db.load_check_run_for_suite_by_name(cs.id, crd.job())?
             {
                 if !matches!(ocr.variety, CheckRunVariety::Basic) {
                     p.complete = true;

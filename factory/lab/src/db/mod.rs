@@ -394,6 +394,7 @@ impl Database {
      * Helper routines for database access:
      */
 
+    #[allow(unused)]
     fn tx_exec_delete(
         &self,
         tx: &mut Transaction,

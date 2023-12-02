@@ -36,7 +36,7 @@ pub(crate) async fn details(
      * into groups by run name, as they appear on GitHub.
      */
     let mut runs: BTreeMap<String, Vec<CheckRun>> = Default::default();
-    for run in db.list_check_runs_for_suite(&cs.id)? {
+    for run in db.list_check_runs_for_suite(cs.id)? {
         let set = runs.entry(run.name.to_string()).or_default();
         set.push(run);
     }

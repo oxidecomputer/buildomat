@@ -57,7 +57,7 @@ impl FromRow for Option<InstanceSeq> {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<Option<InstanceSeq>> {
-        Ok(row.get(0)?)
+        row.get(0)
     }
 }
 
@@ -71,7 +71,7 @@ impl FromRow for Option<EventSeq> {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<Option<EventSeq>> {
-        Ok(row.get(0)?)
+        row.get(0)
     }
 }
 

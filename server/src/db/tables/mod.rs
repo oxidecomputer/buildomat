@@ -107,7 +107,7 @@ impl FromRow for Option<u32> {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<Option<u32>> {
-        Ok(row.get(0)?)
+        row.get(0)
     }
 }
 
@@ -131,10 +131,7 @@ impl FromRow for usize {
  */
 impl FromRow for (JobInput, Option<JobFile>) {
     fn columns() -> Vec<ColumnRef> {
-        JobInput::columns()
-            .into_iter()
-            .chain(JobFile::columns().into_iter())
-            .collect()
+        JobInput::columns().into_iter().chain(JobFile::columns()).collect()
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<Self> {
@@ -166,10 +163,7 @@ impl FromRow for (JobInput, Option<JobFile>) {
 
 impl FromRow for (JobOutput, JobFile) {
     fn columns() -> Vec<ColumnRef> {
-        JobOutput::columns()
-            .into_iter()
-            .chain(JobFile::columns().into_iter())
-            .collect()
+        JobOutput::columns().into_iter().chain(JobFile::columns()).collect()
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<Self> {

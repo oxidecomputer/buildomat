@@ -33,6 +33,7 @@ mod itypes {
 }
 
 pub mod types {
+    pub use crate::itypes::*;
     pub use crate::tables::*;
     pub use buildomat_database::sqlite::{IsoDate, JsonValue};
 }
@@ -643,7 +644,7 @@ impl Database {
         Ok(cs)
     }
 
-    pub fn update_check_suite(&self, check_suite: CheckSuite) -> DBResult<()> {
+    pub fn update_check_suite(&self, check_suite: &CheckSuite) -> DBResult<()> {
         let c = &mut self.1.lock().unwrap().conn;
         let mut tx = c.transaction_with_behavior(
             rusqlite::TransactionBehavior::Immediate,
@@ -670,8 +671,8 @@ impl Database {
                 .table(CheckSuiteDef::Table)
                 .and_where(Expr::col(CheckSuiteDef::Id).eq(check_suite.id))
                 .value(CheckSuiteDef::State, check_suite.state)
-                .value(CheckSuiteDef::Plan, check_suite.plan)
-                .value(CheckSuiteDef::PlanSha, check_suite.plan_sha)
+                .value(CheckSuiteDef::Plan, check_suite.plan.clone())
+                .value(CheckSuiteDef::PlanSha, check_suite.plan_sha.clone())
                 .value(CheckSuiteDef::PrBy, check_suite.pr_by)
                 .value(CheckSuiteDef::RequestedBy, check_suite.requested_by)
                 .value(CheckSuiteDef::ApprovedBy, check_suite.approved_by)
@@ -741,9 +742,9 @@ impl Database {
          */
         let cr = CheckRun {
             id: CheckRunId::generate(),
-            check_suite: check_suite,
+            check_suite,
             name: name.to_string(),
-            variety: variety,
+            variety,
             content: None,
             config: None,
             private: None,
@@ -760,7 +761,7 @@ impl Database {
         Ok(cr)
     }
 
-    pub fn update_check_run(&self, check_run: CheckRun) -> DBResult<()> {
+    pub fn update_check_run(&self, check_run: &CheckRun) -> DBResult<()> {
         let c = &mut self.1.lock().unwrap().conn;
         let mut tx = c.transaction_with_behavior(
             rusqlite::TransactionBehavior::Immediate,
@@ -790,9 +791,9 @@ impl Database {
                 .value(CheckRunDef::Active, check_run.active)
                 .value(CheckRunDef::Flushed, check_run.flushed)
                 .value(CheckRunDef::GithubId, check_run.github_id)
-                .value(CheckRunDef::Private, check_run.private)
-                .value(CheckRunDef::Content, check_run.content)
-                .value(CheckRunDef::Config, check_run.config)
+                .value(CheckRunDef::Private, check_run.private.clone())
+                .value(CheckRunDef::Content, check_run.content.clone())
+                .value(CheckRunDef::Config, check_run.config.clone())
                 .to_owned(),
         )?;
         assert_eq!(uc, 1);
@@ -844,6 +845,7 @@ impl Database {
         Ok(out)
     }
 
+    #[allow(unused)]
     fn exec_delete(&self, d: DeleteStatement) -> DBResult<usize> {
         let (q, v) = d.build_rusqlite(SqliteQueryBuilder);
         debug!(self.0, "query: {q}"; "sql" => true);
@@ -870,6 +872,7 @@ impl Database {
         Ok(out)
     }
 
+    #[allow(unused)]
     fn get_strings(&self, s: SelectStatement) -> DBResult<Vec<String>> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
         debug!(self.0, "query: {q}"; "sql" => true);
@@ -942,6 +945,7 @@ impl Database {
         }
     }
 
+    #[allow(unused)]
     fn tx_get_strings(
         &self,
         tx: &mut Transaction,
@@ -955,6 +959,7 @@ impl Database {
         Ok(out.collect::<rusqlite::Result<_>>()?)
     }
 
+    #[allow(unused)]
     fn tx_get_rows<T: FromRow>(
         &self,
         tx: &mut Transaction,

@@ -115,8 +115,8 @@ async fn artefact(
     let path = path.into_inner();
     let query = query.into_inner();
 
-    let cs = app.db.load_check_suite(&path.check_suite()?).to_500()?;
-    let cr = app.db.load_check_run(&path.check_run()?).to_500()?;
+    let cs = app.db.load_check_suite(path.check_suite()?).to_500()?;
+    let cr = app.db.load_check_run(path.check_run()?).to_500()?;
     if cs.url_key != path.url_key {
         return interr(&rc.log, "url key mismatch");
     }
@@ -186,8 +186,8 @@ async fn details(
     let query = query.into_inner();
     let local_time = query.ts.as_deref() == Some("all");
 
-    let cs = app.db.load_check_suite(&path.check_suite()?).to_500()?;
-    let cr = app.db.load_check_run(&path.check_run()?).to_500()?;
+    let cs = app.db.load_check_suite(path.check_suite()?).to_500()?;
+    let cr = app.db.load_check_run(path.check_run()?).to_500()?;
     if cs.url_key != path.url_key {
         return interr(&rc.log, "url key mismatch");
     }

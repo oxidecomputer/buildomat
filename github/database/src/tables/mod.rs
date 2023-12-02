@@ -63,7 +63,7 @@ impl<T: FromRow + rusqlite::types::FromSql> FromRow for Option<T> {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<Option<T>> {
-        Ok(row.get(0)?)
+        row.get(0)
     }
 }
 
@@ -77,7 +77,7 @@ impl FromRow for DeliverySeq {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<DeliverySeq> {
-        Ok(row.get(0)?)
+        row.get(0)
     }
 }
 
@@ -91,6 +91,6 @@ impl FromRow for CheckSuiteId {
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<CheckSuiteId> {
-        Ok(row.get(0)?)
+        row.get(0)
     }
 }

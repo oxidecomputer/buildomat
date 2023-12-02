@@ -78,7 +78,7 @@ impl From<db::Task> for ArchivedTask {
         } = input;
 
         ArchivedTask {
-            seq: seq.try_into().unwrap(),
+            seq,
             name,
             script,
             env_clear,
@@ -129,7 +129,7 @@ impl From<db::JobEvent> for ArchivedEvent {
         } = input;
 
         ArchivedEvent {
-            task: task.map(|i| i.try_into().unwrap()),
+            task,
             stream,
             time: time.to_archive(),
             time_remote: time_remote.map(|t| t.to_archive()),
@@ -445,7 +445,7 @@ impl ArchivedJob {
             .map(|(seq, ev)| {
                 Ok(db::JobEvent {
                     job,
-                    task: ev.task.map(|t| t.try_into().unwrap()),
+                    task: ev.task,
                     seq: seq.try_into().unwrap(),
                     stream: ev.stream.clone(),
                     time: ev.time.restore_from_archive()?,
@@ -560,7 +560,7 @@ impl ArchivedJob {
 
                 Ok(db::Task {
                     job,
-                    seq: (*seq).try_into().unwrap(),
+                    seq: *seq,
                     name: name.clone(),
                     script: script.clone(),
                     env_clear: *env_clear,

@@ -92,7 +92,7 @@ pub(crate) async fn job_events_get(
         jevs.iter()
             .map(|jev| JobEvent {
                 seq: jev.seq as usize,
-                task: jev.task.map(|n| n as u32),
+                task: jev.task,
                 stream: jev.stream.to_string(),
                 time: jev.time.into(),
                 time_remote: jev.time_remote.map(|t| t.into()),
