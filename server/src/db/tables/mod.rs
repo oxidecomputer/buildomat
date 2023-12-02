@@ -6,7 +6,7 @@ use rusqlite::Row;
 use sea_query::{ColumnRef, Iden, SeaRc};
 
 use crate::db::types::*;
-use buildomat_database::sqlite::rusqlite;
+use buildomat_database::rusqlite;
 
 pub trait FromRow: Sized {
     fn columns() -> Vec<ColumnRef>;
@@ -31,7 +31,7 @@ mod sublude {
     pub use crate::db::types::*;
     pub use crate::db::{CreateDepend, CreateOutputRule, CreateTask};
     pub use anyhow::Result;
-    pub use buildomat_database::sqlite::rusqlite;
+    pub use buildomat_database::rusqlite;
     pub use buildomat_types::metadata;
     pub use chrono::prelude::*;
     pub use rusqlite::Row;

@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use anyhow::Result;
 use buildomat_common::*;
-use buildomat_database::sqlite::rusqlite;
+use buildomat_database::rusqlite;
 use chrono::prelude::*;
 use rusqlite::Transaction;
 use sea_query::{
@@ -22,13 +22,12 @@ use thiserror::Error;
 mod tables;
 
 mod types {
-    use buildomat_database::sqlite::rusqlite;
-    use buildomat_database::sqlite_integer_new_type;
+    use buildomat_database::{rusqlite, sqlite_integer_new_type};
 
     sqlite_integer_new_type!(InstanceSeq, u64, BigUnsigned);
     sqlite_integer_new_type!(EventSeq, u64, BigUnsigned);
 
-    pub use buildomat_database::sqlite::IsoDate;
+    pub use buildomat_database::IsoDate;
 }
 
 pub use tables::*;
@@ -69,7 +68,7 @@ impl Database {
         path: P,
         cache_kb: Option<u32>,
     ) -> Result<Database> {
-        let conn = buildomat_database::sqlite::sqlite_setup(
+        let conn = buildomat_database::sqlite_setup(
             &log,
             path,
             include_str!("../../schema.sql"),

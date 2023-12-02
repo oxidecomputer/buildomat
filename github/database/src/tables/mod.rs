@@ -5,7 +5,7 @@
 use rusqlite::Row;
 
 use crate::itypes::*;
-use buildomat_database::sqlite::rusqlite;
+use buildomat_database::rusqlite;
 use sea_query::{ColumnRef, Iden, SeaRc};
 
 pub trait FromRow: Sized {
@@ -31,8 +31,9 @@ mod sublude {
     pub use super::FromRow;
     pub use crate::itypes::*;
     pub use anyhow::{bail, Result};
-    pub use buildomat_database::sqlite::rusqlite;
-    pub use buildomat_database::{sqlite_json_new_type, sqlite_sql_enum};
+    pub use buildomat_database::{
+        rusqlite, sqlite_json_new_type, sqlite_sql_enum,
+    };
     pub use buildomat_github_common::hooktypes;
     pub use chrono::prelude::*;
     pub use rusqlite::Row;
