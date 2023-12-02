@@ -1,3 +1,7 @@
+/*
+ * Copyright 2023 Oxide Computer Company
+ */
+
 use std::io::Read;
 use std::os::unix::process::CommandExt;
 use std::process::Command;

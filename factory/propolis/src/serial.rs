@@ -1,3 +1,7 @@
+/*
+ * Copyright 2023 Oxide Computer Company
+ */
+
 use std::{
     collections::HashMap,
     ffi::CString,

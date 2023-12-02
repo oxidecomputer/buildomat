@@ -1,3 +1,7 @@
+/*
+ * Copyright 2023 Oxide Computer Company
+ */
+
 use std::{collections::BTreeSet, str::FromStr, sync::Arc, time::Duration};
 
 use crate::{db::types::*, Central};
