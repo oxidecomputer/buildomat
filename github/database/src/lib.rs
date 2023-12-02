@@ -2,7 +2,7 @@
  * Copyright 2023 Oxide Computer Company
  */
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use buildomat_common::*;
 use buildomat_database::sqlite::rusqlite;
 use chrono::prelude::*;
@@ -279,24 +279,27 @@ impl Database {
         &self,
         dels: &[(DeliverySeq, String)],
     ) -> DBResult<()> {
-        // use schema::delivery;
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        for (seq, uuid) in dels.iter() {
+            let dc = self.tx_exec_delete(
+                &mut tx,
+                Query::delete()
+                    .from_table(DeliveryDef::Table)
+                    .and_where(Expr::col(DeliveryDef::Seq).eq(*seq))
+                    .and_where(Expr::col(DeliveryDef::Uuid).eq(uuid))
+                    .to_owned(),
+            )?;
+            if dc != 1 {
+                conflict!("failed to delete delivery {}", seq);
+            }
+        }
 
-        // c.immediate_transaction(|tx| {
-        //     for (seq, uuid) in dels.iter() {
-        //         let dc = diesel::delete(delivery::dsl::delivery)
-        //             .filter(delivery::dsl::seq.eq(seq))
-        //             .filter(delivery::dsl::uuid.eq(uuid))
-        //             .execute(tx)?;
-        //         if dc != 1 {
-        //             conflict!("failed to delete delivery {}", seq.0);
-        //         }
-        //     }
-        //     Ok(())
-        // })
-
-        todo!()
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn list_deliveries_recent(
@@ -372,26 +375,21 @@ impl Database {
         owner: &str,
         name: &str,
     ) -> DBResult<()> {
-        // use schema::repository;
+        let r =
+            Repository { id, owner: owner.to_string(), name: name.to_string() };
 
-        // let c = &mut self.1.lock().unwrap().conn;
+        self.exec_insert(
+            r.insert()
+                .on_conflict(
+                    OnConflict::column(RepositoryDef::Id)
+                        .update_column(RepositoryDef::Name)
+                        .update_column(RepositoryDef::Owner)
+                        .to_owned(),
+                )
+                .to_owned(),
+        )?;
 
-        // let r =
-        //     Repository { id, owner: owner.to_string(), name: name.to_string() };
-
-        // diesel::insert_into(repository::dsl::repository)
-        //     .values(&r)
-        //     .on_conflict(repository::dsl::id)
-        //     .do_update()
-        //     .set((
-        //         repository::dsl::name.eq(&r.name),
-        //         repository::dsl::owner.eq(&r.owner),
-        //     ))
-        //     .execute(c)?;
-
-        // Ok(())
-
-        todo!()
+        Ok(())
     }
 
     pub fn list_repositories(&self) -> DBResult<Vec<Repository>> {
@@ -405,30 +403,27 @@ impl Database {
     }
 
     pub fn repo_to_install(&self, repo: &Repository) -> DBResult<Install> {
-        // let c = &mut self.1.lock().unwrap().conn;
+        /*
+         * First, locate the user that owns the repository.
+         */
+        let user: User = self.get_row(
+            Query::select()
+                .from(UserDef::Table)
+                .columns(User::columns())
+                .and_where(Expr::col(UserDef::Login).eq(&repo.owner))
+                .to_owned(),
+        )?;
 
-        // /*
-        //  * First, locate the user that owns the repository.
-        //  */
-        // let user = {
-        //     use schema::user;
-
-        //     let user: User = user::dsl::user
-        //         .filter(user::login.eq(&repo.owner))
-        //         .get_result(c)?;
-        //     user.id
-        // };
-
-        // /*
-        //  * Check for an installation that belongs to this user.
-        //  */
-        // use schema::install;
-
-        // Ok(install::dsl::install
-        //     .filter(install::owner.eq(user))
-        //     .get_result(c)?)
-
-        todo!()
+        /*
+         * Check for an installation that belongs to this user.
+         */
+        self.get_row(
+            Query::select()
+                .from(InstallDef::Table)
+                .columns(Install::columns())
+                .and_where(Expr::col(InstallDef::Owner).eq(user.id))
+                .to_owned(),
+        )
     }
 
     pub fn load_install(&self, id: i64) -> DBResult<Install> {
@@ -600,92 +595,92 @@ impl Database {
         head_sha: &str,
         head_branch: Option<&str>,
     ) -> DBResult<CheckSuite> {
-        // let c = &mut self.1.lock().unwrap().conn;
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // c.immediate_transaction(|tx| {
-        //     use schema::check_suite::dsl;
+        /*
+         * If the record exists in the database already, just return it:
+         */
+        if let Some(cs) = self.tx_get_row_opt(
+            &mut tx,
+            Query::select()
+                .from(CheckSuiteDef::Table)
+                .columns(CheckSuite::columns())
+                .and_where(Expr::col(CheckSuiteDef::Repo).eq(repo))
+                .and_where(Expr::col(CheckSuiteDef::GithubId).eq(github_id))
+                .to_owned(),
+        )? {
+            tx.commit()?;
+            return Ok(cs);
+        }
 
-        //     /*
-        //      * If the record exists in the database already, just return it:
-        //      */
-        //     if let Some(cs) = dsl::check_suite
-        //         .filter(dsl::repo.eq(repo))
-        //         .filter(dsl::github_id.eq(github_id))
-        //         .get_result(tx)
-        //         .optional()?
-        //     {
-        //         return Ok(cs);
-        //     }
+        /*
+         * Give the check suite a unique ID that we control, and a URL key
+         * that will be hard to guess.
+         */
+        let cs = CheckSuite {
+            id: CheckSuiteId::generate(),
+            url_key: genkey(48),
+            repo,
+            install,
+            github_id,
+            head_sha: head_sha.to_string(),
+            head_branch: head_branch.map(|s| s.to_string()),
+            state: CheckSuiteState::Created,
+            plan: None,
+            plan_sha: None,
+            pr_by: None,
+            requested_by: None,
+            approved_by: None,
+        };
 
-        //     /*
-        //      * Give the check suite a unique ID that we control, and a URL key
-        //      * that will be hard to guess.
-        //      */
-        //     let cs = CheckSuite {
-        //         id: CheckSuiteId::generate(),
-        //         url_key: genkey(48),
-        //         repo,
-        //         install,
-        //         github_id,
-        //         head_sha: head_sha.to_string(),
-        //         head_branch: head_branch.map(|s| s.to_string()),
-        //         state: CheckSuiteState::Created,
-        //         plan: None,
-        //         plan_sha: None,
-        //         pr_by: None,
-        //         requested_by: None,
-        //         approved_by: None,
-        //     };
+        let ic = self.tx_exec_insert(&mut tx, cs.insert())?;
+        assert_eq!(ic, 1);
 
-        //     let ic = diesel::insert_into(dsl::check_suite)
-        //         .values(&cs)
-        //         .execute(tx)?;
-        //     assert_eq!(ic, 1);
-
-        //     Ok(cs)
-        // })
-
-        todo!()
+        tx.commit()?;
+        Ok(cs)
     }
 
     pub fn update_check_suite(&self, check_suite: CheckSuite) -> DBResult<()> {
-        // let c = &mut self.1.lock().unwrap().conn;
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // c.immediate_transaction(|tx| {
-        //     use schema::check_suite::dsl;
+        let cur: CheckSuite =
+            self.tx_get_row(&mut tx, CheckSuite::find(check_suite.id))?;
 
-        //     let cur: CheckSuite =
-        //         dsl::check_suite.find(&check_suite.id).get_result(tx)?;
+        /*
+         * With the current data model, it is an error to modify any of
+         * these fields:
+         */
+        assert_eq!(cur.id, check_suite.id);
+        assert_eq!(cur.repo, check_suite.repo);
+        assert_eq!(cur.install, check_suite.install);
+        assert_eq!(cur.github_id, check_suite.github_id);
+        assert_eq!(cur.head_sha, check_suite.head_sha);
+        assert_eq!(cur.head_branch, check_suite.head_branch);
+        assert_eq!(cur.url_key, check_suite.url_key);
 
-        //     /*
-        //      * With the current data model, it is an error to modify any of
-        //      * these fields:
-        //      */
-        //     assert_eq!(cur.id, check_suite.id);
-        //     assert_eq!(cur.repo, check_suite.repo);
-        //     assert_eq!(cur.install, check_suite.install);
-        //     assert_eq!(cur.github_id, check_suite.github_id);
-        //     assert_eq!(cur.head_sha, check_suite.head_sha);
-        //     assert_eq!(cur.head_branch, check_suite.head_branch);
-        //     assert_eq!(cur.url_key, check_suite.url_key);
+        let uc = self.tx_exec_update(
+            &mut tx,
+            Query::update()
+                .table(CheckSuiteDef::Table)
+                .and_where(Expr::col(CheckSuiteDef::Id).eq(check_suite.id))
+                .value(CheckSuiteDef::State, check_suite.state)
+                .value(CheckSuiteDef::Plan, check_suite.plan)
+                .value(CheckSuiteDef::PlanSha, check_suite.plan_sha)
+                .value(CheckSuiteDef::PrBy, check_suite.pr_by)
+                .value(CheckSuiteDef::RequestedBy, check_suite.requested_by)
+                .value(CheckSuiteDef::ApprovedBy, check_suite.approved_by)
+                .to_owned(),
+        )?;
+        assert_eq!(uc, 1);
 
-        //     let uc = diesel::update(dsl::check_suite)
-        //         .filter(dsl::id.eq(&check_suite.id))
-        //         .set((
-        //             dsl::state.eq(&check_suite.state),
-        //             dsl::plan.eq(&check_suite.plan),
-        //             dsl::plan_sha.eq(&check_suite.plan_sha),
-        //             dsl::pr_by.eq(&check_suite.pr_by),
-        //             dsl::requested_by.eq(&check_suite.requested_by),
-        //             dsl::approved_by.eq(&check_suite.approved_by),
-        //         ))
-        //         .execute(tx)?;
-        //     assert_eq!(uc, 1);
-
-        //     Ok(())
-        // })
-
-        todo!()
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn ensure_check_run(
@@ -695,121 +690,115 @@ impl Database {
         variety: CheckRunVariety,
         dependencies: &HashMap<String, JobFileDepend>,
     ) -> DBResult<CheckRun> {
-        // let c = &mut self.1.lock().unwrap().conn;
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // c.immediate_transaction(|tx| {
-        //     use schema::check_run::dsl;
+        /*
+         * It is possible that we are creating a new check run instance with
+         * a variety different from prior check run instances of the same
+         * name within this suite; e.g., if the user re-runs suite creation
+         * with an updated plan.
+         *
+         * First, clear out any active check runs that match our name but
+         * not our variety.
+         */
+        self.tx_exec_update(
+            &mut tx,
+            Query::update()
+                .table(CheckRunDef::Table)
+                .and_where(Expr::col(CheckRunDef::CheckSuite).eq(check_suite))
+                .and_where(Expr::col(CheckRunDef::Name).eq(name))
+                .and_where(Expr::col(CheckRunDef::Variety).ne(variety))
+                .and_where(Expr::col(CheckRunDef::Active).eq(true))
+                .value(CheckRunDef::Active, false)
+                .to_owned(),
+        )?;
 
-        //     /*
-        //      * It is possible that we are creating a new check run instance with
-        //      * a variety different from prior check run instances of the same
-        //      * name within this suite; e.g., if the user re-runs suite creation
-        //      * with an updated plan.
-        //      *
-        //      * First, clear out any active check runs that match our name but
-        //      * not our variety.
-        //      */
-        //     diesel::update(dsl::check_run)
-        //         .filter(dsl::check_suite.eq(check_suite))
-        //         .filter(dsl::name.eq(name))
-        //         .filter(dsl::variety.ne(variety))
-        //         .filter(dsl::active.eq(true))
-        //         .set(dsl::active.eq(false))
-        //         .execute(tx)?;
+        /*
+         * Then, determine if there is an active check run for this suite
+         * with the expected name and variety.
+         */
+        if let Some(existing) = self.tx_get_row_opt(
+            &mut tx,
+            Query::select()
+                .from(CheckRunDef::Table)
+                .columns(CheckRun::columns())
+                .and_where(Expr::col(CheckRunDef::CheckSuite).eq(check_suite))
+                .and_where(Expr::col(CheckRunDef::Name).eq(name))
+                .and_where(Expr::col(CheckRunDef::Variety).eq(variety))
+                .and_where(Expr::col(CheckRunDef::Active).eq(true))
+                .to_owned(),
+        )? {
+            tx.commit()?;
+            return Ok(existing);
+        }
 
-        //     /*
-        //      * Then, determine if there is an active check run for this suite
-        //      * with the expected name and variety.
-        //      */
-        //     let rows = dsl::check_run
-        //         .filter(dsl::check_suite.eq(check_suite))
-        //         .filter(dsl::name.eq(name))
-        //         .filter(dsl::variety.eq(variety))
-        //         .filter(dsl::active.eq(true))
-        //         .get_results::<CheckRun>(tx)?;
+        /*
+         * Give the check run a unique ID that we control, and that we can
+         * use for the "external_id" field and in details URLs.
+         */
+        let cr = CheckRun {
+            id: CheckRunId::generate(),
+            check_suite: check_suite,
+            name: name.to_string(),
+            variety: variety,
+            content: None,
+            config: None,
+            private: None,
+            active: true,
+            flushed: false,
+            github_id: None,
+            dependencies: Some(JsonValue(serde_json::to_value(dependencies)?)),
+        };
 
-        //     match rows.len() {
-        //         0 => (),
-        //         1 => return Ok(rows[0].clone()),
-        //         n => {
-        //             conflict!(
-        //                 "found {} active check runs for {}/{}",
-        //                 n,
-        //                 check_suite,
-        //                 name
-        //             );
-        //         }
-        //     }
+        let ic = self.tx_exec_insert(&mut tx, cr.insert())?;
+        assert_eq!(ic, 1);
 
-        //     /*
-        //      * Give the check run a unique ID that we control, and that we can
-        //      * use for the "external_id" field and in details URLs.
-        //      */
-        //     let cr = CheckRun {
-        //         id: CheckRunId::generate(),
-        //         check_suite: *check_suite,
-        //         name: name.to_string(),
-        //         variety: *variety,
-        //         content: None,
-        //         config: None,
-        //         private: None,
-        //         active: true,
-        //         flushed: false,
-        //         github_id: None,
-        //         dependencies: Some(JsonValue(serde_json::to_value(
-        //             dependencies,
-        //         )?)),
-        //     };
-
-        //     let ic =
-        //         diesel::insert_into(dsl::check_run).values(&cr).execute(tx)?;
-        //     assert_eq!(ic, 1);
-
-        //     Ok(cr)
-        // })
-
-        todo!()
+        tx.commit()?;
+        Ok(cr)
     }
 
     pub fn update_check_run(&self, check_run: CheckRun) -> DBResult<()> {
-        // let c = &mut self.1.lock().unwrap().conn;
+        let c = &mut self.1.lock().unwrap().conn;
+        let mut tx = c.transaction_with_behavior(
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
 
-        // c.immediate_transaction(|tx| {
-        //     use schema::check_run::dsl;
+        let cur: CheckRun =
+            self.tx_get_row(&mut tx, CheckRun::find(check_run.id))?;
 
-        //     let cur: CheckRun =
-        //         dsl::check_run.find(&check_run.id).get_result(tx)?;
+        /*
+         * With the current data model, it is an error to modify any of
+         * these fields:
+         */
+        assert_eq!(cur.id, check_run.id);
+        assert_eq!(cur.check_suite, check_run.check_suite);
+        assert_eq!(cur.name, check_run.name);
+        assert_eq!(cur.variety, check_run.variety);
+        assert_eq!(
+            cur.dependencies.as_ref().map(|v| &v.0),
+            check_run.dependencies.as_ref().map(|v| &v.0)
+        );
 
-        //     /*
-        //      * With the current data model, it is an error to modify any of
-        //      * these fields:
-        //      */
-        //     assert_eq!(cur.id, check_run.id);
-        //     assert_eq!(cur.check_suite, check_run.check_suite);
-        //     assert_eq!(cur.name, check_run.name);
-        //     assert_eq!(cur.variety, check_run.variety);
-        //     assert_eq!(
-        //         cur.dependencies.as_ref().map(|v| &v.0),
-        //         check_run.dependencies.as_ref().map(|v| &v.0)
-        //     );
+        let uc = self.tx_exec_update(
+            &mut tx,
+            Query::update()
+                .table(CheckRunDef::Table)
+                .and_where(Expr::col(CheckRunDef::Id).eq(check_run.id))
+                .value(CheckRunDef::Active, check_run.active)
+                .value(CheckRunDef::Flushed, check_run.flushed)
+                .value(CheckRunDef::GithubId, check_run.github_id)
+                .value(CheckRunDef::Private, check_run.private)
+                .value(CheckRunDef::Content, check_run.content)
+                .value(CheckRunDef::Config, check_run.config)
+                .to_owned(),
+        )?;
+        assert_eq!(uc, 1);
 
-        //     let uc = diesel::update(dsl::check_run)
-        //         .filter(dsl::id.eq(&check_run.id))
-        //         .set((
-        //             dsl::active.eq(check_run.active),
-        //             dsl::flushed.eq(check_run.flushed),
-        //             dsl::github_id.eq(&check_run.github_id),
-        //             dsl::private.eq(&check_run.private),
-        //             dsl::content.eq(&check_run.content),
-        //             dsl::config.eq(&check_run.config),
-        //         ))
-        //         .execute(tx)?;
-        //     assert_eq!(uc, 1);
-
-        //     Ok(())
-        // })
-
-        todo!()
+        tx.commit()?;
+        Ok(())
     }
 
     /*

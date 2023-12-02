@@ -2,8 +2,8 @@
  * Copyright 2023 Oxide Computer Company
  */
 
+use super::check_run::{CheckRunVariety, JobFileDepend};
 use super::sublude::*;
-use super::check_run::{JobFileDepend, CheckRunVariety};
 
 sqlite_sql_enum!(CheckSuiteState => {
     Created,
@@ -117,6 +117,28 @@ impl CheckSuite {
             .columns(CheckSuite::columns())
             .and_where(Expr::col(CheckSuiteDef::Repo).eq(repo))
             .and_where(Expr::col(CheckSuiteDef::GithubId).eq(github_id))
+            .to_owned()
+    }
+
+    pub fn insert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(CheckSuiteDef::Table)
+            .columns(Self::bare_columns())
+            .values_panic([
+                self.id.into(),
+                self.repo.into(),
+                self.install.into(),
+                self.github_id.into(),
+                self.head_sha.clone().into(),
+                self.head_branch.clone().into(),
+                self.state.into(),
+                self.plan.clone().into(),
+                self.plan_sha.clone().into(),
+                self.url_key.clone().into(),
+                self.pr_by.into(),
+                self.requested_by.into(),
+                self.approved_by.into(),
+            ])
             .to_owned()
     }
 }

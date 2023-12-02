@@ -42,10 +42,7 @@ impl Install {
         Query::insert()
             .into_table(InstallDef::Table)
             .columns(Self::bare_columns())
-            .values_panic([
-                self.id.into(),
-                self.owner.into(),
-            ])
+            .values_panic([self.id.into(), self.owner.into()])
             .to_owned()
     }
 }

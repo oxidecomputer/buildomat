@@ -115,6 +115,26 @@ impl CheckRun {
             .to_owned()
     }
 
+    pub fn insert(&self) -> InsertStatement {
+        Query::insert()
+            .into_table(CheckRunDef::Table)
+            .columns(Self::bare_columns())
+            .values_panic([
+                self.id.into(),
+                self.check_suite.into(),
+                self.name.clone().into(),
+                self.variety.into(),
+                self.content.clone().into(),
+                self.config.clone().into(),
+                self.private.clone().into(),
+                self.active.into(),
+                self.flushed.into(),
+                self.github_id.into(),
+                self.dependencies.clone().into(),
+            ])
+            .to_owned()
+    }
+
     pub fn get_config<T>(&self) -> Result<T>
     where
         for<'de> T: Deserialize<'de>,
