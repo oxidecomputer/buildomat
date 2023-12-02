@@ -11,8 +11,7 @@ use dropshot::{
     endpoint, ConfigDropshot, HttpError, HttpResponseOk, RequestContext,
 };
 use schemars::JsonSchema;
-#[allow(unused_imports)]
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 #[allow(unused_imports)]
 use slog::{debug, error, info, o, trace, warn, Logger};
 use std::collections::{HashMap, HashSet};

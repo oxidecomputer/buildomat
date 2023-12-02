@@ -20,10 +20,7 @@ use dropshot::{
     Query as TypedQuery, RequestContext, RequestInfo,
 };
 use getopts::Options;
-#[allow(unused_imports)]
-use hyper::{
-    header::AUTHORIZATION, header::CONTENT_LENGTH, Body, Response, StatusCode,
-};
+use hyper::{header::AUTHORIZATION, Body, Response, StatusCode};
 use hyper_staticfile::FileBytesStream;
 use rusty_ulid::Ulid;
 use schemars::JsonSchema;

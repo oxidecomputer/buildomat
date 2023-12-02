@@ -639,14 +639,10 @@ name = "buildomat-common"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "base64 0.13.1",
  "chrono",
- "getopts",
  "new_mime_guess",
  "rand",
- "reqwest",
  "rusty_ulid",
- "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -694,7 +690,6 @@ name = "buildomat-factory-lab"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "base64 0.13.1",
  "buildomat-client",
  "buildomat-common",
  "buildomat-database",
@@ -706,7 +701,6 @@ dependencies = [
  "hyper-staticfile",
  "libc",
  "rand",
- "rusty_ulid",
  "schemars",
  "sea-query",
  "sea-query-rusqlite",
@@ -724,10 +718,8 @@ name = "buildomat-factory-propolis"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "base64 0.13.1",
  "buildomat-client",
  "buildomat-common",
- "buildomat-database",
  "buildomat-types",
  "chrono",
  "getopts",
@@ -799,14 +791,11 @@ dependencies = [
  "buildomat-github-common",
  "chrono",
  "hiercmd",
- "hmac-sha256",
  "hyper",
- "jsonwebtoken",
  "octorust",
  "openssl",
  "pem 2.0.1",
  "reqwest",
- "rusty_ulid",
  "serde",
  "serde_json",
  "slog",
@@ -831,7 +820,6 @@ dependencies = [
  "hmac-sha256",
  "html-escape",
  "hyper",
- "jsonwebtoken",
  "octorust",
  "pem 2.0.1",
  "reqwest",
@@ -856,9 +844,7 @@ dependencies = [
  "aws-credential-types",
  "aws-sdk-s3",
  "aws-smithy-http",
- "aws-smithy-types",
  "aws-types",
- "base64 0.13.1",
  "buildomat-common",
  "buildomat-database",
  "buildomat-types",
@@ -877,8 +863,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "tokio-util 0.6.10",
- "walkdir",
 ]
 
 [[package]]
@@ -2761,15 +2745,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ad4cc8da4ef723ed60bced201181d83791ad433213d8c24efffda1eec85d741"
 
 [[package]]
-name = "same-file"
-version = "1.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
-dependencies = [
- "winapi-util",
-]
-
-[[package]]
 name = "schannel"
 version = "0.1.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3764,16 +3739,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "walkdir"
-version = "2.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d71d857dc86794ca4c280d616f7da00d2dbfd8cd788846559a6813e6aa4b54ee"
-dependencies = [
- "same-file",
- "winapi-util",
-]
-
-[[package]]
 name = "want"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3902,15 +3867,6 @@ name = "winapi-i686-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
-
-[[package]]
-name = "winapi-util"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f29e6f9198ba0d26b4c9f07dbe6f9ed633e1f3d5b8b414090084349e46a52596"
-dependencies = [
- "winapi",
-]
 
 [[package]]
 name = "winapi-x86_64-pc-windows-gnu"

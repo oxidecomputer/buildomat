@@ -16,7 +16,6 @@ futures = { workspace = true }
 hmac-sha256 = { workspace = true }
 html-escape = { workspace = true }
 hyper = { workspace = true }
-jsonwebtoken = { workspace = true }
 octorust = { workspace = true }
 pem = { workspace = true }
 reqwest = { workspace = true }

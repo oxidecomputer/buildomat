@@ -10,8 +10,6 @@ use buildomat_common::*;
 use buildomat_database::sqlite::rusqlite;
 use chrono::prelude::*;
 use rusqlite::Transaction;
-#[allow(unused_imports)]
-use rusty_ulid::Ulid;
 use sea_query::{
     DeleteStatement, Expr, InsertStatement, Order, Query, SelectStatement,
     SqliteQueryBuilder, UpdateStatement,
