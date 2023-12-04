@@ -150,14 +150,12 @@ fn thread_serial(
 
     unsafe {
         cmd.pre_exec(move || {
-            //unsafe {
             libc::setsid();
             libc::ioctl(sub, libc::TIOCSCTTY, 0);
             libc::dup2(sub, 0);
             libc::dup2(sub, 1);
             libc::dup2(sub, 2);
             libc::close(sub);
-            //}
             Ok(())
         })
     };

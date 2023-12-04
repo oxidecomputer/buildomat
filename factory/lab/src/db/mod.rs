@@ -398,6 +398,7 @@ impl Database {
         d: DeleteStatement,
     ) -> OResult<usize> {
         let (q, v) = d.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
         self.tx_exec(tx, q, v)
     }
 
@@ -407,6 +408,7 @@ impl Database {
         u: UpdateStatement,
     ) -> OResult<usize> {
         let (q, v) = u.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
         self.tx_exec(tx, q, v)
     }
 
@@ -416,6 +418,7 @@ impl Database {
         i: InsertStatement,
     ) -> OResult<usize> {
         let (q, v) = i.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.0, "query: {q}"; "sql" => true);
         self.tx_exec(tx, q, v)
     }
 

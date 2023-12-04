@@ -534,7 +534,6 @@ pub(crate) async fn factory_create(
 pub struct TargetCreate {
     name: String,
     desc: String,
-    // redirect: Option<String>,
 }
 
 #[derive(Serialize, JsonSchema)]

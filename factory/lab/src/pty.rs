@@ -36,7 +36,6 @@ impl Pty {
     }
 
     pub fn subsidiary(&mut self) -> i32 {
-        //std::process::Stdio::from_raw_fd(self.subsidiary.take().unwrap())
         self.subsidiary.unwrap()
     }
 

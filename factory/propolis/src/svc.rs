@@ -304,10 +304,6 @@ fn poll_services(
                     smf::State::Online => (),
                 }
             }
-
-            //if let Some(next) = next {
-            //    problems.push(format!("{fmri} is in transition -> {next:?}"));
-            //}
         }
     }
 
