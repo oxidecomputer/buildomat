@@ -154,6 +154,7 @@ impl Database {
                 );
             }
 
+            tx.commit()?;
             return Ok((oldseq, false));
         }
 

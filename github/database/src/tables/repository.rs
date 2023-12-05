@@ -28,8 +28,8 @@ impl FromRow for Repository {
     fn from_row(row: &Row) -> rusqlite::Result<Self> {
         Ok(Repository {
             id: row.get(0)?,
-            owner: row.get(0)?,
-            name: row.get(0)?,
+            owner: row.get(1)?,
+            name: row.get(2)?,
         })
     }
 }
