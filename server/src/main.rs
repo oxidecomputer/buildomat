@@ -14,24 +14,19 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
+use buildomat_common::*;
 use dropshot::{
     endpoint, ApiDescription, ConfigDropshot, HttpError, HttpServerStarter,
     Query as TypedQuery, RequestContext, RequestInfo,
 };
 use getopts::Options;
-#[allow(unused_imports)]
-use hyper::{
-    header::AUTHORIZATION, header::CONTENT_LENGTH, Body, Response, StatusCode,
-};
+use hyper::{header::AUTHORIZATION, Body, Response, StatusCode};
 use hyper_staticfile::FileBytesStream;
 use rusty_ulid::Ulid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 #[allow(unused_imports)]
 use slog::{error, info, o, warn, Logger};
-#[macro_use]
-extern crate diesel;
-use buildomat_common::*;
 
 mod api;
 mod archive;
@@ -692,7 +687,7 @@ impl Central {
          * system.  If the database is damaged, job records will need to be
          * repopulated by importing from the archive.
          */
-        let job = self.db.job_by_id(id).or_500()?;
+        let job = self.db.job(id).or_500()?;
 
         let readpriv = "admin.job.read";
         if job.owner == user.id {
@@ -734,7 +729,7 @@ impl Central {
 
             aj.job_output(output)
         } else {
-            self.db.job_output(job.id, output)
+            Ok(self.db.job_output(job.id, output)?)
         }
     }
 
@@ -752,7 +747,7 @@ impl Central {
 
             aj.job_outputs()
         } else {
-            self.db.job_outputs(job.id)
+            Ok(self.db.job_outputs(job.id)?)
         }
     }
 
@@ -777,7 +772,7 @@ impl Central {
 
             aj.job_events(minseq)
         } else {
-            self.db.job_events(job.id, minseq)
+            Ok(self.db.job_events(job.id, minseq)?)
         }
     }
 }

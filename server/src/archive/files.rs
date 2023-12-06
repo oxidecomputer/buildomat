@@ -108,7 +108,7 @@ async fn clean_files_one(log: &Logger, c: &Central) -> Result<()> {
         /*
          * Look up the job to see if it is complete.
          */
-        let job = if let Some(job) = c.db.job_by_id_opt(jid)? {
+        let job = if let Some(job) = c.db.job_opt(jid)? {
             if !job.complete {
                 /*
                  * Ignore present-but-incomplete jobs.
@@ -159,7 +159,7 @@ async fn clean_files_one(log: &Logger, c: &Central) -> Result<()> {
                     continue;
                 };
 
-            let file = if let Some(file) = c.db.job_file_by_id_opt(jid, fid)? {
+            let file = if let Some(file) = c.db.job_file_opt(jid, fid)? {
                 if file.time_archived.is_none() {
                     /*
                      * Ignore files not yet archived to the object store.

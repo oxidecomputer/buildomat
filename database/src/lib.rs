@@ -5,77 +5,110 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use chrono::prelude::*;
-use diesel::deserialize::FromSql;
-use diesel::prelude::*;
-use diesel::serialize::ToSql;
-use slog::{info, Logger};
-
-#[macro_use]
-extern crate diesel;
+pub use jmclib::sqlite::rusqlite;
+use sea_query::{Nullable, Value};
+use slog::Logger;
 
 #[macro_export]
-macro_rules! sql_for_enum {
-    ($name:ident) => {
-        impl ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite> for $name
-        where
-            String: ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite>,
-        {
-            fn to_sql(
-                &self,
-                out: &mut diesel::serialize::Output<diesel::sqlite::Sqlite>,
-            ) -> diesel::serialize::Result {
-                out.set_value(self.to_string());
-                Ok(diesel::serialize::IsNull::No)
+macro_rules! sqlite_sql_enum {
+    ($name:ident ( $($derives:ident),* ) => { $($arms:tt)* }) => {
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            strum::Display,
+            strum::EnumString,
+            serde::Serialize,
+            serde::Deserialize,
+            $($derives),*
+        )]
+        #[serde(rename_all = "snake_case")]
+        #[strum(serialize_all = "snake_case")]
+        pub enum $name { $($arms)* }
+
+        impl From<$name> for sea_query::Value {
+            fn from(value: $name) -> sea_query::Value {
+                sea_query::Value::String(Some(Box::new(value.to_string())))
             }
         }
 
-        impl<DB> FromSql<diesel::sql_types::Text, DB> for $name
-        where
-            DB: diesel::backend::Backend,
-            String: FromSql<diesel::sql_types::Text, DB>,
-        {
-            fn from_sql(
-                bytes: diesel::backend::RawValue<DB>,
-            ) -> diesel::deserialize::Result<Self> {
-                Ok($name::from_str(&String::from_sql(bytes)?)?)
+        impl sea_query::Nullable for $name {
+            fn null() -> sea_query::Value {
+                sea_query::Value::String(None)
             }
         }
+
+        impl rusqlite::types::FromSql for $name {
+            fn column_result(
+                v: rusqlite::types::ValueRef<'_>,
+            ) -> rusqlite::types::FromSqlResult<Self> {
+                use std::str::FromStr;
+
+                if let rusqlite::types::ValueRef::Text(t) = v {
+                    if let Ok(s) = String::from_utf8(t.to_vec()) {
+                        match $name::from_str(&s) {
+                            Ok(v) => Ok(v),
+                            Err(e) => {
+                                Err(rusqlite::types::FromSqlError::Other(
+                                    format!("invalid enum: {e}").into(),
+                                ))
+                            }
+                        }
+                    } else {
+                        Err(rusqlite::types::FromSqlError::Other(
+                            "invalid UTF-8".into(),
+                        ))
+                    }
+                } else {
+                    Err(rusqlite::types::FromSqlError::InvalidType)
+                }
+            }
+        }
+    };
+
+    ($name:ident => { $($arms:tt)* }) => {
+        $crate::sqlite_sql_enum!($name () => { $($arms)* });
     };
 }
 
 #[macro_export]
-macro_rules! json_new_type {
+macro_rules! sqlite_json_new_type {
     ($name:ident, $mytype:ty) => {
-        #[derive(
-            Clone, Debug, FromSqlRow, diesel::expression::AsExpression,
-        )]
-        #[diesel(sql_type = diesel::sql_types::Text)]
+        #[derive(Clone, Debug)]
         pub struct $name(pub $mytype);
 
-        impl ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite> for $name
-        where
-            String: ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite>,
-        {
-            fn to_sql(
-                &self,
-                out: &mut diesel::serialize::Output<diesel::sqlite::Sqlite>,
-            ) -> diesel::serialize::Result {
-                out.set_value(serde_json::to_string(&self.0)?);
-                Ok(diesel::serialize::IsNull::No)
+        impl From<$name> for sea_query::Value {
+            fn from(value: $name) -> sea_query::Value {
+                sea_query::Value::String(Some(Box::new(
+                    serde_json::to_string(&value.0).unwrap(),
+                )))
             }
         }
 
-        impl<DB> FromSql<diesel::sql_types::Text, DB> for $name
-        where
-            DB: diesel::backend::Backend,
-            String: FromSql<diesel::sql_types::Text, DB>,
-        {
-            fn from_sql(
-                bytes: diesel::backend::RawValue<DB>,
-            ) -> diesel::deserialize::Result<Self> {
-                Ok($name(serde_json::from_str(&String::from_sql(bytes)?)?))
+        impl sea_query::Nullable for $name {
+            fn null() -> sea_query::Value {
+                sea_query::Value::String(None)
+            }
+        }
+
+        impl rusqlite::types::FromSql for $name {
+            fn column_result(
+                v: rusqlite::types::ValueRef<'_>,
+            ) -> rusqlite::types::FromSqlResult<Self> {
+                if let rusqlite::types::ValueRef::Text(t) = v {
+                    match serde_json::from_slice(t) {
+                        Ok(o) => Ok(Self(o)),
+                        Err(e) => Err(rusqlite::types::FromSqlError::Other(
+                            format!("invalid JSON: {e}").into(),
+                        )),
+                    }
+                } else {
+                    Err(rusqlite::types::FromSqlError::InvalidType)
+                }
             }
         }
 
@@ -102,46 +135,37 @@ macro_rules! json_new_type {
 }
 
 #[macro_export]
-macro_rules! integer_new_type {
-    ($name:ident, $mytype:ty, $intype:ty, $sqltype:ident, $sqlts:ty) => {
-        #[derive(
-            Clone,
-            Copy,
-            Debug,
-            PartialEq,
-            Hash,
-            Eq,
-            FromSqlRow,
-            diesel::expression::AsExpression,
-        )]
-        #[diesel(sql_type = $sqlts)]
+macro_rules! sqlite_integer_new_type {
+    ($name:ident, $mytype:ty, $intype:ident) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Hash, Eq)]
         pub struct $name(pub $mytype);
 
-        impl ToSql<diesel::sql_types::$sqltype, diesel::sqlite::Sqlite>
-            for $name
-        where
-            $intype: ToSql<diesel::sql_types::$sqltype, diesel::sqlite::Sqlite>,
-        {
-            fn to_sql(
-                &self,
-                out: &mut diesel::serialize::Output<diesel::sqlite::Sqlite>,
-            ) -> diesel::serialize::Result {
-                assert!(self.0 <= (<$intype>::MAX as $mytype));
-                out.set_value((self.0 as $intype));
-                Ok(diesel::serialize::IsNull::No)
+        impl From<$name> for sea_query::Value {
+            fn from(value: $name) -> sea_query::Value {
+                sea_query::Value::$intype(Some(value.0.try_into().unwrap()))
             }
         }
 
-        impl<DB> FromSql<diesel::sql_types::$sqltype, DB> for $name
-        where
-            DB: diesel::backend::Backend,
-            $intype: FromSql<diesel::sql_types::$sqltype, DB>,
-        {
-            fn from_sql(
-                bytes: diesel::backend::RawValue<DB>,
-            ) -> diesel::deserialize::Result<Self> {
-                let n = <$intype>::from_sql(bytes)? as $mytype;
-                Ok($name(n))
+        impl sea_query::Nullable for $name {
+            fn null() -> sea_query::Value {
+                sea_query::Value::$intype(None)
+            }
+        }
+
+        impl rusqlite::types::FromSql for $name {
+            fn column_result(
+                v: rusqlite::types::ValueRef<'_>,
+            ) -> rusqlite::types::FromSqlResult<Self> {
+                if let rusqlite::types::ValueRef::Integer(i) = v {
+                    match i.try_into() {
+                        Ok(n) => Ok(Self(n)),
+                        Err(e) => Err(rusqlite::types::FromSqlError::Other(
+                            format!("invalid number: {i}: {e}").into(),
+                        )),
+                    }
+                } else {
+                    Err(rusqlite::types::FromSqlError::InvalidType)
+                }
             }
         }
 
@@ -168,46 +192,47 @@ macro_rules! integer_new_type {
 }
 
 #[macro_export]
-macro_rules! ulid_new_type {
+macro_rules! sqlite_ulid_new_type {
     ($name:ident) => {
-        #[derive(
-            Clone,
-            Copy,
-            PartialEq,
-            Eq,
-            PartialOrd,
-            Ord,
-            Hash,
-            Debug,
-            FromSqlRow,
-            diesel::expression::AsExpression,
-        )]
-        #[diesel(sql_type = diesel::sql_types::Text)]
+        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
         pub struct $name(pub rusty_ulid::Ulid);
 
-        impl ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite> for $name
-        where
-            String: ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite>,
-        {
-            fn to_sql(
-                &self,
-                out: &mut diesel::serialize::Output<diesel::sqlite::Sqlite>,
-            ) -> diesel::serialize::Result {
-                out.set_value(self.0.to_string());
-                Ok(diesel::serialize::IsNull::No)
+        impl From<$name> for sea_query::Value {
+            fn from(value: $name) -> sea_query::Value {
+                sea_query::Value::String(Some(Box::new(value.0.to_string())))
             }
         }
 
-        impl<DB> FromSql<diesel::sql_types::Text, DB> for $name
-        where
-            DB: diesel::backend::Backend,
-            String: FromSql<diesel::sql_types::Text, DB>,
-        {
-            fn from_sql(
-                bytes: diesel::backend::RawValue<DB>,
-            ) -> diesel::deserialize::Result<Self> {
-                let s = String::from_sql(bytes)?;
-                Ok($name(rusty_ulid::Ulid::from_str(&s)?))
+        impl sea_query::Nullable for $name {
+            fn null() -> sea_query::Value {
+                sea_query::Value::String(None)
+            }
+        }
+
+        impl rusqlite::types::FromSql for $name {
+            fn column_result(
+                v: rusqlite::types::ValueRef<'_>,
+            ) -> rusqlite::types::FromSqlResult<Self> {
+                use std::str::FromStr;
+
+                if let rusqlite::types::ValueRef::Text(t) = v {
+                    if let Ok(s) = String::from_utf8(t.to_vec()) {
+                        match rusty_ulid::Ulid::from_str(&s) {
+                            Ok(id) => Ok($name(id)),
+                            Err(e) => {
+                                Err(rusqlite::types::FromSqlError::Other(
+                                    format!("invalid ULID: {e}").into(),
+                                ))
+                            }
+                        }
+                    } else {
+                        Err(rusqlite::types::FromSqlError::Other(
+                            "invalid UTF-8".into(),
+                        ))
+                    }
+                } else {
+                    Err(rusqlite::types::FromSqlError::InvalidType)
+                }
             }
         }
 
@@ -230,12 +255,12 @@ macro_rules! ulid_new_type {
                 $name(rusty_ulid::Ulid::generate())
             }
 
-            pub fn datetime(&self) -> DateTime<Utc> {
+            pub fn datetime(&self) -> chrono::DateTime<chrono::Utc> {
                 self.0.datetime()
             }
 
             pub fn age(&self) -> std::time::Duration {
-                Utc::now()
+                chrono::Utc::now()
                     .signed_duration_since(self.0.datetime())
                     .to_std()
                     .unwrap_or_else(|_| std::time::Duration::from_secs(0))
@@ -248,54 +273,62 @@ macro_rules! ulid_new_type {
  * IsoDate
  */
 
-#[derive(Clone, Copy, Debug, FromSqlRow, diesel::expression::AsExpression)]
-#[diesel(sql_type = diesel::sql_types::Text)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IsoDate(pub DateTime<Utc>);
 
-impl ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite> for IsoDate
-where
-    String: ToSql<diesel::sql_types::Text, diesel::sqlite::Sqlite>,
-{
-    fn to_sql(
-        &self,
-        out: &mut diesel::serialize::Output<diesel::sqlite::Sqlite>,
-    ) -> diesel::serialize::Result {
-        out.set_value(
-            self.0.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
-        );
-        Ok(diesel::serialize::IsNull::No)
+impl From<IsoDate> for Value {
+    fn from(v: IsoDate) -> Self {
+        Value::String(Some(Box::new(
+            v.0.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
+        )))
     }
 }
 
-impl<DB> FromSql<diesel::sql_types::Text, DB> for IsoDate
-where
-    DB: diesel::backend::Backend,
-    String: FromSql<diesel::sql_types::Text, DB>,
-{
-    fn from_sql(
-        bytes: diesel::backend::RawValue<DB>,
-    ) -> diesel::deserialize::Result<Self> {
-        let s = String::from_sql(bytes)?;
-        let fo = match DateTime::parse_from_rfc3339(&s) {
-            Ok(fo) => fo,
-            Err(e1) => {
-                /*
-                 * Try an older date format from before we switched to diesel:
-                 */
-                match DateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S%.9f%z") {
-                    Ok(fo) => fo,
-                    Err(_) => {
-                        return Err(
-                            diesel::result::Error::DeserializationError(
-                                e1.into(),
-                            )
-                            .into(),
-                        )
-                    }
-                }
+impl Nullable for IsoDate {
+    fn null() -> Value {
+        Value::String(None)
+    }
+}
+
+impl rusqlite::types::FromSql for IsoDate {
+    fn column_result(
+        v: rusqlite::types::ValueRef<'_>,
+    ) -> rusqlite::types::FromSqlResult<Self> {
+        if let rusqlite::types::ValueRef::Text(t) = v {
+            if let Ok(s) = String::from_utf8(t.to_vec()) {
+                Ok(IsoDate(DateTime::from(
+                    match DateTime::parse_from_rfc3339(&s) {
+                        Ok(fo) => fo,
+                        Err(e1) => {
+                            /*
+                             * Try an older date format from before we switched
+                             * to diesel:
+                             */
+                            match DateTime::parse_from_str(
+                                &s,
+                                "%Y-%m-%d %H:%M:%S%.9f%z",
+                            ) {
+                                Ok(fo) => fo,
+                                Err(_) => {
+                                    return Err(
+                                        rusqlite::types::FromSqlError::Other(
+                                            format!("invalid date: {e1}")
+                                                .into(),
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                    },
+                )))
+            } else {
+                Err(rusqlite::types::FromSqlError::Other(
+                    "invalid UTF-8".into(),
+                ))
             }
-        };
-        Ok(IsoDate(DateTime::from(fo)))
+        } else {
+            Err(rusqlite::types::FromSqlError::InvalidType)
+        }
     }
 }
 
@@ -332,135 +365,35 @@ impl IsoDate {
     }
 }
 
-json_new_type!(Dictionary, HashMap<String, String>);
-json_new_type!(JsonValue, serde_json::Value);
+sqlite_json_new_type!(Dictionary, HashMap<String, String>);
+sqlite_json_new_type!(JsonValue, serde_json::Value);
 
 pub fn sqlite_setup<P: AsRef<Path>, S: AsRef<str>>(
     log: &Logger,
     path: P,
     schema: S,
     cache_kb: Option<u32>,
-) -> Result<diesel::SqliteConnection> {
-    let url = if let Some(path) = path.as_ref().to_str() {
-        format!("sqlite://{}", path)
-    } else {
-        bail!("path to database must be UTF-8 safe to pass in SQLite URL");
-    };
+) -> Result<rusqlite::Connection> {
+    let path = path.as_ref();
 
-    info!(log, "opening database {:?}", url);
-    let mut c = diesel::SqliteConnection::establish(&url)?;
+    let mut setup = jmclib::sqlite::SqliteSetup::new();
+    setup.schema(schema.as_ref());
+    setup.log(log.clone());
 
     /*
-     * Enable foreign key processing, which is off by default.  Without enabling
-     * this, there is no referential integrity check between primary and foreign
-     * keys in tables.
+     * Disable integrity checking for the moment, because it takes _a very long
+     * time_ on the truly astronomical (100GB+) buildomat core API database
+     * right now.
      */
-    diesel::sql_query("PRAGMA foreign_keys = 'ON'").execute(&mut c)?;
-
-    /*
-     * Enable the WAL.
-     */
-    diesel::sql_query("PRAGMA journal_mode = 'WAL'").execute(&mut c)?;
+    setup.check_integrity(false);
 
     if let Some(kb) = cache_kb {
         /*
          * If requested, set the page cache size to something other than the
          * default value of 2MB.
          */
-        diesel::sql_query(format!("PRAGMA cache_size = -{}", kb))
-            .execute(&mut c)?;
+        setup.cache_kb(kb);
     }
 
-    #[derive(QueryableByName)]
-    struct UserVersion {
-        #[diesel(sql_type = diesel::sql_types::Integer)]
-        user_version: i32,
-    }
-
-    /*
-     * Take the schema file and split it on the special comments we use to
-     * separate statements.
-     */
-    let mut steps: Vec<(i32, String)> = Vec::new();
-    let mut version = None;
-    let mut statement = String::new();
-
-    for l in schema.as_ref().lines() {
-        if l.starts_with("-- v ") {
-            if let Some(version) = version.take() {
-                steps.push((version, statement.trim().to_string()));
-            }
-
-            version = Some(l.trim_start_matches("-- v ").parse()?);
-            statement.clear();
-        } else {
-            statement.push_str(l);
-            statement.push('\n');
-        }
-    }
-    if let Some(version) = version.take() {
-        steps.push((version, statement.trim().to_string()));
-    }
-
-    info!(
-        log,
-        "found user version {} in database",
-        diesel::sql_query("PRAGMA user_version")
-            .get_result::<UserVersion>(&mut c)?
-            .user_version
-    );
-    for (version, statement) in steps {
-        /*
-         * Do some whitespace normalisation.  We would prefer to keep the
-         * whitespace-heavy layout of the schema as represented in the file,
-         * as SQLite will preserve it in the ".schema" output.
-         * Unfortunately, there is no obvious way to ALTER TABLE ADD COLUMN
-         * in a way that similarly maintains the whitespace, so we will
-         * instead uniformly do without.
-         */
-        let mut statement = statement.replace('\n', " ");
-        while statement.contains("( ") {
-            statement = statement.trim().replace("( ", "(");
-        }
-        while statement.contains(" )") {
-            statement = statement.trim().replace(" )", ")");
-        }
-        while statement.contains("  ") {
-            statement = statement.trim().replace("  ", " ");
-        }
-
-        /*
-         * Perform the version check, statement execution, and version update
-         * inside a single transaction.  Not all of the things we could do in a
-         * statement are transactional, but if we are doing an INSERT SELECT to
-         * copy things from one table to another, we don't want that to conk out
-         * half way and run again.
-         */
-        c.immediate_transaction::<_, anyhow::Error, _>(|tx| {
-            /*
-             * Determine the current user version.
-             */
-            let uv = diesel::sql_query("PRAGMA user_version")
-                .get_result::<UserVersion>(tx)?
-                .user_version;
-
-            if version > uv {
-                info!(log, "apply version {}, run {}", version, statement);
-
-                diesel::sql_query(statement).execute(tx)?;
-
-                /*
-                 * Update the user version.
-                 */
-                diesel::sql_query(format!("PRAGMA user_version = {}", version))
-                    .execute(tx)?;
-
-                info!(log, "version {} ok", version);
-            }
-
-            Ok(())
-        })?;
-    }
-
-    Ok(c)
+    setup.open(path)
 }

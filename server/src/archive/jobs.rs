@@ -78,7 +78,7 @@ impl From<db::Task> for ArchivedTask {
         } = input;
 
         ArchivedTask {
-            seq: seq.try_into().unwrap(),
+            seq,
             name,
             script,
             env_clear,
@@ -129,7 +129,7 @@ impl From<db::JobEvent> for ArchivedEvent {
         } = input;
 
         ArchivedEvent {
-            task: task.map(|i| i.try_into().unwrap()),
+            task,
             stream,
             time: time.to_archive(),
             time_remote: time_remote.map(|t| t.to_archive()),
@@ -445,7 +445,7 @@ impl ArchivedJob {
             .map(|(seq, ev)| {
                 Ok(db::JobEvent {
                     job,
-                    task: ev.task.map(|t| t.try_into().unwrap()),
+                    task: ev.task,
                     seq: seq.try_into().unwrap(),
                     stream: ev.stream.clone(),
                     time: ev.time.restore_from_archive()?,
@@ -560,7 +560,7 @@ impl ArchivedJob {
 
                 Ok(db::Task {
                     job,
-                    seq: (*seq).try_into().unwrap(),
+                    seq: *seq,
                     name: name.clone(),
                     script: script.clone(),
                     env_clear: *env_clear,
@@ -590,7 +590,7 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<bool> {
          * Service explicit requests from the operator to archive a job
          * first.
          */
-        let job = c.db.job_by_id(job)?;
+        let job = c.db.job(job)?;
         if !job.complete {
             warn!(log, "job {} not complete; cannot archive yet", job.id);
             return Ok(false);
@@ -656,7 +656,7 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<bool> {
             .collect::<HashMap<String, String>>();
     let target_id = job.target().to_string();
     let (target_resolved_name, target_resolved_desc) = {
-        let t = c.db.target_get(job.target())?;
+        let t = c.db.target(job.target())?;
         (t.name, t.desc)
     };
     let store =
@@ -672,8 +672,8 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<bool> {
     let worker_info = job
         .worker
         .map(|id| {
-            let w = c.db.worker_get(id)?;
-            let f = c.db.factory_get(w.factory())?;
+            let w = c.db.worker(id)?;
+            let f = c.db.factory(w.factory())?;
             Ok::<_, anyhow::Error>(ArchivedWorkerInfo::from((w, f)))
         })
         .transpose()?;
@@ -697,7 +697,7 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<bool> {
         target_id: _,
     } = job;
 
-    let Some(owner) = c.db.user_get_by_id(owner)? else {
+    let Some(owner) = c.db.user(owner)? else {
         bail!("could not locate user {owner}");
     };
 

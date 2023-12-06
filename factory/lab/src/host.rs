@@ -1,14 +1,16 @@
-use std::io::{BufRead, Read};
-use std::os::unix::prelude::FromRawFd;
+/*
+ * Copyright 2023 Oxide Computer Company
+ */
+
+use std::io::Read;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context, Error, Result};
+use anyhow::{bail, Context, Result};
 use buildomat_common::*;
-use serde::Deserialize;
 use slog::{debug, error, info, trace, warn};
 
 use super::{Activity, Central, Message};
@@ -148,14 +150,12 @@ fn thread_serial(
 
     unsafe {
         cmd.pre_exec(move || {
-            //unsafe {
             libc::setsid();
             libc::ioctl(sub, libc::TIOCSCTTY, 0);
             libc::dup2(sub, 0);
             libc::dup2(sub, 1);
             libc::dup2(sub, 2);
             libc::close(sub);
-            //}
             Ok(())
         })
     };

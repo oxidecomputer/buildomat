@@ -26,12 +26,10 @@ aws-config = "0.55.3"
 aws-credential-types = "0.55.3"
 aws-sdk-s3 = "0.28.0"
 aws-smithy-http = "0.55.3"
-aws-smithy-types = "0.55.3"
 aws-types = "0.55.3"
 base64 = "0.13"
 bytes = "1.1"
 chrono = { version = "0.4", features = [ "serde" ] }
-diesel = { version = "2.0.2", features = [ "sqlite", "extras", "serde_json" ] }
 dirs-next = "2"
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "x-forwarded-for" }
 futures = "0.3"
@@ -46,7 +44,6 @@ hyper = "0.14"
 hyper-staticfile = { version = "0.8.0", git = "https://github.com/jclulow/hyper-staticfile", branch = "jclulow" }
 ipnet = "2.8"
 jmclib = { git = "https://github.com/jclulow/rust-jmclib", features = ["sqlite"] }
-jsonwebtoken = "7.2"
 libc = "0.2.113"
 new_mime_guess = "4"
 octorust = { git = "https://github.com/oxidecomputer/third-party-api-clients", branch = "jclulow" }
@@ -60,6 +57,8 @@ rusoto_credential = "0.48"
 rusoto_ec2 = "0.48"
 rusty_ulid = "1"
 schemars = { version = "0.8", features = [ "chrono" ] }
+sea-query = { version = "0.30", default-features = false, features = [ "derive", "attr", "backend-sqlite" ] }
+sea-query-rusqlite = "0.4"
 serde = { version = "1", features = [ "derive" ] }
 serde_json = "1"
 serde_repr = "0.1"
@@ -76,5 +75,4 @@ thiserror = "1"
 tokio = { version = "1", features = [ "full" ] }
 tokio-util = { version = "0.6.9", features = [ "io" ] }
 toml = "0.5"
-walkdir = "2.3"
 zone = { version = "0.3", features = [ "async" ], default-features = false }

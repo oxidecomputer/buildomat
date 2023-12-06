@@ -2,17 +2,12 @@
  * Copyright 2023 Oxide Computer Company
  */
 
-#![allow(unused_imports)]
-
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{sync::Arc, time::Duration};
 
 use anyhow::{bail, Context, Result};
 use buildomat_common::*;
 use getopts::Options;
-use slog::{info, o, warn, Drain, Logger};
+use slog::{info, o, Logger};
 
 mod config;
 mod db;

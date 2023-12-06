@@ -175,7 +175,7 @@ pub(crate) async fn user_get(
 
     c.require_admin(log, &rqctx.request, "user.read").await?;
 
-    if let Some(u) = c.db.user_get_by_id(path.into_inner().user()?).or_500()? {
+    if let Some(u) = c.db.user(path.into_inner().user()?).or_500()? {
         Ok(HttpResponseOk(User {
             id: u.user.id.to_string(),
             name: u.user.name,
@@ -296,7 +296,7 @@ pub(crate) async fn admin_job_get(
     c.require_admin(log, &rqctx.request, "job.read").await?;
 
     let id = path.into_inner().job.parse::<db::JobId>().or_500()?;
-    let job = c.db.job_by_id(id).or_500()?;
+    let job = c.db.job(id).or_500()?;
 
     Ok(HttpResponseOk(super::user::Job::load(log, c, &job).await.or_500()?))
 }
@@ -315,7 +315,7 @@ pub(crate) async fn admin_job_archive_request(
     c.require_admin(log, &rqctx.request, "job.archive").await?;
 
     let id = path.into_inner().job.parse::<db::JobId>().or_500()?;
-    let job = c.db.job_by_id(id).or_500()?;
+    let job = c.db.job(id).or_500()?;
 
     if !job.complete {
         return Err(HttpError::for_bad_request(
@@ -534,7 +534,6 @@ pub(crate) async fn factory_create(
 pub struct TargetCreate {
     name: String,
     desc: String,
-    // redirect: Option<String>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -609,7 +608,7 @@ pub(crate) async fn target_require_privilege(
     c.require_admin(log, &rqctx.request, "target.write").await?;
 
     let path = path.into_inner();
-    let t = c.db.target_get(path.target()?).or_500()?;
+    let t = c.db.target(path.target()?).or_500()?;
 
     c.db.target_require(t.id, Some(&path.privilege)).or_500()?;
 
@@ -630,7 +629,7 @@ pub(crate) async fn target_require_no_privilege(
     c.require_admin(log, &rqctx.request, "target.write").await?;
 
     let path = path.into_inner();
-    let t = c.db.target_get(path.target()?).or_500()?;
+    let t = c.db.target(path.target()?).or_500()?;
 
     c.db.target_require(t.id, None).or_500()?;
 
@@ -666,7 +665,7 @@ pub(crate) async fn target_redirect(
     c.require_admin(log, &rqctx.request, "target.write").await?;
 
     let path = path.into_inner();
-    let t = c.db.target_get(path.target()?).or_500()?;
+    let t = c.db.target(path.target()?).or_500()?;
 
     /*
      * Make sure the redirect target, if specified, exists in the database:
@@ -674,7 +673,7 @@ pub(crate) async fn target_redirect(
     let redirect = body
         .into_inner()
         .redirect()?
-        .map(|t| c.db.target_get(t).map(|t| t.id))
+        .map(|t| c.db.target(t).map(|t| t.id))
         .transpose()
         .or_500()?;
 
@@ -704,7 +703,7 @@ pub(crate) async fn target_rename(
     c.require_admin(log, &rqctx.request, "target.write").await?;
 
     let path = path.into_inner();
-    let t = c.db.target_get(path.target()?).or_500()?;
+    let t = c.db.target(path.target()?).or_500()?;
     let body = body.into_inner();
 
     let t =

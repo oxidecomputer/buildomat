@@ -9,10 +9,11 @@ default = ['vendored-openssl']
 vendored-openssl = ['openssl/vendored']
 
 [dependencies]
-anyhow = { workspace = true }
 buildomat-common = { path = "../common" }
 buildomat-client = { path = "../client" }
 buildomat-types = { path = "../types" }
+
+anyhow = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }

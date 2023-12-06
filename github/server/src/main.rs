@@ -878,7 +878,7 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                     continue;
                 };
 
-                let mut cr = if let Ok(cr) = app.db.load_check_run(&crid) {
+                let mut cr = if let Ok(cr) = app.db.load_check_run(crid) {
                     cr
                 } else {
                     error!(
@@ -887,7 +887,7 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                     );
                     continue;
                 };
-                let mut cs = app.db.load_check_suite(&cr.check_suite)?;
+                let mut cs = app.db.load_check_suite(cr.check_suite)?;
 
                 match cr.variety {
                     CheckRunVariety::Control => {
@@ -932,7 +932,7 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                                  * runs in this suite:
                                  */
                                 for mut cr in
-                                    app.db.list_check_runs_for_suite(&cs.id)?
+                                    app.db.list_check_runs_for_suite(cs.id)?
                                 {
                                     if !cr.active
                                         || !matches!(
@@ -1069,7 +1069,7 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                     continue;
                 };
 
-                let mut cr = if let Ok(cr) = app.db.load_check_run(&crid) {
+                let mut cr = if let Ok(cr) = app.db.load_check_run(crid) {
                     cr
                 } else {
                     error!(
@@ -1078,7 +1078,7 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                     );
                     continue;
                 };
-                let mut cs = app.db.load_check_suite(&cr.check_suite)?;
+                let mut cs = app.db.load_check_suite(cr.check_suite)?;
 
                 /*
                  * Mark this check run as inactive, then return the check suite
@@ -1269,7 +1269,7 @@ async fn reconcile_check_runs(app: &Arc<App>, cs: &CheckSuite) -> Result<()> {
             matches!(run.status, octorust::types::JobStatus::Completed,);
 
         let mut cr = match run.external_id.parse() {
-            Ok(id) => db.load_check_run(&id)?,
+            Ok(id) => db.load_check_run(id)?,
             Err(e) => {
                 /*
                  * If there is no local database entry, we will cancel the Check
@@ -1379,7 +1379,7 @@ async fn flush_check_runs(
     let db = &app.db;
     let gh = app.install_client(cs.install);
 
-    for mut cr in db.list_check_runs_for_suite(&cs.id)? {
+    for mut cr in db.list_check_runs_for_suite(cs.id)? {
         if !cr.active {
             continue;
         }
@@ -1678,7 +1678,7 @@ async fn check_run_run(
             let mut p: FailFirstPrivate = cr.get_private()?;
             if !p.complete {
                 let n = db
-                    .list_check_runs_for_suite(&cs.id)?
+                    .list_check_runs_for_suite(cs.id)?
                     .iter()
                     .filter(|ocr| ocr.name == cr.name)
                     .count();
@@ -1695,7 +1695,7 @@ async fn check_run_run(
     })
 }
 
-async fn process_check_suite(app: &Arc<App>, cs: &CheckSuiteId) -> Result<()> {
+async fn process_check_suite(app: &Arc<App>, cs: CheckSuiteId) -> Result<()> {
     let log = &app.log;
     let db = &app.db;
 
@@ -1736,7 +1736,7 @@ async fn process_check_suite(app: &Arc<App>, cs: &CheckSuiteId) -> Result<()> {
              * get cancelled.
              */
             let mut control_name = None;
-            for mut cr in db.list_check_runs_for_suite(&cs.id)? {
+            for mut cr in db.list_check_runs_for_suite(cs.id)? {
                 if cr.variety.is_control() {
                     /*
                      * If this check suite already has a control run, use the
@@ -1785,9 +1785,9 @@ async fn process_check_suite(app: &Arc<App>, cs: &CheckSuiteId) -> Result<()> {
             let control_name =
                 control_name.as_deref().unwrap_or(CONTROL_RUN_NAME);
             let mut cr = db.ensure_check_run(
-                &cs.id,
+                cs.id,
                 control_name,
-                &CheckRunVariety::Control,
+                CheckRunVariety::Control,
                 &Default::default(),
             )?;
 
@@ -2046,9 +2046,9 @@ async fn process_check_suite(app: &Arc<App>, cs: &CheckSuiteId) -> Result<()> {
              */
             for jf in plan.jobfiles.iter() {
                 let mut cr = db.ensure_check_run(
-                    &cs.id,
+                    cs.id,
                     &jf.name,
-                    &jf.variety,
+                    jf.variety,
                     &jf.dependencies,
                 )?;
 
@@ -2085,7 +2085,7 @@ async fn process_check_suite(app: &Arc<App>, cs: &CheckSuiteId) -> Result<()> {
             info!(log, "check suite {}: running now", cs.id);
 
             let mut nrunning = 0;
-            for mut cr in db.list_check_runs_for_suite(&cs.id)? {
+            for mut cr in db.list_check_runs_for_suite(cs.id)? {
                 let running = match check_run_run(app, &cs, &mut cr).await {
                     Ok(running) => running,
                     Err(e) => {
@@ -2140,12 +2140,12 @@ async fn bgtask(app: Arc<App>) {
         match app.db.list_check_suites_active() {
             Ok(suites) => {
                 for suite in suites {
-                    if let Err(e) = process_check_suite(&app, &suite.id).await {
+                    if let Err(e) = process_check_suite(&app, suite.id).await {
                         /*
                          * Attempt to include the check suite state in the log
                          * message.
                          */
-                        let st = match app.db.load_check_suite(&suite.id) {
+                        let st = match app.db.load_check_suite(suite.id) {
                             Ok(cs) => cs.state.to_string(),
                             Err(_) => "?".into(),
                         };

@@ -92,7 +92,7 @@ pub(crate) async fn job_events_get(
         jevs.iter()
             .map(|jev| JobEvent {
                 seq: jev.seq as usize,
-                task: jev.task.map(|n| n as u32),
+                task: jev.task,
                 stream: jev.stream.to_string(),
                 time: jev.time.into(),
                 time_remote: jev.time_remote.map(|t| t.into()),
@@ -449,7 +449,7 @@ impl Job {
                 aj.tasks().or_500()?,
                 aj.output_rules().or_500()?,
                 aj.tags().or_500()?,
-                c.db.target_get(job.target()).or_500()?,
+                c.db.target(job.target()).or_500()?,
                 aj.times().or_500()?,
             )
         } else {
@@ -457,7 +457,7 @@ impl Job {
                 c.db.job_tasks(job.id).or_500()?,
                 c.db.job_output_rules(job.id).or_500()?,
                 c.db.job_tags(job.id).or_500()?,
-                c.db.target_get(job.target()).or_500()?,
+                c.db.target(job.target()).or_500()?,
                 c.db.job_times(job.id).or_500()?,
             )
         };

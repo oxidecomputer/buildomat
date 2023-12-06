@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 use std::collections::{BTreeMap, HashMap};
@@ -84,7 +84,7 @@ async fn job_assignment_one(log: &Logger, c: &Central) -> Result<()> {
              * recycle its worker.
              */
             if let Some(wid) = j.worker {
-                let w = c.db.worker_get(wid)?;
+                let w = c.db.worker(wid)?;
                 if !w.deleted && !w.recycle {
                     info!(
                         log,
@@ -109,7 +109,7 @@ async fn job_assignment_one(log: &Logger, c: &Central) -> Result<()> {
              * This job has already been assigned.  Check to see if the worker
              * still exists.
              */
-            let w = c.db.worker_get(wid)?;
+            let w = c.db.worker(wid)?;
             if w.deleted || w.recycle {
                 info!(
                     log,
@@ -176,7 +176,7 @@ async fn job_waiters_one(log: &Logger, c: &Central) -> Result<()> {
                 continue;
             }
 
-            let failmsg = if let Some(pj) = c.db.job_by_id_opt(d.prior_job)? {
+            let failmsg = if let Some(pj) = c.db.job_opt(d.prior_job)? {
                 /*
                  * The job exists!  Check on the status.
                  */
@@ -306,7 +306,7 @@ async fn lease_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
         .collect::<Vec<_>>();
     let remove = leases
         .drain(..)
-        .map(|id| Ok((id, c.db.job_by_id_opt(id)?)))
+        .map(|id| Ok((id, c.db.job_opt(id)?)))
         .collect::<Result<Vec<_>>>()?
         .drain(..)
         .filter(|(_, job)| {

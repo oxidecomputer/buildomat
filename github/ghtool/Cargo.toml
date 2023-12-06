@@ -13,13 +13,10 @@ anyhow = { workspace = true }
 base64 = { workspace = true }
 chrono = { workspace = true }
 hiercmd = { workspace = true }
-hmac-sha256 = { workspace = true }
 hyper = { workspace = true }
-jsonwebtoken = { workspace = true }
 octorust = { workspace = true }
 pem = { workspace = true }
 reqwest = { workspace = true }
-rusty_ulid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 slog = { workspace = true }

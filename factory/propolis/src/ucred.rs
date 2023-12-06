@@ -1,6 +1,10 @@
-use std::{os::fd::AsRawFd, ptr::NonNull};
+/*
+ * Copyright 2023 Oxide Computer Company
+ */
 
-use anyhow::{anyhow, bail, Result};
+use std::os::fd::AsRawFd;
+
+use anyhow::{bail, Result};
 use libc::{getpeerucred, ucred_free, ucred_getzoneid, ucred_t, zoneid_t};
 
 pub trait PeerUCred: AsRawFd {

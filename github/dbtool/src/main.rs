@@ -358,7 +358,7 @@ async fn do_check_suite_dump(mut l: Level<Stuff>) -> Result<()> {
 
     let csid = CheckSuiteId::from_str(&a.args()[0])?;
 
-    let cs = l.context().db().load_check_suite(&csid)?;
+    let cs = l.context().db().load_check_suite(csid)?;
 
     println!("check suite: {cs:#?}");
     Ok(())
@@ -456,7 +456,7 @@ async fn do_duplicates(mut l: Level<Stuff>) -> Result<()> {
         Default::default();
 
     for id in ids {
-        let cs = l.context().db().load_check_suite(&id)?;
+        let cs = l.context().db().load_check_suite(id)?;
 
         let v = suites_for_commit.entry(cs.head_sha).or_default();
 

@@ -1,10 +1,11 @@
+/*
+ * Copyright 2023 Oxide Computer Company
+ */
+
 use std::{
     collections::HashMap,
     ffi::CString,
-    os::{
-        fd::{AsFd, AsRawFd},
-        unix::prelude::PermissionsExt,
-    },
+    os::{fd::AsRawFd, unix::prelude::PermissionsExt},
     path::PathBuf,
     sync::{Arc, Mutex},
     time::Duration,
