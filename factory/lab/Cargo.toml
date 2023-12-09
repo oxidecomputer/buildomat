@@ -20,11 +20,9 @@ libc = { workspace = true }
 rand = { workspace = true }
 schemars = { workspace = true }
 sea-query = { workspace = true }
-sea-query-rusqlite = { workspace = true }
 serde = { workspace = true }
 slog = { workspace = true }
 slog-term = { workspace = true }
 strum = { workspace = true }
-thiserror = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }

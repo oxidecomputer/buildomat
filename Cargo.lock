@@ -705,12 +705,10 @@ dependencies = [
  "rand",
  "schemars",
  "sea-query",
- "sea-query-rusqlite",
  "serde",
  "slog",
  "slog-term",
  "strum",
- "thiserror",
  "tokio",
  "toml 0.5.11",
 ]
