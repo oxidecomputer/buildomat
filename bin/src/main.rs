@@ -127,13 +127,11 @@ async fn do_job_join(mut l: Level<Stuff>) -> Result<()> {
                                     job.id, old, job.state,
                                 );
                             }
-                        } else {
-                            if job.state != "completed" {
-                                eprintln!(
-                                    "INFO: job {} in state {:?}",
-                                    job.id, job.state,
-                                );
-                            }
+                        } else if job.state != "completed" {
+                            eprintln!(
+                                "INFO: job {} in state {:?}",
+                                job.id, job.state,
+                            );
                         }
                     }
                     last_state
@@ -223,7 +221,7 @@ async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
     let script = if let Some(script) = a.opts().opt_str("script") {
         script
     } else if let Some(path) = a.opts().opt_str("script-file") {
-        let mut f = std::fs::File::open(&path)?;
+        let mut f = std::fs::File::open(path)?;
         let mut s = String::new();
         f.read_to_string(&mut s)?;
         s

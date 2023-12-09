@@ -52,9 +52,7 @@ async fn main() -> Result<()> {
         aws::aws_worker(c).await.context("AWS worker task failure")
     });
 
-    loop {
-        tokio::select! {
-            _ = t_aws => bail!("AWS worker task stopped early"),
-        }
+    tokio::select! {
+        _ = t_aws => bail!("AWS worker task stopped early"),
     }
 }

@@ -37,7 +37,9 @@ mod files;
 mod jobs;
 mod workers;
 
-use db::{AuthUser, Job, JobEvent, JobFile, JobFileId, JobId, JobOutput};
+use db::{
+    AuthUser, Job, JobEvent, JobFileId, JobId, JobOutput, JobOutputAndFile,
+};
 
 pub(crate) trait MakeInternalError<T> {
     fn or_500(self) -> SResult<T, HttpError>;
@@ -61,13 +63,13 @@ impl<T> MakeInternalError<T> for std::io::Result<T> {
     }
 }
 
-impl<T> MakeInternalError<T> for db::OResult<T> {
+impl<T> MakeInternalError<T> for buildomat_database::DBResult<T> {
     fn or_500(self) -> SResult<T, HttpError> {
         self.map_err(|e| {
-            use db::OperationError;
+            use buildomat_database::DatabaseError;
 
             match e {
-                OperationError::Conflict(msg) => HttpError::for_client_error(
+                DatabaseError::Conflict(msg) => HttpError::for_client_error(
                     Some("conflict".to_string()),
                     StatusCode::CONFLICT,
                     msg,
@@ -539,7 +541,7 @@ impl Central {
         let mut fout = std::fs::OpenOptions::new()
             .create_new(true)
             .write(true)
-            .open(&fp)?;
+            .open(fp)?;
         {
             let mut bw = std::io::BufWriter::new(&mut fout);
             for (ip, _) in files.iter() {
@@ -741,7 +743,7 @@ impl Central {
         &self,
         log: &Logger,
         job: &Job,
-    ) -> Result<Vec<(JobOutput, JobFile)>> {
+    ) -> Result<Vec<JobOutputAndFile>> {
         if job.is_archived() {
             let aj = self.archive_load(log, job.id).await?;
 
@@ -1052,14 +1054,12 @@ async fn main() -> Result<()> {
 
     let server_task = server.start();
 
-    loop {
-        tokio::select! {
-            _ = t_assign => bail!("task assignment task stopped early"),
-            _ = t_chunks => bail!("chunk cleanup task stopped early"),
-            _ = t_archive_files => bail!("archive files task stopped early"),
-            _ = t_archive_jobs => bail!("archive jobs task stopped early"),
-            _ = t_workers => bail!("worker cleanup task stopped early"),
-            _ = server_task => bail!("server stopped early"),
-        }
+    tokio::select! {
+        _ = t_assign => bail!("task assignment task stopped early"),
+        _ = t_chunks => bail!("chunk cleanup task stopped early"),
+        _ = t_archive_files => bail!("archive files task stopped early"),
+        _ = t_archive_jobs => bail!("archive jobs task stopped early"),
+        _ = t_workers => bail!("worker cleanup task stopped early"),
+        _ = server_task => bail!("server stopped early"),
     }
 }

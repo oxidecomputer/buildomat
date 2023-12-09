@@ -2,14 +2,53 @@
  * Copyright 2023 Oxide Computer Company
  */
 
-use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Condvar;
+use std::thread::ThreadId;
+use std::{collections::HashMap, sync::Mutex};
 
 use anyhow::Result;
 use chrono::prelude::*;
 pub use jmclib::sqlite::rusqlite;
-use sea_query::{Nullable, Value};
-use slog::Logger;
+use rusqlite::Row;
+use sea_query::{
+    ColumnRef, DeleteStatement, Iden, InsertStatement, Nullable, SeaRc,
+    SelectStatement, SqliteQueryBuilder, UpdateStatement, Value,
+};
+use sea_query_rusqlite::{RusqliteBinder, RusqliteValues};
+use slog::{debug, Logger};
+use thiserror::Error;
+
+pub trait FromRow: Sized {
+    fn columns() -> Vec<ColumnRef>;
+    fn from_row(row: &Row) -> rusqlite::Result<Self>;
+
+    fn bare_columns() -> Vec<SeaRc<dyn Iden>> {
+        Self::columns()
+            .into_iter()
+            .map(|v| match v {
+                ColumnRef::TableColumn(_, c) => c,
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+}
+
+/*
+ * This simple FromRow implementation allows us to automatically lift out single
+ * column queries where the output type is a base SQL type, or close equivalent,
+ * like a u32 or String.  This reduces boilerplate on simple queries that SELECT
+ * MAX() or COUNT() from some table.
+ */
+impl<T: rusqlite::types::FromSql> FromRow for T {
+    fn columns() -> Vec<ColumnRef> {
+        unimplemented!()
+    }
+
+    fn from_row(row: &Row) -> rusqlite::Result<T> {
+        row.get(0)
+    }
+}
 
 #[macro_export]
 macro_rules! sqlite_sql_enum {
@@ -368,32 +407,234 @@ impl IsoDate {
 sqlite_json_new_type!(Dictionary, HashMap<String, String>);
 sqlite_json_new_type!(JsonValue, serde_json::Value);
 
-pub fn sqlite_setup<P: AsRef<Path>, S: AsRef<str>>(
-    log: &Logger,
-    path: P,
-    schema: S,
-    cache_kb: Option<u32>,
-) -> Result<rusqlite::Connection> {
-    let path = path.as_ref();
+pub struct Sqlite {
+    log: Logger,
+    conn: Mutex<rusqlite::Connection>,
+    busy: Mutex<Option<ThreadId>>,
+    cv: Condvar,
+}
 
-    let mut setup = jmclib::sqlite::SqliteSetup::new();
-    setup.schema(schema.as_ref());
-    setup.log(log.clone());
+impl Sqlite {
+    pub fn setup<P: AsRef<Path>, S: AsRef<str>>(
+        log: Logger,
+        path: P,
+        schema: S,
+        cache_kb: Option<u32>,
+    ) -> Result<Sqlite> {
+        let path = path.as_ref();
 
-    /*
-     * Disable integrity checking for the moment, because it takes _a very long
-     * time_ on the truly astronomical (100GB+) buildomat core API database
-     * right now.
-     */
-    setup.check_integrity(false);
+        let mut setup = jmclib::sqlite::SqliteSetup::new();
+        setup.schema(schema.as_ref());
+        setup.log(log.clone());
 
-    if let Some(kb) = cache_kb {
         /*
-         * If requested, set the page cache size to something other than the
-         * default value of 2MB.
+         * Disable integrity checking for the moment, because it takes _a very
+         * long time_ on the truly astronomical (100GB+) buildomat core API
+         * database right now.
          */
-        setup.cache_kb(kb);
+        setup.check_integrity(false);
+
+        if let Some(kb) = cache_kb {
+            /*
+             * If requested, set the page cache size to something other than the
+             * default value of 2MB.
+             */
+            setup.cache_kb(kb);
+        }
+
+        Ok(Sqlite {
+            log,
+            conn: Mutex::new(setup.open(path)?),
+            busy: Mutex::new(None),
+            cv: Default::default(),
+        })
     }
 
-    setup.open(path)
+    pub fn tx_immediate<T>(
+        &self,
+        func: impl FnOnce(&mut Handle) -> DBResult<T>,
+    ) -> DBResult<T> {
+        self.tx_common(rusqlite::TransactionBehavior::Immediate, func)
+    }
+
+    pub fn tx<T>(
+        &self,
+        func: impl FnOnce(&mut Handle) -> DBResult<T>,
+    ) -> DBResult<T> {
+        self.tx_common(rusqlite::TransactionBehavior::Deferred, func)
+    }
+
+    fn tx_common<T>(
+        &self,
+        txb: rusqlite::TransactionBehavior,
+        func: impl FnOnce(&mut Handle) -> DBResult<T>,
+    ) -> DBResult<T> {
+        let curthread = std::thread::current().id();
+
+        /*
+         * Keep track of which thread is currently engaged in a transaction.  If
+         * we accidentally attempt to start a second transaction recursively, we
+         * want to fail.
+         */
+        {
+            let mut b = self.busy.lock().unwrap();
+            while let Some(owner) = *b {
+                if owner == curthread {
+                    conflict!("nested transactions would cause deadlock");
+                }
+
+                b = self.cv.wait(b).unwrap();
+            }
+            *b = Some(curthread);
+        }
+
+        let mut c = self.conn.lock().unwrap();
+        let tx = c.transaction_with_behavior(txb)?;
+
+        let mut h = Handle { tx, log: self.log.clone() };
+
+        let res = match func(&mut h) {
+            Ok(res) => {
+                h.tx.commit()?;
+                Ok(res)
+            }
+            Err(e) => {
+                h.tx.rollback()?;
+                Err(e)
+            }
+        };
+
+        {
+            let mut b = self.busy.lock().unwrap();
+
+            /*
+             * This code is completely synchronous, so we must not be migrated
+             * to another LWP prior to the ultimate return to our caller.
+             */
+            assert_eq!(b.take(), Some(curthread));
+
+            self.cv.notify_all();
+        }
+
+        res
+    }
+}
+
+pub type DBResult<T> = std::result::Result<T, DatabaseError>;
+
+#[derive(Error, Debug)]
+pub enum DatabaseError {
+    #[error("conflict: {0}")]
+    Conflict(String),
+    #[error(transparent)]
+    Sql(#[from] rusqlite::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    OutOfRange(#[from] chrono::OutOfRangeError),
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
+impl DatabaseError {
+    pub fn is_locked_database(&self) -> bool {
+        match self {
+            DatabaseError::Sql(e) => {
+                e.to_string().contains("database is locked")
+            }
+            _ => false,
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! conflict {
+    ($msg:expr) => {
+        return Err($crate::DatabaseError::Conflict(format!($msg)))
+    };
+    ($fmt:expr, $($arg:tt)*) => {
+        return Err($crate::DatabaseError::Conflict(format!($fmt, $($arg)*)))
+    }
+}
+
+pub struct Handle<'a> {
+    log: Logger,
+    tx: rusqlite::Transaction<'a>,
+}
+
+impl<'a> Handle<'a> {
+    pub fn get_row_opt<T: FromRow>(
+        &mut self,
+        s: SelectStatement,
+    ) -> DBResult<Option<T>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.log, "query: {q}"; "sql" => true);
+        let mut s = self.tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
+        match out.len() {
+            0 => Ok(None),
+            1 => Ok(Some(out.pop().unwrap())),
+            n => conflict!("found {n} records when we wanted only 1"),
+        }
+    }
+
+    pub fn get_strings(&mut self, s: SelectStatement) -> DBResult<Vec<String>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.log, "query: {q}"; "sql" => true);
+        let mut s = self.tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), |row| row.get(0))?;
+
+        Ok(out.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn get_rows<T: FromRow>(
+        &mut self,
+        s: SelectStatement,
+    ) -> DBResult<Vec<T>> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.log, "query: {q}"; "sql" => true);
+        let mut s = self.tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+
+        Ok(out.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn get_row<T: FromRow>(&mut self, s: SelectStatement) -> DBResult<T> {
+        let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.log, "query: {q}"; "sql" => true);
+        let mut s = self.tx.prepare(&q)?;
+        let out = s.query_map(&*v.as_params(), T::from_row)?;
+        let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
+        match out.len() {
+            0 => conflict!("record not found"),
+            1 => Ok(out.pop().unwrap()),
+            n => conflict!("found {n} records when we wanted only 1"),
+        }
+    }
+
+    pub fn exec_delete(&mut self, d: DeleteStatement) -> DBResult<usize> {
+        let (q, v) = d.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.log, "query: {q}"; "sql" => true);
+        self.exec(q, v)
+    }
+
+    pub fn exec_update(&mut self, u: UpdateStatement) -> DBResult<usize> {
+        let (q, v) = u.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.log, "query: {q}"; "sql" => true);
+        self.exec(q, v)
+    }
+
+    pub fn exec_insert(&mut self, i: InsertStatement) -> DBResult<usize> {
+        let (q, v) = i.build_rusqlite(SqliteQueryBuilder);
+        debug!(self.log, "query: {q}"; "sql" => true);
+        self.exec(q, v)
+    }
+
+    fn exec(&mut self, q: String, v: RusqliteValues) -> DBResult<usize> {
+        let mut s = self.tx.prepare(&q)?;
+        let out = s.execute(&*v.as_params())?;
+
+        Ok(out)
+    }
 }

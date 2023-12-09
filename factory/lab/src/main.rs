@@ -273,11 +273,9 @@ async fn main() -> Result<()> {
         worker::upload_worker(c).await.context("upload worker task failure")
     });
 
-    loop {
-        tokio::select! {
-            _ = t_lab => bail!("lab worker task stopped early"),
-            _ = t_upload => bail!("upload worker task stopped early"),
-            _ = t_server => bail!("server task stopped early"),
-        }
+    tokio::select! {
+        _ = t_lab => bail!("lab worker task stopped early"),
+        _ = t_upload => bail!("upload worker task stopped early"),
+        _ = t_server => bail!("server task stopped early"),
     }
 }

@@ -58,7 +58,7 @@ async fn main() -> Result<()> {
     };
 
     let db = if let Some(p) = p.opt_str("d") {
-        db::Database::open(log.clone(), p)?
+        db::Database::new(log.clone(), p, None)?
     } else {
         bail!("must specify database file (-d)");
     };
@@ -103,10 +103,8 @@ async fn main() -> Result<()> {
         factory::factory_task(c).await.context("factory task failure")
     });
 
-    loop {
-        tokio::select! {
-            _ = t_vm => bail!("VM worker task stopped early"),
-            _ = t_factory => bail!("factory task stopped early"),
-        }
+    tokio::select! {
+        _ = t_vm => bail!("VM worker task stopped early"),
+        _ = t_factory => bail!("factory task stopped early"),
     }
 }

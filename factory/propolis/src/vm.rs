@@ -59,8 +59,7 @@ async fn vm_worker_one(
                 }
             };
 
-        let mut h = c.db.connect().await?;
-        if h.instance_get(&id)?.is_some() {
+        if c.db.instance_get(&id)?.is_some() {
             continue;
         }
 
@@ -74,20 +73,19 @@ async fn vm_worker_one(
      * Now that the book-keeping is out of the way, ensure that we have an
      * instance worker spawned for each active instance.
      */
-    let instances = {
-        let h = c.db.connect().await?;
-        h.instances_active()?
-    };
+    let instances = c.db.instances_active()?;
 
     for i in instances {
-        if instances_with_workers.contains(&i.id) {
+        let id = i.id();
+
+        if instances_with_workers.contains(&id) {
             continue;
         }
-        instances_with_workers.insert(i.id.clone());
+        instances_with_workers.insert(id.clone());
 
         let c = Arc::clone(c);
         tokio::spawn(async move {
-            instance_worker(c, i.id).await;
+            instance_worker(c, id).await;
         });
     }
 
@@ -200,28 +198,25 @@ async fn instance_worker_one(
     mon: &mut Option<crate::svc::Monitor>,
     ser: &mut Option<crate::serial::SerialForZone>,
 ) -> Result<DoNext> {
-    let i = {
-        let mut h = c.db.connect().await?;
-        h.instance_get(id)?
-    };
+    let i = c.db.instance_get(id)?;
 
     let Some(i) = i else {
         bail!("no instance {id} in the database?");
     };
+    let id = i.id();
 
     let Some(targ) = c.config.target.get(&i.target) else {
         bail!(
-            "instance {} has target {} that is not in config file",
-            i.id,
+            "instance {id} has target {} that is not in config file",
             i.target,
         );
     };
 
-    let zn = i.id.zonename();
+    let zn = id.zonename();
 
     match i.state {
         InstanceState::Unconfigured => {
-            let t = c.config.for_instance_in_slot(i.slot, &i.id)?;
+            let t = c.config.for_instance_in_slot(i.slot, &id)?;
 
             /*
              * The zone needs to be configured.
@@ -272,8 +267,7 @@ async fn instance_worker_one(
             match zc.run().await {
                 Ok(_) => {
                     info!(log, "zone {zn} configured!");
-                    let mut h = c.db.connect().await?;
-                    h.instance_new_state(&i.id, InstanceState::Configured)?;
+                    c.db.instance_new_state(&id, InstanceState::Configured)?;
                     Ok(DoNext::Immediate)
                 }
                 Err(e) => bail!("zone {zn} config error: {e}"),
@@ -294,8 +288,7 @@ async fn instance_worker_one(
                 match zone::Adm::new(&zn).uninstall(true).await {
                     Ok(_) => {
                         info!(log, "zone {zn} installed!");
-                        let mut h = c.db.connect().await?;
-                        h.instance_new_state(&i.id, InstanceState::Installed)?;
+                        c.db.instance_new_state(&id, InstanceState::Installed)?;
                     }
                     Err(e) => bail!("zone {zn} install error: {e}"),
                 }
@@ -307,15 +300,14 @@ async fn instance_worker_one(
             match zone::Adm::new(&zn).install(Default::default()).await {
                 Ok(_) => {
                     info!(log, "zone {zn} installed!");
-                    let mut h = c.db.connect().await?;
-                    h.instance_new_state(&i.id, InstanceState::Installed)?;
+                    c.db.instance_new_state(&id, InstanceState::Installed)?;
                     Ok(DoNext::Immediate)
                 }
                 Err(e) => bail!("zone {zn} install error: {e}"),
             }
         }
         InstanceState::Installed => {
-            let t = c.config.for_instance_in_slot(i.slot, &i.id)?;
+            let t = c.config.for_instance_in_slot(i.slot, &id)?;
 
             /*
              * Confirm that the VNIC is correctly configured, and get the MAC
@@ -336,7 +328,7 @@ async fn instance_worker_one(
 
                 Config {
                     main: Main {
-                        name: i.id.flat_id(),
+                        name: id.flat_id(),
                         bootrom: "/software/OVMF_CODE.fd".into(),
 
                         cpus: t.ncpus(),
@@ -408,8 +400,8 @@ async fn instance_worker_one(
                         ),
                         meta_data: Some(
                             crate::nocloud::MetaData {
-                                instance_id: i.id.flat_id(),
-                                local_hostname: i.id.local_hostname(),
+                                instance_id: id.flat_id(),
+                                local_hostname: id.local_hostname(),
                             }
                             .to_json()?,
                         ),
@@ -450,7 +442,7 @@ async fn instance_worker_one(
             }
             std::fs::create_dir(&vmdir)?;
 
-            std::fs::write(&vmdir.join("config.toml"), psc.as_bytes())?;
+            std::fs::write(vmdir.join("config.toml"), psc.as_bytes())?;
 
             for (name, script, bundle) in [
                 (
@@ -525,8 +517,7 @@ async fn instance_worker_one(
             zone::Adm::new(&zn).boot().await?;
 
             info!(log, "zone {zn}: online!");
-            let mut h = c.db.connect().await?;
-            h.instance_new_state(&i.id, InstanceState::ZoneOnline)?;
+            c.db.instance_new_state(&id, InstanceState::ZoneOnline)?;
             Ok(DoNext::Immediate)
         }
         InstanceState::ZoneOnline => {
@@ -576,8 +567,7 @@ async fn instance_worker_one(
 
             if give_up {
                 warn!(log, "zone {zn}: giving up on zone!");
-                let mut h = c.db.connect().await?;
-                h.instance_new_state(&i.id, InstanceState::Destroying)?;
+                c.db.instance_new_state(&id, InstanceState::Destroying)?;
             }
 
             /*
@@ -586,7 +576,7 @@ async fn instance_worker_one(
             Ok(DoNext::Immediate)
         }
         InstanceState::Destroying => {
-            let t = c.config.for_instance_in_slot(i.slot, &i.id)?;
+            let t = c.config.for_instance_in_slot(i.slot, &id)?;
 
             if let Some(cur) = mon.as_ref() {
                 tokio::task::block_in_place(|| cur.shutdown());
@@ -695,10 +685,9 @@ async fn instance_worker_one(
              * Remove the now-vestigial zone path:
              */
             let zp = PathBuf::from(t.zonepath());
-            std::fs::remove_dir_all(&zp).ok();
+            std::fs::remove_dir_all(zp).ok();
 
-            let mut h = c.db.connect().await?;
-            h.instance_new_state(&i.id, InstanceState::Destroyed)?;
+            c.db.instance_new_state(&id, InstanceState::Destroyed)?;
             Ok(DoNext::Immediate)
         }
         InstanceState::Destroyed => {

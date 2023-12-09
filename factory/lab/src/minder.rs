@@ -98,13 +98,13 @@ impl<T> MakeInternalError<T> for std::io::Result<T> {
     }
 }
 
-impl<T> MakeInternalError<T> for super::db::OResult<T> {
+impl<T> MakeInternalError<T> for buildomat_database::DBResult<T> {
     fn or_500(self) -> SResult<T, HttpError> {
         self.map_err(|e| {
-            use super::db::OperationError;
+            use buildomat_database::DatabaseError;
 
             match e {
-                OperationError::Conflict(msg) => HttpError::for_client_error(
+                DatabaseError::Conflict(msg) => HttpError::for_client_error(
                     Some("conflict".to_string()),
                     StatusCode::CONFLICT,
                     msg,

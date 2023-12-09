@@ -234,7 +234,7 @@ async fn job_waiters_one(log: &Logger, c: &Central) -> Result<()> {
         }
 
         let inputs = c.db.job_inputs(j.id)?;
-        if inputs.iter().any(|(_, f)| f.is_none()) {
+        if inputs.iter().any(|jif| jif.file.is_none()) {
             /*
              * At least one input file is not yet uploaded.
              */

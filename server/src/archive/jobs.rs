@@ -144,13 +144,13 @@ struct ArchivedOutput {
     pub file: ArchivedFile,
 }
 
-impl TryFrom<(db::JobOutput, db::JobFile)> for ArchivedOutput {
+impl TryFrom<db::JobOutputAndFile> for ArchivedOutput {
     type Error = anyhow::Error;
 
-    fn try_from(input: (db::JobOutput, db::JobFile)) -> Result<Self> {
-        let db::JobOutput { job: _, id: _, path } = input.0;
+    fn try_from(input: db::JobOutputAndFile) -> Result<Self> {
+        let db::JobOutput { job: _, id: _, path } = input.output;
 
-        Ok(ArchivedOutput { path, file: input.1.try_into()? })
+        Ok(ArchivedOutput { path, file: input.file.try_into()? })
     }
 }
 
@@ -161,15 +161,15 @@ struct ArchivedInput {
     pub other_job_id: Option<String>,
 }
 
-impl TryFrom<(db::JobInput, Option<db::JobFile>)> for ArchivedInput {
+impl TryFrom<db::JobInputAndFile> for ArchivedInput {
     type Error = anyhow::Error;
 
-    fn try_from(input: (db::JobInput, Option<db::JobFile>)) -> Result<Self> {
-        let db::JobInput { job: _, id: _, name, other_job } = input.0;
+    fn try_from(input: db::JobInputAndFile) -> Result<Self> {
+        let db::JobInput { job: _, id: _, name, other_job } = input.input;
 
         Ok(ArchivedInput {
             name,
-            file: input.1.map(ArchivedFile::try_from).transpose()?,
+            file: input.file.map(ArchivedFile::try_from).transpose()?,
             other_job_id: other_job.map(|i| i.to_string()),
         })
     }
@@ -460,7 +460,7 @@ impl ArchivedJob {
             .collect::<Result<Vec<_>>>()
     }
 
-    pub fn job_outputs(&self) -> Result<Vec<(db::JobOutput, db::JobFile)>> {
+    pub fn job_outputs(&self) -> Result<Vec<db::JobOutputAndFile>> {
         let job: db::JobId = self.id.parse()?;
 
         self.outputs
@@ -479,7 +479,7 @@ impl ArchivedJob {
                     time_archived: Some(f.file.time_archived()?),
                 };
 
-                Ok((output, file))
+                Ok(db::JobOutputAndFile { output, file })
             })
             .collect::<Result<Vec<_>>>()
     }

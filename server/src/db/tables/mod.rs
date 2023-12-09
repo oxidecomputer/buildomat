@@ -3,35 +3,19 @@
  */
 
 use rusqlite::Row;
-use sea_query::{ColumnRef, Iden, SeaRc};
+use sea_query::{ColumnRef, Cond, Expr, Query, SelectStatement};
 
 use crate::db::types::*;
-use buildomat_database::rusqlite;
-
-pub trait FromRow: Sized {
-    fn columns() -> Vec<ColumnRef>;
-    fn from_row(row: &Row) -> rusqlite::Result<Self>;
-
-    fn bare_columns() -> Vec<SeaRc<dyn Iden>> {
-        Self::columns()
-            .into_iter()
-            .map(|v| match v {
-                ColumnRef::TableColumn(_, c) => c,
-                _ => unreachable!(),
-            })
-            .collect()
-    }
-}
+use buildomat_database::{rusqlite, FromRow};
 
 mod sublude {
     pub use std::str::FromStr;
     pub use std::time::Duration;
 
-    pub use super::FromRow;
     pub use crate::db::types::*;
     pub use crate::db::{CreateDepend, CreateOutputRule, CreateTask};
     pub use anyhow::Result;
-    pub use buildomat_database::rusqlite;
+    pub use buildomat_database::{rusqlite, FromRow};
     pub use buildomat_types::metadata;
     pub use chrono::prelude::*;
     pub use rusqlite::Row;
@@ -101,41 +85,47 @@ impl std::ops::Deref for AuthUser {
  * This implementation allows us to use the existing tx_get_row() routine to
  * fish out a MAX() value for the task "seq" column.
  */
-impl FromRow for Option<u32> {
-    fn columns() -> Vec<ColumnRef> {
-        unimplemented!()
-    }
-
-    fn from_row(row: &Row) -> rusqlite::Result<Option<u32>> {
-        row.get(0)
-    }
-}
+// XXX impl FromRow for Option<u32> {
+// XXX     fn columns() -> Vec<ColumnRef> {
+// XXX         unimplemented!()
+// XXX     }
+// XXX
+// XXX     fn from_row(row: &Row) -> rusqlite::Result<Option<u32>> {
+// XXX         row.get(0)
+// XXX     }
+// XXX }
 
 /*
  * This implementation allows us to use the existing tx_get_row() routine to
  * fish out a COUNT() value.
  */
-impl FromRow for usize {
-    fn columns() -> Vec<ColumnRef> {
-        unimplemented!()
-    }
+// XXX impl FromRow for usize {
+// XXX     fn columns() -> Vec<ColumnRef> {
+// XXX         unimplemented!()
+// XXX     }
+// XXX
+// XXX     fn from_row(row: &Row) -> rusqlite::Result<usize> {
+// XXX         Ok(row.get::<_, i64>(0)?.try_into().unwrap())
+// XXX     }
+// XXX }
 
-    fn from_row(row: &Row) -> rusqlite::Result<usize> {
-        Ok(row.get::<_, i64>(0)?.try_into().unwrap())
-    }
+/**
+ * This synthetic model object represents the left outer join of Inputs and
+ * Files.  When an input is created, it may not yet have an associated File, at
+ * which point "file" will be None.
+ */
+pub struct JobInputAndFile {
+    pub input: JobInput,
+    pub file: Option<JobFile>,
 }
 
-/*
- * Joins are a bit of a mess, so produce some helper implementations for pairs
- * of objects we need to return:
- */
-impl FromRow for (JobInput, Option<JobFile>) {
+impl FromRow for JobInputAndFile {
     fn columns() -> Vec<ColumnRef> {
         JobInput::columns().into_iter().chain(JobFile::columns()).collect()
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<Self> {
-        let ji = JobInput {
+        let input = JobInput {
             job: row.get(0)?,
             name: row.get(1)?,
             id: row.get(2)?,
@@ -146,7 +136,7 @@ impl FromRow for (JobInput, Option<JobFile>) {
          * The first column of job_file is the job ID, which will be NULL if
          * this record did not appear in the LEFT OUTER JOIN.
          */
-        let jf = if let Some(job) = row.get::<_, Option<JobId>>(4)? {
+        let file = if let Some(job) = row.get::<_, Option<JobId>>(4)? {
             Some(JobFile {
                 job,
                 id: row.get(5)?,
@@ -157,24 +147,131 @@ impl FromRow for (JobInput, Option<JobFile>) {
             None
         };
 
-        Ok((ji, jf))
+        Ok(JobInputAndFile { input, file })
     }
 }
 
-impl FromRow for (JobOutput, JobFile) {
+impl JobInputAndFile {
+    pub fn base_query() -> SelectStatement {
+        Query::select()
+            .columns(JobInputAndFile::columns())
+            .from(JobInputDef::Table)
+            .left_join(
+                JobFileDef::Table,
+                Cond::all()
+                    /*
+                     * The file ID column must always match:
+                     */
+                    .add(
+                        Expr::col((JobFileDef::Table, JobFileDef::Id)).eq(
+                            Expr::col((JobInputDef::Table, JobInputDef::Id)),
+                        ),
+                    )
+                    .add(
+                        Cond::any()
+                            /*
+                             * Either the other_job field is null, and the input
+                             * job ID matches the file job ID directly...
+                             */
+                            .add(
+                                Expr::col((
+                                    JobInputDef::Table,
+                                    JobInputDef::OtherJob,
+                                ))
+                                .is_null()
+                                .and(
+                                    Expr::col((
+                                        JobFileDef::Table,
+                                        JobFileDef::Job,
+                                    ))
+                                    .eq(
+                                        Expr::col((
+                                            JobInputDef::Table,
+                                            JobInputDef::Job,
+                                        )),
+                                    ),
+                                ),
+                            )
+                            /*
+                             * ... or the other_job field is populated and it
+                             * matches the file job ID instead:
+                             */
+                            .add(
+                                Expr::col((
+                                    JobInputDef::Table,
+                                    JobInputDef::OtherJob,
+                                ))
+                                .is_not_null()
+                                .and(
+                                    Expr::col((
+                                        JobFileDef::Table,
+                                        JobFileDef::Job,
+                                    ))
+                                    .eq(
+                                        Expr::col((
+                                            JobInputDef::Table,
+                                            JobInputDef::OtherJob,
+                                        )),
+                                    ),
+                                ),
+                            ),
+                    ),
+            )
+            .to_owned()
+    }
+}
+
+/**
+ * This synthetic model object represents the inner join of Outputs and Files.
+ * Outputs and their underlying File are created in one transaction, so they
+ * always exist together.
+ */
+pub struct JobOutputAndFile {
+    pub output: JobOutput,
+    pub file: JobFile,
+}
+
+impl FromRow for JobOutputAndFile {
     fn columns() -> Vec<ColumnRef> {
         JobOutput::columns().into_iter().chain(JobFile::columns()).collect()
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<Self> {
-        Ok((
-            JobOutput { job: row.get(0)?, path: row.get(1)?, id: row.get(2)? },
-            JobFile {
+        Ok(JobOutputAndFile {
+            output: JobOutput {
+                job: row.get(0)?,
+                path: row.get(1)?,
+                id: row.get(2)?,
+            },
+            file: JobFile {
                 job: row.get(3)?,
                 id: row.get(4)?,
                 size: row.get(5)?,
                 time_archived: row.get(6)?,
             },
-        ))
+        })
+    }
+}
+
+impl JobOutputAndFile {
+    pub fn base_query() -> SelectStatement {
+        Query::select()
+            .columns(JobOutputAndFile::columns())
+            .from(JobOutputDef::Table)
+            .inner_join(
+                JobFileDef::Table,
+                /*
+                 * The job in both tables must match:
+                 */
+                Expr::col((JobFileDef::Table, JobFileDef::Job))
+                    .eq(Expr::col((JobOutputDef::Table, JobOutputDef::Job)))
+                    /*
+                     * The file ID must also match:
+                     */
+                    .and(Expr::col((JobFileDef::Table, JobFileDef::Id)).eq(
+                        Expr::col((JobOutputDef::Table, JobOutputDef::Id)),
+                    )),
+            )
+            .to_owned()
     }
 }

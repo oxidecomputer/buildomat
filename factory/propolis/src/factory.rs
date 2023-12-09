@@ -4,15 +4,15 @@
 
 use std::{collections::BTreeSet, str::FromStr, sync::Arc, time::Duration};
 
-use crate::{db::types::*, Central};
+use crate::{
+    db::{types::*, CreateInstance},
+    Central,
+};
 use anyhow::Result;
 use slog::{debug, error, info, o, warn, Logger};
 
 async fn factory_task_one(log: &Logger, c: &Arc<Central>) -> Result<()> {
-    let instances = {
-        let h = c.db.connect().await?;
-        h.instances_active()?
-    };
+    let instances = c.db.instances_active()?;
 
     /*
      * For each instance, check to see if its worker record still exists.  If it
@@ -27,6 +27,7 @@ async fn factory_task_one(log: &Logger, c: &Arc<Central>) -> Result<()> {
             continue;
         }
 
+        let id = i.id();
         let w = c
             .client
             .factory_worker_get()
@@ -37,15 +38,14 @@ async fn factory_task_one(log: &Logger, c: &Arc<Central>) -> Result<()> {
 
         let destroy = match w.worker {
             Some(w) => {
-                debug!(log, "instance {} is for worker {}", i.id, w.id);
+                debug!(log, "instance {id} is for worker {}", w.id);
 
                 if let Some(expected) = w.private.as_deref() {
-                    if expected != i.id.to_string() {
+                    if expected != id.to_string() {
                         error!(
                             log,
-                            "instance {} for worker {} does not match \
+                            "instance {id} for worker {} does not match \
                                 expected instance ID {} from core server",
-                            i.id,
                             w.id,
                             expected,
                         );
@@ -58,12 +58,12 @@ async fn factory_task_one(log: &Logger, c: &Arc<Central>) -> Result<()> {
                      */
                     info!(
                         log,
-                        "associating instance {} with worker {}", i.id, w.id,
+                        "associating instance {id} with worker {}", w.id,
                     );
                     c.client
                         .factory_worker_associate()
                         .worker(&w.id)
-                        .body_map(|b| b.private(i.id.to_string()))
+                        .body_map(|b| b.private(id.to_string()))
                         .send()
                         .await?;
                 }
@@ -104,8 +104,7 @@ async fn factory_task_one(log: &Logger, c: &Arc<Central>) -> Result<()> {
             None => {
                 warn!(
                     log,
-                    "instance {} is worker {} which no longer exists",
-                    i.id,
+                    "instance {id} is worker {} which no longer exists",
                     i.worker,
                 );
                 true
@@ -113,8 +112,7 @@ async fn factory_task_one(log: &Logger, c: &Arc<Central>) -> Result<()> {
         };
 
         if destroy {
-            let mut h = c.db.connect().await?;
-            h.instance_new_state(&i.id, InstanceState::Destroying)?;
+            c.db.instance_new_state(&id, InstanceState::Destroying)?;
         }
     }
 
@@ -133,10 +131,7 @@ async fn factory_task_one(log: &Logger, c: &Arc<Central>) -> Result<()> {
              * There is a record of a particular instance ID for this worker.
              * Check to see if that instance exists.
              */
-            let i = {
-                let mut h = c.db.connect().await?;
-                h.instance_get(&instance_id)?
-            };
+            let i = c.db.instance_get(&instance_id)?;
 
             if let Some(i) = i {
                 if matches!(i.state, InstanceState::Destroyed) {
@@ -196,10 +191,7 @@ async fn factory_task_one(log: &Logger, c: &Arc<Central>) -> Result<()> {
         }
     }
 
-    let active = {
-        let h = c.db.connect().await?;
-        h.slots_active()?
-    };
+    let active = c.db.slots_active()?;
 
     let mut free = BTreeSet::new();
     for n in 0..c.config.slots {
@@ -250,17 +242,16 @@ async fn factory_task_one(log: &Logger, c: &Arc<Central>) -> Result<()> {
         .send()
         .await?;
 
-    let instance_id = {
-        let mut h = c.db.connect().await?;
-        h.instance_create(
-            &c.config.nodename,
-            &w.id,
-            &lease.job,
-            &lease.target,
-            &w.bootstrap,
-            *slot,
-        )?
-    };
+    let instance_id = c.db.instance_create(
+        &c.config.nodename,
+        CreateInstance {
+            worker: w.id.to_string(),
+            lease: lease.job.to_string(),
+            target: lease.target.to_string(),
+            bootstrap: w.bootstrap.to_string(),
+            slot: *slot,
+        },
+    )?;
     info!(log, "created instance: {instance_id} [slot {slot}]");
 
     /*
