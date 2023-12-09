@@ -37,7 +37,9 @@ mod files;
 mod jobs;
 mod workers;
 
-use db::{AuthUser, Job, JobEvent, JobFile, JobFileId, JobId, JobOutput};
+use db::{
+    AuthUser, Job, JobEvent, JobFileId, JobId, JobOutput, JobOutputAndFile,
+};
 
 pub(crate) trait MakeInternalError<T> {
     fn or_500(self) -> SResult<T, HttpError>;
@@ -61,13 +63,13 @@ impl<T> MakeInternalError<T> for std::io::Result<T> {
     }
 }
 
-impl<T> MakeInternalError<T> for db::OResult<T> {
+impl<T> MakeInternalError<T> for buildomat_database::DBResult<T> {
     fn or_500(self) -> SResult<T, HttpError> {
         self.map_err(|e| {
-            use db::OperationError;
+            use buildomat_database::DatabaseError;
 
             match e {
-                OperationError::Conflict(msg) => HttpError::for_client_error(
+                DatabaseError::Conflict(msg) => HttpError::for_client_error(
                     Some("conflict".to_string()),
                     StatusCode::CONFLICT,
                     msg,
@@ -741,7 +743,7 @@ impl Central {
         &self,
         log: &Logger,
         job: &Job,
-    ) -> Result<Vec<(JobOutput, JobFile)>> {
+    ) -> Result<Vec<JobOutputAndFile>> {
         if job.is_archived() {
             let aj = self.archive_load(log, job.id).await?;
 

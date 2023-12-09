@@ -194,10 +194,10 @@ pub(crate) async fn worker_ping(
                     .job_inputs(job.id)
                     .or_500()?
                     .iter()
-                    .filter(|(ji, _)| ji.id.is_some())
-                    .map(|(ji, _)| WorkerPingInput {
-                        name: ji.name.to_string(),
-                        id: ji.id.unwrap().to_string(),
+                    .filter(|jif| jif.input.id.is_some())
+                    .map(|jif| WorkerPingInput {
+                        name: jif.input.name.to_string(),
+                        id: jif.input.id.unwrap().to_string(),
                     })
                     .collect::<Vec<_>>(),
             })

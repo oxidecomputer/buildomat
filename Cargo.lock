@@ -660,9 +660,11 @@ dependencies = [
  "chrono",
  "jmclib",
  "sea-query",
+ "sea-query-rusqlite",
  "serde",
  "serde_json",
  "slog",
+ "thiserror",
 ]
 
 [[package]]
@@ -856,12 +858,10 @@ dependencies = [
  "rusty_ulid",
  "schemars",
  "sea-query",
- "sea-query-rusqlite",
  "serde",
  "serde_json",
  "slog",
  "tempfile",
- "thiserror",
  "tokio",
 ]
 

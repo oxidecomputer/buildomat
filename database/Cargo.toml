@@ -12,6 +12,8 @@ anyhow = { workspace = true }
 chrono = { workspace = true }
 jmclib = { workspace = true }
 sea-query = { workspace = true }
+sea-query-rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 slog = { workspace = true }
+thiserror = { workspace = true }

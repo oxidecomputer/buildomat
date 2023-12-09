@@ -58,16 +58,6 @@ pub use install::*;
 pub use repository::*;
 pub use user::*;
 
-impl<T: FromRow + rusqlite::types::FromSql> FromRow for Option<T> {
-    fn columns() -> Vec<ColumnRef> {
-        unimplemented!()
-    }
-
-    fn from_row(row: &Row) -> rusqlite::Result<Option<T>> {
-        row.get(0)
-    }
-}
-
 /*
  * This implementation allows us to use the existing tx_get_rows() routine to
  * fish out a list of delivery "seq" values.

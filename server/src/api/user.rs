@@ -122,10 +122,10 @@ pub(crate) async fn job_outputs_get(
 
     Ok(HttpResponseOk(
         jops.iter()
-            .map(|(jop, jf)| JobOutput {
-                id: jop.id.to_string(),
-                size: jf.size.0,
-                path: jop.path.to_string(),
+            .map(|jof| JobOutput {
+                id: jof.output.id.to_string(),
+                size: jof.file.size.0,
+                path: jof.output.path.to_string(),
             })
             .collect(),
     ))
