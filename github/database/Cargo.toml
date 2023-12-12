@@ -17,9 +17,7 @@ chrono = { workspace = true }
 rand = { workspace = true }
 rusty_ulid = { workspace = true }
 sea-query = { workspace = true }
-sea-query-rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 slog = { workspace = true }
 strum = { workspace = true }
-thiserror = { workspace = true }

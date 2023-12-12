@@ -760,12 +760,10 @@ dependencies = [
  "rand",
  "rusty_ulid",
  "sea-query",
- "sea-query-rusqlite",
  "serde",
  "serde_json",
  "slog",
  "strum",
- "thiserror",
 ]
 
 [[package]]

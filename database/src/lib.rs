@@ -494,6 +494,17 @@ pub enum DatabaseError {
     Other(#[from] anyhow::Error),
 }
 
+impl DatabaseError {
+    pub fn is_locked_database(&self) -> bool {
+        match self {
+            DatabaseError::Sql(e) => {
+                e.to_string().contains("database is locked")
+            }
+            _ => false,
+        }
+    }
+}
+
 #[macro_export]
 macro_rules! conflict {
     ($msg:expr) => {
