@@ -58,7 +58,7 @@ async fn main() -> Result<()> {
     };
 
     let db = if let Some(p) = p.opt_str("d") {
-        db::Database::open(log.clone(), p)?
+        db::Database::new(log.clone(), p, None)?
     } else {
         bail!("must specify database file (-d)");
     };

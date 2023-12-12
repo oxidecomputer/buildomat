@@ -6,17 +6,18 @@ license = "MPL-2.0"
 
 [dependencies]
 buildomat-common = { path = "../../common" }
+buildomat-database = { path = "../../database" }
 buildomat-client = { path = "../../client" }
 buildomat-types = { path = "../../types" }
 
 anyhow = { workspace = true }
 chrono = { workspace = true }
 getopts = { workspace = true }
-jmclib = { workspace = true }
 libc = { workspace = true }
 rand = { workspace = true }
 rusty_ulid = { workspace = true }
 schemars = { workspace = true }
+sea-query = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
@@ -24,7 +25,6 @@ slog = { workspace = true }
 slog-term = { workspace = true }
 smf = { workspace = true }
 strum = { workspace = true }
-thiserror = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
 zone = { workspace = true }
