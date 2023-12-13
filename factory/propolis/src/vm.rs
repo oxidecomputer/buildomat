@@ -442,7 +442,7 @@ async fn instance_worker_one(
             }
             std::fs::create_dir(&vmdir)?;
 
-            std::fs::write(&vmdir.join("config.toml"), psc.as_bytes())?;
+            std::fs::write(vmdir.join("config.toml"), psc.as_bytes())?;
 
             for (name, script, bundle) in [
                 (
@@ -685,7 +685,7 @@ async fn instance_worker_one(
              * Remove the now-vestigial zone path:
              */
             let zp = PathBuf::from(t.zonepath());
-            std::fs::remove_dir_all(&zp).ok();
+            std::fs::remove_dir_all(zp).ok();
 
             c.db.instance_new_state(&id, InstanceState::Destroyed)?;
             Ok(DoNext::Immediate)

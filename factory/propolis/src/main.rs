@@ -103,10 +103,8 @@ async fn main() -> Result<()> {
         factory::factory_task(c).await.context("factory task failure")
     });
 
-    loop {
-        tokio::select! {
-            _ = t_vm => bail!("VM worker task stopped early"),
-            _ = t_factory => bail!("factory task stopped early"),
-        }
+    tokio::select! {
+        _ = t_vm => bail!("VM worker task stopped early"),
+        _ = t_factory => bail!("factory task stopped early"),
     }
 }

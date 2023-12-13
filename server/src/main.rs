@@ -541,7 +541,7 @@ impl Central {
         let mut fout = std::fs::OpenOptions::new()
             .create_new(true)
             .write(true)
-            .open(&fp)?;
+            .open(fp)?;
         {
             let mut bw = std::io::BufWriter::new(&mut fout);
             for (ip, _) in files.iter() {
@@ -1054,14 +1054,12 @@ async fn main() -> Result<()> {
 
     let server_task = server.start();
 
-    loop {
-        tokio::select! {
-            _ = t_assign => bail!("task assignment task stopped early"),
-            _ = t_chunks => bail!("chunk cleanup task stopped early"),
-            _ = t_archive_files => bail!("archive files task stopped early"),
-            _ = t_archive_jobs => bail!("archive jobs task stopped early"),
-            _ = t_workers => bail!("worker cleanup task stopped early"),
-            _ = server_task => bail!("server stopped early"),
-        }
+    tokio::select! {
+        _ = t_assign => bail!("task assignment task stopped early"),
+        _ = t_chunks => bail!("chunk cleanup task stopped early"),
+        _ = t_archive_files => bail!("archive files task stopped early"),
+        _ = t_archive_jobs => bail!("archive jobs task stopped early"),
+        _ = t_workers => bail!("worker cleanup task stopped early"),
+        _ = server_task => bail!("server stopped early"),
     }
 }
