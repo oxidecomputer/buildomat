@@ -127,7 +127,7 @@ struct Central {
     tx: Mutex<std::sync::mpsc::Sender<Activity>>,
 }
 
-#[tokio::main]
+#[tokio::main(worker_threads = 4)]
 async fn main() -> Result<()> {
     let mut opts = Options::new();
 

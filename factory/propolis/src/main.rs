@@ -28,7 +28,11 @@ struct Central {
     serial: serial::Serial,
 }
 
-#[tokio::main]
+/*
+ * This factory runs on large AMD machines (e.g., 100+ SMT threads) and thus
+ * ends up with far too many worker threads by default.
+ */
+#[tokio::main(worker_threads = 4)]
 async fn main() -> Result<()> {
     let mut opts = Options::new();
 
