@@ -67,7 +67,7 @@ impl Database {
             /*
              * Get the existing state of this instance:
              */
-            let i: Instance = self.sql.tx(|h| h.get_row(Instance::find(id)))?;
+            let i: Instance = h.get_row(Instance::find(id))?;
 
             if i.state == state {
                 return Ok(());

@@ -3,6 +3,8 @@
  */
 
 use std::path::Path;
+use std::sync::Condvar;
+use std::thread::ThreadId;
 use std::{collections::HashMap, sync::Mutex};
 
 use anyhow::Result;
@@ -408,6 +410,8 @@ sqlite_json_new_type!(JsonValue, serde_json::Value);
 pub struct Sqlite {
     log: Logger,
     conn: Mutex<rusqlite::Connection>,
+    busy: Mutex<Option<ThreadId>>,
+    cv: Condvar,
 }
 
 impl Sqlite {
@@ -438,7 +442,12 @@ impl Sqlite {
             setup.cache_kb(kb);
         }
 
-        Ok(Sqlite { log, conn: Mutex::new(setup.open(path)?) })
+        Ok(Sqlite {
+            log,
+            conn: Mutex::new(setup.open(path)?),
+            busy: Mutex::new(None),
+            cv: Default::default(),
+        })
     }
 
     pub fn tx_immediate<T>(
@@ -460,12 +469,31 @@ impl Sqlite {
         txb: rusqlite::TransactionBehavior,
         func: impl FnOnce(&mut Handle) -> DBResult<T>,
     ) -> DBResult<T> {
+        let curthread = std::thread::current().id();
+
+        /*
+         * Keep track of which thread is currently engaged in a transaction.  If
+         * we accidentally attempt to start a second transaction recursively, we
+         * want to fail.
+         */
+        {
+            let mut b = self.busy.lock().unwrap();
+            while let Some(owner) = *b {
+                if owner == curthread {
+                    conflict!("nested transactions would cause deadlock");
+                }
+
+                b = self.cv.wait(b).unwrap();
+            }
+            *b = Some(curthread);
+        }
+
         let mut c = self.conn.lock().unwrap();
         let tx = c.transaction_with_behavior(txb)?;
 
         let mut h = Handle { tx, log: self.log.clone() };
 
-        match func(&mut h) {
+        let res = match func(&mut h) {
             Ok(res) => {
                 h.tx.commit()?;
                 Ok(res)
@@ -474,7 +502,21 @@ impl Sqlite {
                 h.tx.rollback()?;
                 Err(e)
             }
+        };
+
+        {
+            let mut b = self.busy.lock().unwrap();
+
+            /*
+             * This code is completely synchronous, so we must not be migrated
+             * to another LWP prior to the ultimate return to our caller.
+             */
+            assert_eq!(b.take(), Some(curthread));
+
+            self.cv.notify_all();
         }
+
+        res
     }
 }
 
