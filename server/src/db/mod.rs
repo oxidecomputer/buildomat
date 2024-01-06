@@ -2012,6 +2012,18 @@ impl Database {
         Ok(f)
     }
 
+    pub fn factories(&self) -> DBResult<Vec<Factory>> {
+        self.sql.tx(|h| {
+            h.get_rows(
+                Query::select()
+                    .from(FactoryDef::Table)
+                    .columns(Factory::columns())
+                    .order_by(FactoryDef::Id, Order::Asc)
+                    .to_owned(),
+            )
+        })
+    }
+
     pub fn factory(&self, id: FactoryId) -> DBResult<Factory> {
         if id == Worker::legacy_default_factory_id() {
             /*

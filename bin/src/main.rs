@@ -19,6 +19,7 @@ use hiercmd::prelude::*;
 use rusty_ulid::Ulid;
 
 const WIDTH_ISODATE: usize = 20;
+const WIDTH_ID: usize = 26;
 
 mod config;
 
@@ -599,7 +600,7 @@ async fn do_job_cancel(mut l: Level<Stuff>) -> Result<()> {
 async fn do_job_outputs(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("path", 68, true);
     l.add_column("size", 10, true);
-    l.add_column("id", 26, false);
+    l.add_column("id", WIDTH_ID, false);
 
     l.usage_args(Some("JOB"));
 
@@ -626,7 +627,7 @@ async fn do_job_outputs(mut l: Level<Stuff>) -> Result<()> {
 }
 
 async fn do_job_list(mut l: Level<Stuff>) -> Result<()> {
-    l.add_column("id", 26, true);
+    l.add_column("id", WIDTH_ID, true);
     l.add_column("age", 8, true);
     l.add_column("s", 1, true);
     l.add_column("name", 32, true);
@@ -1157,7 +1158,7 @@ async fn do_user_revoke(mut l: Level<Stuff>) -> Result<()> {
 }
 
 async fn do_user_list(mut l: Level<Stuff>) -> Result<()> {
-    l.add_column("id", 26, true);
+    l.add_column("id", WIDTH_ID, true);
     l.add_column("name", 30, true);
     l.add_column("age", 8, true);
     l.add_column("creation", WIDTH_ISODATE, false);
@@ -1218,7 +1219,7 @@ async fn do_user(mut l: Level<Stuff>) -> Result<()> {
 }
 
 async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
-    l.add_column("id", 26, true);
+    l.add_column("id", WIDTH_ID, true);
     l.add_column("flags", 5, true);
     l.add_column("creation", WIDTH_ISODATE, true);
     l.add_column("age", 8, true);
@@ -1344,7 +1345,35 @@ async fn do_factory_create(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_factory_list(mut l: Level<Stuff>) -> Result<()> {
+    l.add_column("id", WIDTH_ID, true);
+    l.add_column("name", 32, true);
+    l.add_column("last_ping", WIDTH_ISODATE, true);
+
+    let a = no_args!(l);
+
+    let mut t = a.table();
+
+    for f in l.context().admin().factories_list().send().await?.into_inner() {
+        let mut r = Row::default();
+        r.add_str("id", &f.id);
+        r.add_str("name", &f.name);
+        r.add_str(
+            "last_ping",
+            &f.last_ping
+                .map(|d| d.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+                .as_deref()
+                .unwrap_or("-"),
+        );
+        t.add_row(r);
+    }
+
+    print!("{}", t.output()?);
+    Ok(())
+}
+
 async fn do_factory(mut l: Level<Stuff>) -> Result<()> {
+    l.cmda("list", "ls", "list factories", cmd!(do_factory_list))?;
     l.cmd("create", "create a factory", cmd!(do_factory_create))?;
 
     sel!(l).run().await
@@ -1403,10 +1432,10 @@ async fn do_target_rename(mut l: Level<Stuff>) -> Result<()> {
 }
 
 async fn do_target_list(mut l: Level<Stuff>) -> Result<()> {
-    l.add_column("id", 26, true);
+    l.add_column("id", WIDTH_ID, true);
     l.add_column("name", 15, true);
     l.add_column("description", 38, true);
-    l.add_column("redirect", 26, false);
+    l.add_column("redirect", WIDTH_ID, false);
     l.add_column("privilege", 14, false);
 
     let a = no_args!(l);

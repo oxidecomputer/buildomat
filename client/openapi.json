@@ -5,6 +5,33 @@
     "version": "1.0"
   },
   "paths": {
+    "/0/admin/factories": {
+      "get": {
+        "operationId": "factories_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_Factory",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Factory"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/0/admin/factory": {
       "post": {
         "operationId": "factory_create",
@@ -1987,18 +2014,6 @@
     }
   },
   "components": {
-    "responses": {
-      "Error": {
-        "description": "Error",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
-            }
-          }
-        }
-      }
-    },
     "schemas": {
       "DependSubmit": {
         "type": "object",
@@ -2040,6 +2055,26 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "Factory": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "last_ping": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
         ]
       },
       "FactoryAddresses": {
@@ -3285,6 +3320,18 @@
         "required": [
           "workers"
         ]
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     }
   }

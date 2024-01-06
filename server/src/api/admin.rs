@@ -13,6 +13,13 @@ pub struct User {
 }
 
 #[derive(Serialize, JsonSchema)]
+pub struct Factory {
+    id: String,
+    name: String,
+    last_ping: Option<DateTime<Utc>>,
+}
+
+#[derive(Serialize, JsonSchema)]
 pub struct Target {
     id: String,
     name: String,
@@ -530,6 +537,32 @@ pub(crate) async fn factory_create(
     }))
 }
 
+#[endpoint {
+    method = GET,
+    path = "/0/admin/factories",
+}]
+pub(crate) async fn factories_list(
+    rqctx: RequestContext<Arc<Central>>,
+) -> DSResult<HttpResponseOk<Vec<Factory>>> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    c.require_admin(log, &rqctx.request, "factory.read").await?;
+
+    let out =
+        c.db.factories()
+            .or_500()?
+            .into_iter()
+            .map(|f| Factory {
+                id: f.id.to_string(),
+                name: f.name,
+                last_ping: f.lastping.map(|d| d.0),
+            })
+            .collect::<Vec<_>>();
+
+    Ok(HttpResponseOk(out))
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct TargetCreate {
     name: String,
@@ -581,7 +614,7 @@ pub(crate) async fn targets_list(
     let out =
         c.db.targets()
             .or_500()?
-            .drain(..)
+            .into_iter()
             .map(|t| Target {
                 id: t.id.to_string(),
                 name: t.name,
