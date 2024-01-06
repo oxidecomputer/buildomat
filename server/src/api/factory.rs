@@ -425,6 +425,12 @@ pub(crate) async fn factory_lease(
 
     let f = c.require_factory(log, &rqctx.request).await?;
 
+    /*
+     * Update the last ping time for this factory, whether we are going to issue
+     * it a lease or not:
+     */
+    c.db.factory_ping(f.id).or_500()?;
+
     if c.inner.lock().unwrap().hold {
         /*
          * The operator has requested that we not create any more workers.
