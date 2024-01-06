@@ -1159,7 +1159,8 @@ async fn do_user_revoke(mut l: Level<Stuff>) -> Result<()> {
 async fn do_user_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("id", 26, true);
     l.add_column("name", 30, true);
-    l.add_column("creation", WIDTH_ISODATE, true);
+    l.add_column("age", 8, true);
+    l.add_column("creation", WIDTH_ISODATE, false);
 
     let a = no_args!(l);
 
@@ -1173,6 +1174,7 @@ async fn do_user_list(mut l: Level<Stuff>) -> Result<()> {
             "creation",
             &u.time_create.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         );
+        r.add_age("age", u.time_create.age());
         t.add_row(r);
     }
 
