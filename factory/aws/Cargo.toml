@@ -19,3 +19,4 @@ slog = { workspace = true }
 slog-term = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
+usdt = { workspace = true }

@@ -19,6 +19,13 @@ use sea_query_rusqlite::{RusqliteBinder, RusqliteValues};
 use slog::{debug, Logger};
 use thiserror::Error;
 
+#[usdt::provider]
+mod buildomat__database {
+    fn sql__query__start(query: String) {}
+    fn sql__query__end() {}
+}
+use buildomat__database::{sql__query__end, sql__query__start};
+
 pub trait FromRow: Sized {
     fn columns() -> Vec<ColumnRef>;
     fn from_row(row: &Row) -> rusqlite::Result<Self>;
@@ -569,9 +576,13 @@ impl<'a> Handle<'a> {
     ) -> DBResult<Option<T>> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
         debug!(self.log, "query: {q}"; "sql" => true);
+
+        sql__query__start!(|| &q);
         let mut s = self.tx.prepare(&q)?;
         let out = s.query_map(&*v.as_params(), T::from_row)?;
         let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
+        sql__query__end!(|| ());
+
         match out.len() {
             0 => Ok(None),
             1 => Ok(Some(out.pop().unwrap())),
@@ -582,10 +593,14 @@ impl<'a> Handle<'a> {
     pub fn get_strings(&mut self, s: SelectStatement) -> DBResult<Vec<String>> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
         debug!(self.log, "query: {q}"; "sql" => true);
+
+        sql__query__start!(|| &q);
         let mut s = self.tx.prepare(&q)?;
         let out = s.query_map(&*v.as_params(), |row| row.get(0))?;
+        let res = out.collect::<rusqlite::Result<_>>()?;
+        sql__query__end!(|| ());
 
-        Ok(out.collect::<rusqlite::Result<_>>()?)
+        Ok(res)
     }
 
     pub fn get_rows<T: FromRow>(
@@ -594,18 +609,26 @@ impl<'a> Handle<'a> {
     ) -> DBResult<Vec<T>> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
         debug!(self.log, "query: {q}"; "sql" => true);
+
+        sql__query__start!(|| &q);
         let mut s = self.tx.prepare(&q)?;
         let out = s.query_map(&*v.as_params(), T::from_row)?;
+        let res = out.collect::<rusqlite::Result<_>>()?;
+        sql__query__end!(|| ());
 
-        Ok(out.collect::<rusqlite::Result<_>>()?)
+        Ok(res)
     }
 
     pub fn get_row<T: FromRow>(&mut self, s: SelectStatement) -> DBResult<T> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
         debug!(self.log, "query: {q}"; "sql" => true);
+
+        sql__query__start!(|| &q);
         let mut s = self.tx.prepare(&q)?;
         let out = s.query_map(&*v.as_params(), T::from_row)?;
         let mut out = out.collect::<rusqlite::Result<Vec<T>>>()?;
+        sql__query__end!(|| ());
+
         match out.len() {
             0 => conflict!("record not found"),
             1 => Ok(out.pop().unwrap()),
@@ -632,8 +655,10 @@ impl<'a> Handle<'a> {
     }
 
     fn exec(&mut self, q: String, v: RusqliteValues) -> DBResult<usize> {
+        sql__query__start!(|| &q);
         let mut s = self.tx.prepare(&q)?;
         let out = s.execute(&*v.as_params())?;
+        sql__query__end!(|| ());
 
         Ok(out)
     }

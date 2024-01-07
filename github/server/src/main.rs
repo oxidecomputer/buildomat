@@ -2169,6 +2169,8 @@ async fn bgtask(app: Arc<App>) {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    usdt::register_probes().unwrap();
+
     let log = make_log("github-server");
 
     info!(log, "ok");

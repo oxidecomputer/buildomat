@@ -28,3 +28,4 @@ serde_json = { workspace = true }
 slog = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
+usdt = { workspace = true }

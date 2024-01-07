@@ -866,6 +866,8 @@ async fn file_agent_gz(
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    usdt::register_probes().unwrap();
+
     let mut opts = Options::new();
 
     opts.optopt("b", "", "bind address:port", "BIND_ADDRESS");

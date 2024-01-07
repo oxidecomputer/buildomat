@@ -75,4 +75,5 @@ thiserror = "1"
 tokio = { version = "1", features = [ "full" ] }
 tokio-util = { version = "0.6.9", features = [ "io" ] }
 toml = "0.5"
+usdt = "0.3"
 zone = { version = "0.3", features = [ "async" ], default-features = false }

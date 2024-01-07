@@ -34,6 +34,8 @@ struct Central {
  */
 #[tokio::main(worker_threads = 4)]
 async fn main() -> Result<()> {
+    usdt::register_probes().unwrap();
+
     let mut opts = Options::new();
 
     opts.optopt("f", "", "configuration file", "CONFIG");
