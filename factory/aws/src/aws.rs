@@ -494,6 +494,14 @@ async fn aws_worker_one(
             .await?;
     }
 
+    if freeslots == 0 {
+        /*
+         * If we are not going to check for workers, we should explicitly ping
+         * the server so it knows we are online:
+         */
+        c.client.factory_ping().send().await?;
+    }
+
     info!(log, "worker pass complete");
     Ok(())
 }

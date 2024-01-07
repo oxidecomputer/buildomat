@@ -197,7 +197,13 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
         })
         .collect::<Vec<_>>();
 
-    if !supported_targets.is_empty() {
+    if supported_targets.is_empty() {
+        /*
+         * If we are not going to check for workers, we should explicitly ping
+         * the server so it knows we are online:
+         */
+        c.client.factory_ping().send().await?;
+    } else {
         /*
          * Check to see if the server requires any new workers.
          */

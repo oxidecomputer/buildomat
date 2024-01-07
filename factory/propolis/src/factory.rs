@@ -203,6 +203,12 @@ async fn factory_task_one(log: &Logger, c: &Arc<Central>) -> Result<()> {
     debug!(log, "slots"; "active" => ?active, "free" => ?free);
 
     let Some(slot) = free.first() else {
+        /*
+         * If we are not going to check for workers, we should explicitly ping
+         * the server so it knows we are online:
+         */
+        c.client.factory_ping().send().await?;
+
         return Ok(());
     };
 
