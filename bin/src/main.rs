@@ -1433,21 +1433,38 @@ async fn do_target_rename(mut l: Level<Stuff>) -> Result<()> {
 
 async fn do_target_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("id", WIDTH_ID, true);
-    l.add_column("name", 15, true);
-    l.add_column("description", 38, true);
-    l.add_column("redirect", WIDTH_ID, false);
-    l.add_column("privilege", 14, false);
+    l.add_column("name", 20, true);
+    l.add_column("description", 38, false);
+    l.add_column("redirect_id", WIDTH_ID, false);
+    l.add_column("redirect", 20, true);
+    l.add_column("privilege", 14, true);
 
     let a = no_args!(l);
 
     let mut t = a.table();
 
-    for targ in l.context().admin().targets_list().send().await?.into_inner() {
+    let targs = l.context().admin().targets_list().send().await?.into_inner();
+
+    for targ in targs.iter() {
         let mut r = Row::default();
         r.add_str("id", &targ.id);
         r.add_str("name", &targ.name);
         r.add_str("description", &targ.desc);
-        r.add_str("redirect", targ.redirect.as_deref().unwrap_or("-"));
+        if let Some(redir) = targ.redirect.as_deref() {
+            r.add_str("redirect_id", redir);
+            if let Some(rt) = targs.iter().find(|t| t.id == redir) {
+                r.add_str("redirect", &rt.name);
+            } else {
+                /*
+                 * This should not happen.  It implies a target has an invalid
+                 * redirect to a target that does not exist.
+                 */
+                r.add_str("redirect", "?MISSING");
+            }
+        } else {
+            r.add_str("redirect_id", "-");
+            r.add_str("redirect", "-");
+        }
         r.add_str("privilege", targ.privilege.as_deref().unwrap_or("-"));
         t.add_row(r);
     }
