@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 #![allow(clippy::many_single_char_names)]
@@ -892,6 +892,7 @@ async fn main() -> Result<()> {
     ad.register(api::admin::user_privilege_grant).api_check()?;
     ad.register(api::admin::user_privilege_revoke).api_check()?;
     ad.register(api::admin::workers_list).api_check()?;
+    ad.register(api::admin::workers_list_old).api_check()?;
     ad.register(api::admin::workers_recycle).api_check()?;
     ad.register(api::admin::worker_recycle).api_check()?;
     ad.register(api::admin::admin_job_get).api_check()?;

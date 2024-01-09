@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use anyhow::{anyhow, bail, Result};
@@ -10,6 +10,7 @@ use chrono::prelude::*;
 use dropshot::{
     endpoint, ConfigDropshot, HttpError, HttpResponseOk, RequestContext,
 };
+use futures::TryStreamExt;
 use schemars::JsonSchema;
 use serde::Deserialize;
 #[allow(unused_imports)]
@@ -354,7 +355,13 @@ async fn status(
         oldjobs.sort_by(|a, b| b.id.cmp(&a.id));
         oldjobs
     };
-    let workers = b.workers_list().active(true).send().await.to_500()?;
+    let workers = b
+        .workers_list()
+        .active(true)
+        .stream()
+        .try_collect::<Vec<_>>()
+        .await
+        .to_500()?;
     let targets = b
         .targets_list()
         .send()
@@ -474,11 +481,11 @@ async fn status(
 
     let mut seen = HashSet::new();
 
-    if workers.workers.iter().any(|w| !w.deleted) {
+    if workers.iter().any(|w| !w.deleted) {
         out += "<h2>Active Workers</h2>\n";
         out += "<ul>\n";
 
-        for w in workers.workers.iter() {
+        for w in workers.iter() {
             if w.deleted {
                 continue;
             }

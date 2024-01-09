@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use std::collections::HashMap;
@@ -115,6 +115,29 @@ impl Database {
                 .and_where(Expr::col(WorkerDef::Id).eq(id))
                 .to_owned(),
         )
+    }
+
+    pub fn workers_page(
+        &self,
+        marker: Option<WorkerId>,
+        active: bool,
+    ) -> DBResult<Vec<Worker>> {
+        let q = Query::select()
+            .from(WorkerDef::Table)
+            .columns(Worker::columns())
+            .order_by(WorkerDef::Id, Order::Asc)
+            .conditions(
+                active,
+                |q| {
+                    q.and_where(Expr::col(WorkerDef::Deleted).eq(false));
+                },
+                |_| {},
+            )
+            .and_where_option(marker.map(|id| Expr::col(WorkerDef::Id).gt(id)))
+            .limit(1000)
+            .to_owned();
+
+        self.sql.tx(|h| h.get_rows(q))
     }
 
     pub fn workers(&self) -> DBResult<Vec<Worker>> {

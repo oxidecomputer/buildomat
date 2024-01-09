@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use super::prelude::*;
@@ -410,7 +410,7 @@ pub struct WorkersListQuery {
     method = GET,
     path = "/0/workers",
 }]
-pub(crate) async fn workers_list(
+pub(crate) async fn workers_list_old(
     rqctx: RequestContext<Arc<Central>>,
     query: TypedQuery<WorkersListQuery>,
 ) -> DSResult<HttpResponseOk<WorkersResult>> {
@@ -461,6 +461,88 @@ pub(crate) async fn workers_list(
         .collect::<Vec<_>>();
 
     Ok(HttpResponseOk(WorkersResult { workers }))
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct WorkerScan {
+    #[serde(default)]
+    active: bool,
+}
+
+impl From<WorkerSelect> for WorkerScan {
+    fn from(sel: WorkerSelect) -> Self {
+        WorkerScan { active: sel.active }
+    }
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub(crate) struct WorkerSelect {
+    id: String,
+    active: bool,
+}
+
+impl WorkerSelect {
+    fn id(&self) -> DSResult<db::WorkerId> {
+        db::WorkerId::from_str(&self.id).or_500()
+    }
+
+    fn from_scan(scan: &WorkerScan, id: &str) -> Self {
+        WorkerSelect { id: id.to_string(), active: scan.active }
+    }
+}
+
+#[endpoint {
+    method = GET,
+    path = "/1/workers",
+}]
+pub(crate) async fn workers_list(
+    rqctx: RequestContext<Arc<Central>>,
+    pag: TypedQuery<PaginationParams<WorkerScan, WorkerSelect>>,
+) -> DSResult<HttpResponseOk<ResultsPage<Worker>>> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    c.require_admin(log, &rqctx.request, "worker.read").await?;
+
+    let pag = pag.into_inner();
+    let (marker, scan) = match pag.page {
+        WhichPage::First(scan) => (None, scan),
+        WhichPage::Next(sel) => (Some(sel.id()?), sel.into()),
+    };
+
+    Ok(HttpResponseOk(ResultsPage::new(
+        c.db.workers_page(marker, scan.active)
+            .or_500()?
+            .into_iter()
+            .map(|w| {
+                let jobs =
+                    c.db.worker_jobs(w.id)
+                        .unwrap_or_else(|_| vec![])
+                        .iter()
+                        .map(|j| WorkerJob {
+                            id: j.id.to_string(),
+                            name: j.name.to_string(),
+                            owner: j.owner.to_string(),
+                            state: super::user::format_job_state(j),
+                            tags: c.db.job_tags(j.id).unwrap_or_default(),
+                        })
+                        .collect::<Vec<_>>();
+                Worker {
+                    id: w.id.to_string(),
+                    factory: w.factory().to_string(),
+                    factory_private: w.factory_private.clone(),
+                    target: w.target().to_string(),
+                    bootstrap: w.token.is_some(),
+                    deleted: w.deleted,
+                    recycle: w.recycle,
+                    lastping: w.lastping.map(|x| x.into()),
+                    jobs,
+                }
+            })
+            .collect::<Vec<_>>(),
+        &scan,
+        |a, scan| WorkerSelect::from_scan(scan, &a.id),
+    )?))
 }
 
 #[endpoint {

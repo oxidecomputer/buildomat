@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 #![allow(clippy::many_single_char_names)]
@@ -14,7 +14,7 @@ use anyhow::{anyhow, bail, Result};
 use buildomat_client::{ext::*, types::*, Client, ClientBuilder};
 use buildomat_common::*;
 use chrono::prelude::*;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use hiercmd::prelude::*;
 use rusty_ulid::Ulid;
 
@@ -1226,22 +1226,21 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("info", 20, false);
 
     l.optflag("A", "active", "display only workers not yet destroyed");
+    l.optflag("U", "", "do not sort locally; just stream results from server");
 
     let a = no_args!(l);
     let active = a.opts().opt_present("active");
+    let unsorted = a.opts().opt_present("U");
     let c = l.context();
 
     let mut t = a.table();
 
-    for w in c
-        .admin()
-        .workers_list()
-        .active(active)
-        .send()
-        .await?
-        .into_inner()
-        .workers
-    {
+    if unsorted {
+        print!("{}", t.output_unsorted_header()?);
+    }
+
+    let mut workers = c.admin().workers_list().active(active).stream();
+    while let Some(w) = workers.try_next().await? {
         if active && w.deleted {
             continue;
         }
@@ -1265,10 +1264,17 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
         r.add_age("age", id.age());
         r.add_str("flags", flags);
         r.add_str("info", w.factory_private.as_deref().unwrap_or("-"));
-        t.add_row(r);
+
+        if unsorted {
+            print!("{}", t.output_unsorted(r)?);
+        } else {
+            t.add_row(r);
+        }
     }
 
-    print!("{}", t.output()?);
+    if !unsorted {
+        print!("{}", t.output()?);
+    }
     Ok(())
 }
 
@@ -1675,7 +1681,13 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
     /*
      * Load active workers:
      */
-    let res = s.admin().workers_list().active(true).send().await?.into_inner();
+    let workers = s
+        .admin()
+        .workers_list()
+        .active(true)
+        .stream()
+        .try_collect::<Vec<_>>()
+        .await?;
     w.lap("workers_list");
 
     fn github_url(tags: &HashMap<String, String>) -> Option<String> {
@@ -1756,7 +1768,7 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
      * Display each worker, and its associated job if there is one:
      */
     let mut seen = HashSet::new();
-    for w in res.workers.iter() {
+    for w in workers.iter() {
         if w.deleted {
             continue;
         }
