@@ -18,7 +18,6 @@ pub mod types {
     sqlite_integer_new_type!(InstanceSeq, u64, BigUnsigned);
 
     pub use super::tables::{InstanceId, InstanceState};
-    pub use buildomat_database::IsoDate;
 }
 
 pub use tables::*;

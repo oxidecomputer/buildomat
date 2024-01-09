@@ -20,8 +20,8 @@ mod sublude {
     pub use chrono::prelude::*;
     pub use rusqlite::Row;
     pub use sea_query::{
-        enum_def, ColumnRef, Expr, Iden, IdenStatic, InsertStatement,
-        OnConflict, Query, SeaRc, SelectStatement, SimpleExpr, Value,
+        enum_def, ColumnRef, Expr, Iden, InsertStatement, OnConflict, Query,
+        SeaRc, SelectStatement,
     };
 }
 

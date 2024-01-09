@@ -5,7 +5,6 @@
 mod sublude {
     pub use std::collections::HashMap;
     pub use std::str::FromStr;
-    pub use std::time::Duration;
 
     pub use crate::itypes::*;
     pub use anyhow::{bail, Result};
@@ -13,11 +12,10 @@ mod sublude {
         rusqlite, sqlite_json_new_type, sqlite_sql_enum, FromRow,
     };
     pub use buildomat_github_common::hooktypes;
-    pub use chrono::prelude::*;
     pub use rusqlite::Row;
     pub use sea_query::{
-        enum_def, ColumnRef, Expr, Iden, IdenStatic, InsertStatement,
-        OnConflict, Order, Query, SeaRc, SelectStatement, SimpleExpr, Value,
+        enum_def, ColumnRef, Expr, Iden, InsertStatement, Query, SeaRc,
+        SelectStatement,
     };
     pub use serde::{Deserialize, Serialize};
 }
