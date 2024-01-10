@@ -86,6 +86,47 @@ impl Stuff {
             bail!("could not locate user with name {name:?}");
         }
     }
+
+    /**
+     * Perform a fuzzy mapping of an argument string to a target ID.  If the
+     * string is correctly formatted, we'll just pass it back.  If not, we'll
+     * try and look it up as a target name on the server.  Critically, just
+     * because this function returns an ID does NOT mean a target with that ID
+     * exists: merely that it _might_.  Note that target redirection resolution
+     * is NOT performed here.
+     */
+    async fn target_to_id(&self, arg: &str) -> Result<String> {
+        if looks_like_a_ulid(arg) {
+            /*
+             * If this _looks_ like a ULID, make sure it actually _is_ one.
+             */
+            match Ulid::from_str(arg) {
+                Ok(ulid) => Ok(ulid.to_string()),
+                Err(e) => bail!(
+                    "argument {arg:?} looks like, but is not, a ULID: {e}"
+                ),
+            }
+        } else {
+            let name = arg.trim();
+            if name.is_empty() {
+                bail!("invalid target name {arg:?}");
+            }
+
+            /*
+             * If this is _not_ a ULID, attempt to locate the target ID by the
+             * provided target name.
+             */
+            let targets =
+                self.admin().targets_list().send().await?.into_inner();
+            for t in targets {
+                if t.name == name {
+                    return Ok(t.id);
+                }
+            }
+
+            bail!("could not locate target with name {name:?}");
+        }
+    }
 }
 
 async fn do_job_join(mut l: Level<Stuff>) -> Result<()> {
@@ -1410,15 +1451,19 @@ async fn do_target_create(mut l: Level<Stuff>) -> Result<()> {
 }
 
 async fn do_target_rename(mut l: Level<Stuff>) -> Result<()> {
-    l.usage_args(Some("TARGET_ID NAME"));
+    l.usage_args(Some("TARGET_ID|NAME NAME"));
     l.reqopt("d", "desc", "signpost target description", "DESC");
 
     let a = args!(l);
 
     if a.args().len() != 2 {
-        bad_args!(l, "specify ID of existing target and new name of target");
+        bad_args!(
+            l,
+            "specify name or ID of existing target \
+            and new name of target",
+        );
     }
-    let id = a.args()[0].to_string();
+    let id = l.context().target_to_id(&a.args()[0]).await?;
     let new_name = a.args()[1].to_string();
     let signpost_description = a.opts().opt_str("d").unwrap();
 
@@ -1480,14 +1525,14 @@ async fn do_target_list(mut l: Level<Stuff>) -> Result<()> {
 }
 
 async fn do_target_restrict(mut l: Level<Stuff>) -> Result<()> {
-    l.usage_args(Some("TARGET_ID PRIVILEGE"));
+    l.usage_args(Some("TARGET_ID|NAME PRIVILEGE"));
 
     let a = args!(l);
 
     if a.args().len() != 2 {
-        bad_args!(l, "specify ID of target and name of privilege");
+        bad_args!(l, "specify name or ID of target and name of privilege");
     }
-    let id = a.args()[0].to_string();
+    let id = l.context().target_to_id(&a.args()[0]).await?;
     let privilege = a.args()[1].to_string();
 
     l.context()
@@ -1501,14 +1546,14 @@ async fn do_target_restrict(mut l: Level<Stuff>) -> Result<()> {
 }
 
 async fn do_target_unrestrict(mut l: Level<Stuff>) -> Result<()> {
-    l.usage_args(Some("TARGET_ID"));
+    l.usage_args(Some("TARGET_ID|NAME"));
 
     let a = args!(l);
 
     if a.args().len() != 1 {
-        bad_args!(l, "specify ID of target");
+        bad_args!(l, "specify name or ID of target");
     }
-    let id = a.args()[0].to_string();
+    let id = l.context().target_to_id(&a.args()[0]).await?;
 
     l.context()
         .admin()
@@ -1520,19 +1565,19 @@ async fn do_target_unrestrict(mut l: Level<Stuff>) -> Result<()> {
 }
 
 async fn do_target_redirect(mut l: Level<Stuff>) -> Result<()> {
-    l.usage_args(Some("TARGET_ID REDIRECT_TO_TARGET_ID"));
+    l.usage_args(Some("TARGET_ID|NAME REDIRECT_TO_TARGET_ID|NAME"));
 
     let a = args!(l);
 
     if a.args().len() != 2 {
         bad_args!(
             l,
-            "specify ID of target to redirect, and ID of target to which \
-            it should be redirected",
+            "specify name or ID of target to redirect, \
+            and name or ID of target to which it should be redirected",
         );
     }
-    let id = a.args()[0].to_string();
-    let redirect = a.args()[1].to_string();
+    let id = l.context().target_to_id(&a.args()[0]).await?;
+    let redirect = l.context().target_to_id(&a.args()[1]).await?;
 
     l.context()
         .admin()
@@ -1545,17 +1590,18 @@ async fn do_target_redirect(mut l: Level<Stuff>) -> Result<()> {
 }
 
 async fn do_target_unredirect(mut l: Level<Stuff>) -> Result<()> {
-    l.usage_args(Some("TARGET_ID"));
+    l.usage_args(Some("TARGET_ID|NAME"));
 
     let a = args!(l);
 
     if a.args().len() != 1 {
         bad_args!(
             l,
-            "specify ID of target for which redirection should be disabled",
+            "specify name or ID of target \
+            for which redirection should be disabled",
         );
     }
-    let id = a.args()[0].to_string();
+    let id = l.context().target_to_id(&a.args()[0].to_string()).await?;
 
     /*
      * By omitting the body altogether, we clear the redirect property on the
