@@ -676,6 +676,7 @@ dependencies = [
  "base64 0.13.1",
  "buildomat-client",
  "buildomat-common",
+ "chrono",
  "getopts",
  "rusoto_core",
  "rusoto_credential",

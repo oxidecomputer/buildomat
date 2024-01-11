@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use std::collections::HashMap;
@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Result};
 use buildomat_client::types::*;
+use chrono::prelude::*;
 use rusoto_core::{HttpClient, Region};
 use rusoto_credential::StaticProvider;
 use rusoto_ec2::{
@@ -29,6 +30,21 @@ struct Instance {
     ip: Option<String>,
     worker_id: Option<Ulid>,
     lease_id: Option<Ulid>,
+    launch_time: Option<DateTime<Utc>>,
+}
+
+impl Instance {
+    fn age_secs(&self) -> u64 {
+        self.launch_time
+            .map(|dt| {
+                Utc::now()
+                    .signed_duration_since(dt)
+                    .to_std()
+                    .unwrap_or_else(|_| Duration::from_secs(0))
+                    .as_secs()
+            })
+            .unwrap_or(0)
+    }
 }
 
 trait TagExtractor {
@@ -188,6 +204,12 @@ async fn instances(
                         .unwrap()
                         .to_string();
 
+                    let launch_time = i
+                        .launch_time
+                        .as_ref()
+                        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                        .map(|dt| dt.into());
+
                     let worker_id = i
                         .tags
                         .tag(&format!("{}-worker_id", tag))
@@ -204,7 +226,14 @@ async fn instances(
 
                     out.insert(
                         id.to_string(),
-                        Instance { id, state, worker_id, lease_id, ip },
+                        Instance {
+                            id,
+                            state,
+                            worker_id,
+                            lease_id,
+                            ip,
+                            launch_time,
+                        },
                     );
                 }
             }
@@ -292,6 +321,20 @@ async fn aws_worker_one(
                          * Terminate any instances which stop themselves.
                          */
                         warn!(log, "instance {} stopped, destroying!", i.id);
+                        true
+                    } else if !w.online && i.age_secs() > 5 * 60 {
+                        /*
+                         * We have seen a recent spate of AWS instances that
+                         * hang in early boot.  They get destroyed eventually,
+                         * but we should terminate them more promptly than that
+                         * to avoid being billed for AWS bullshit.
+                         */
+                        error!(
+                            log,
+                            "instance {} hung; destroying after {} seconds",
+                            i.id,
+                            i.age_secs(),
+                        );
                         true
                     } else {
                         /*
