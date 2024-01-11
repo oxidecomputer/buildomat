@@ -330,7 +330,7 @@ pub struct ArchivedFactoryInfo {
 
 impl From<db::Factory> for ArchivedFactoryInfo {
     fn from(input: db::Factory) -> Self {
-        let db::Factory { id, name, token: _, lastping: _ } = input;
+        let db::Factory { id, name, token: _, lastping: _, enable: _ } = input;
 
         ArchivedFactoryInfo { id: id.to_string(), name }
     }

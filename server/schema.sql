@@ -279,3 +279,7 @@ ALTER TABLE worker ADD COLUMN
 -- v 43
 ALTER TABLE job ADD COLUMN
     time_archived   TEXT;
+
+-- v 44
+ALTER TABLE factory ADD COLUMN
+    enable          INTEGER NOT NULL    DEFAULT 1;

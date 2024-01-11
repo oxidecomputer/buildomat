@@ -431,9 +431,10 @@ pub(crate) async fn factory_lease(
      */
     c.db.factory_ping(f.id).or_500()?;
 
-    if c.inner.lock().unwrap().hold {
+    if !f.enable || c.inner.lock().unwrap().hold {
         /*
-         * The operator has requested that we not create any more workers.
+         * The operator has requested that we not create any more workers,
+         * either for this factory specifically or for the entire system.
          */
         return Ok(HttpResponseOk(FactoryLeaseResult { lease: None }));
     }

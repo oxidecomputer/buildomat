@@ -65,6 +65,58 @@
         }
       }
     },
+    "/0/admin/factory/{factory}/disable": {
+      "post": {
+        "operationId": "factory_disable",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "factory",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/0/admin/factory/{factory}/enable": {
+      "post": {
+        "operationId": "factory_enable",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "factory",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/0/admin/jobs": {
       "get": {
         "operationId": "admin_jobs_get",
@@ -2025,6 +2077,14 @@
           },
           {
             "in": "query",
+            "name": "factory",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "description": "Maximum number of items returned by a single call",
             "schema": {
@@ -2115,6 +2175,9 @@
       "Factory": {
         "type": "object",
         "properties": {
+          "enable": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           },
@@ -2128,6 +2191,7 @@
           }
         },
         "required": [
+          "enable",
           "id",
           "name"
         ]

@@ -11,6 +11,7 @@ pub struct Factory {
     pub name: String,
     pub token: String,
     pub lastping: Option<IsoDate>,
+    pub enable: bool,
 }
 
 impl FromRow for Factory {
@@ -20,6 +21,7 @@ impl FromRow for Factory {
             FactoryDef::Name,
             FactoryDef::Token,
             FactoryDef::Lastping,
+            FactoryDef::Enable,
         ]
         .into_iter()
         .map(|col| {
@@ -37,6 +39,7 @@ impl FromRow for Factory {
             name: row.get(1)?,
             token: row.get(2)?,
             lastping: row.get(3)?,
+            enable: row.get(4)?,
         })
     }
 }
@@ -59,6 +62,7 @@ impl Factory {
                 self.name.clone().into(),
                 self.token.clone().into(),
                 self.lastping.into(),
+                self.enable.into(),
             ])
             .to_owned()
     }

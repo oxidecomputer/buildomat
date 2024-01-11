@@ -127,6 +127,46 @@ impl Stuff {
             bail!("could not locate target with name {name:?}");
         }
     }
+
+    /**
+     * Perform a fuzzy mapping of an argument string to a factory ID.  If the
+     * string is correctly formatted, we'll just pass it back.  If not, we'll
+     * try and look it up as a factory name on the server.  Critically, just
+     * because this function returns an ID does NOT mean a factory with that ID
+     * exists: merely that it _might_.
+     */
+    async fn factory_to_id(&self, arg: &str) -> Result<String> {
+        if looks_like_a_ulid(arg) {
+            /*
+             * If this _looks_ like a ULID, make sure it actually _is_ one.
+             */
+            match Ulid::from_str(arg) {
+                Ok(ulid) => Ok(ulid.to_string()),
+                Err(e) => bail!(
+                    "argument {arg:?} looks like, but is not, a ULID: {e}"
+                ),
+            }
+        } else {
+            let name = arg.trim();
+            if name.is_empty() {
+                bail!("invalid factory name {arg:?}");
+            }
+
+            /*
+             * If this is _not_ a ULID, attempt to locate the factory ID by the
+             * provided factory name.
+             */
+            let factories =
+                self.admin().factories_list().send().await?.into_inner();
+            for f in factories {
+                if f.name == name {
+                    return Ok(f.id);
+                }
+            }
+
+            bail!("could not locate factory with name {name:?}");
+        }
+    }
 }
 
 async fn do_job_join(mut l: Level<Stuff>) -> Result<()> {
@@ -1392,16 +1432,93 @@ async fn do_factory_create(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_factory_enable(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("FACTORY_ID|NAME"));
+
+    let a = args!(l);
+
+    if a.args().len() != 1 {
+        bad_args!(l, "specify name or ID of factory");
+    }
+    let id = l.context().factory_to_id(&a.args()[0]).await?;
+
+    l.context().admin().factory_enable().factory(&id).send().await?;
+    Ok(())
+}
+
+async fn do_factory_disable(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("FACTORY_ID|NAME"));
+
+    let a = args!(l);
+
+    if a.args().len() != 1 {
+        bad_args!(l, "specify name or ID of factory");
+    }
+    let id = l.context().factory_to_id(&a.args()[0]).await?;
+
+    l.context().admin().factory_disable().factory(&id).send().await?;
+    Ok(())
+}
+
+async fn do_factory_drain(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("FACTORY_ID|NAME"));
+
+    let a = args!(l);
+
+    if a.args().len() != 1 {
+        bad_args!(l, "specify name or ID of factory");
+    }
+    let id = l.context().factory_to_id(&a.args()[0]).await?;
+
+    println!(" * disabling factory {id}...");
+    l.context().admin().factory_disable().factory(&id).send().await?;
+
+    let mut last_count = None;
+    loop {
+        /*
+         * Determine the current count of workers outstanding for this factory.
+         */
+        let workers = l
+            .context()
+            .admin()
+            .workers_list()
+            .active(true)
+            .factory(&id)
+            .stream()
+            .try_collect::<Vec<_>>()
+            .await?;
+        let new_count = workers.len();
+
+        if new_count == 0 {
+            break;
+        }
+
+        if last_count != Some(new_count) {
+            println!(" * waiting for {new_count} workers to complete...");
+            last_count = Some(new_count);
+        }
+
+        sleep_ms(3000).await;
+    }
+
+    println!("factory {id} is disabled and has no active workers");
+    Ok(())
+}
+
 async fn do_factory_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("id", WIDTH_ID, true);
     l.add_column("name", 32, true);
-    l.add_column("last_ping", WIDTH_ISODATE, true);
+    l.add_column("flags", 5, true);
+    l.add_column("ping", 4, true);
+    l.add_column("last_ping", WIDTH_ISODATE, false);
 
     let a = no_args!(l);
 
     let mut t = a.table();
 
     for f in l.context().admin().factories_list().send().await?.into_inner() {
+        let flags = [f.enable.then_some("E").unwrap_or("-")].join("");
+
         let mut r = Row::default();
         r.add_str("id", &f.id);
         r.add_str("name", &f.name);
@@ -1412,6 +1529,13 @@ async fn do_factory_list(mut l: Level<Stuff>) -> Result<()> {
                 .as_deref()
                 .unwrap_or("-"),
         );
+        r.add_str(
+            "ping",
+            f.last_ping
+                .map(|d| d.age().as_secs().to_string())
+                .unwrap_or_else(|| "-".to_string()),
+        );
+        r.add_str("flags", &flags);
         t.add_row(r);
     }
 
@@ -1422,6 +1546,9 @@ async fn do_factory_list(mut l: Level<Stuff>) -> Result<()> {
 async fn do_factory(mut l: Level<Stuff>) -> Result<()> {
     l.cmda("list", "ls", "list factories", cmd!(do_factory_list))?;
     l.cmd("create", "create a factory", cmd!(do_factory_create))?;
+    l.cmd("enable", "enable a factory", cmd!(do_factory_enable))?;
+    l.cmd("disable", "disable a factory", cmd!(do_factory_disable))?;
+    l.cmd("drain", "disable and drain a factory", cmd!(do_factory_drain))?;
 
     sel!(l).run().await
 }

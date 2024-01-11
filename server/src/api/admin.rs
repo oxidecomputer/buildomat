@@ -17,6 +17,7 @@ pub struct Factory {
     id: String,
     name: String,
     last_ping: Option<DateTime<Utc>>,
+    enable: bool,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -26,6 +27,17 @@ pub struct Target {
     desc: String,
     redirect: Option<String>,
     privilege: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct FactoryPath {
+    factory: String,
+}
+
+impl FactoryPath {
+    fn factory(&self) -> DSResult<db::FactoryId> {
+        db::FactoryId::from_str(&self.factory).or_500()
+    }
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -467,18 +479,31 @@ pub(crate) async fn workers_list_old(
 pub(crate) struct WorkerScan {
     #[serde(default)]
     active: bool,
+    factory: Option<String>,
 }
 
 impl From<WorkerSelect> for WorkerScan {
     fn from(sel: WorkerSelect) -> Self {
-        WorkerScan { active: sel.active }
+        WorkerScan { active: sel.active, factory: sel.factory }
+    }
+}
+
+impl WorkerScan {
+    fn factory(&self) -> DSResult<Option<db::FactoryId>> {
+        if let Some(factory) = &self.factory {
+            Ok(Some(db::FactoryId::from_str(factory).or_500()?))
+        } else {
+            Ok(None)
+        }
     }
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub(crate) struct WorkerSelect {
     id: String,
+    #[serde(default)]
     active: bool,
+    factory: Option<String>,
 }
 
 impl WorkerSelect {
@@ -487,7 +512,11 @@ impl WorkerSelect {
     }
 
     fn from_scan(scan: &WorkerScan, id: &str) -> Self {
-        WorkerSelect { id: id.to_string(), active: scan.active }
+        WorkerSelect {
+            id: id.to_string(),
+            active: scan.active,
+            factory: scan.factory.clone(),
+        }
     }
 }
 
@@ -511,7 +540,7 @@ pub(crate) async fn workers_list(
     };
 
     Ok(HttpResponseOk(ResultsPage::new(
-        c.db.workers_page(marker, scan.active)
+        c.db.workers_page(marker, scan.active, scan.factory()?)
             .or_500()?
             .into_iter()
             .map(|w| {
@@ -639,10 +668,59 @@ pub(crate) async fn factories_list(
                 id: f.id.to_string(),
                 name: f.name,
                 last_ping: f.lastping.map(|d| d.0),
+                enable: f.enable,
             })
             .collect::<Vec<_>>();
 
     Ok(HttpResponseOk(out))
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/admin/factory/{factory}/disable",
+}]
+pub(crate) async fn factory_disable(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<FactoryPath>,
+) -> DSResult<HttpResponseUpdatedNoContent> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    c.require_admin(log, &rqctx.request, "factory.write").await?;
+
+    /*
+     * Make sure this factory exists:
+     */
+    let f = c.db.factory(path.into_inner().factory()?).or_500()?;
+
+    c.db.factory_enable(f.id, false).or_500()?;
+    info!(rqctx.log, "factory {} ({:?}) disabled", f.id, f.name);
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/admin/factory/{factory}/enable",
+}]
+pub(crate) async fn factory_enable(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<FactoryPath>,
+) -> DSResult<HttpResponseUpdatedNoContent> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    c.require_admin(log, &rqctx.request, "factory.write").await?;
+
+    /*
+     * Make sure this factory exists:
+     */
+    let f = c.db.factory(path.into_inner().factory()?).or_500()?;
+
+    c.db.factory_enable(f.id, true).or_500()?;
+    info!(rqctx.log, "factory {} ({:?}) enabled", f.id, f.name);
+
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 #[derive(Deserialize, JsonSchema)]

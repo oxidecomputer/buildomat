@@ -121,6 +121,7 @@ impl Database {
         &self,
         marker: Option<WorkerId>,
         active: bool,
+        factory: Option<FactoryId>,
     ) -> DBResult<Vec<Worker>> {
         let q = Query::select()
             .from(WorkerDef::Table)
@@ -134,6 +135,9 @@ impl Database {
                 |_| {},
             )
             .and_where_option(marker.map(|id| Expr::col(WorkerDef::Id).gt(id)))
+            .and_where_option(
+                factory.map(|id| Expr::col(WorkerDef::Factory).eq(id)),
+            )
             .limit(1000)
             .to_owned();
 
@@ -2028,6 +2032,7 @@ impl Database {
             name: name.to_string(),
             token: genkey(64),
             lastping: None,
+            enable: true,
         };
 
         self.sql.tx(|h| h.exec_insert(f.insert()))?;
@@ -2062,6 +2067,7 @@ impl Database {
                  */
                 token: "".into(),
                 lastping: None,
+                enable: true,
             });
         }
 
@@ -2109,6 +2115,20 @@ impl Database {
                     .value(FactoryDef::Lastping, IsoDate::now())
                     .to_owned(),
             )? > 0)
+        })
+    }
+
+    pub fn factory_enable(&self, id: FactoryId, enable: bool) -> DBResult<()> {
+        self.sql.tx(|h| {
+            h.exec_update(
+                Query::update()
+                    .table(FactoryDef::Table)
+                    .and_where(Expr::col(FactoryDef::Id).eq(id))
+                    .value(FactoryDef::Enable, enable)
+                    .to_owned(),
+            )?;
+
+            Ok(())
         })
     }
 

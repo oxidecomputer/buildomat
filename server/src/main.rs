@@ -899,6 +899,8 @@ async fn main() -> Result<()> {
     ad.register(api::admin::admin_job_archive_request).api_check()?;
     ad.register(api::admin::admin_jobs_get).api_check()?;
     ad.register(api::admin::factory_create).api_check()?;
+    ad.register(api::admin::factory_enable).api_check()?;
+    ad.register(api::admin::factory_disable).api_check()?;
     ad.register(api::admin::factories_list).api_check()?;
     ad.register(api::admin::target_create).api_check()?;
     ad.register(api::admin::targets_list).api_check()?;
