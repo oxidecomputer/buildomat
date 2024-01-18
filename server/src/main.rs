@@ -619,15 +619,33 @@ impl Central {
         &self,
         job: JobId,
         file: JobFileId,
-    ) -> Result<FileResponse> {
+    ) -> Result<Option<FileResponse>> {
         let op = self.file_path(job, file)?;
 
-        Ok(if op.is_file() {
+        Ok(Some(if op.is_file() {
             /*
              * The file exists locally.
              */
             let info = format!("local file system at {:?}", op);
-            let f = tokio::fs::File::open(op).await?;
+            let f = match tokio::fs::File::open(&op).await {
+                Ok(f) => f,
+                // The the path doesn't exist. Return `None` rather than an
+                // error, so that the API can respond with 404 rather than 500.
+                //
+                // N.B. that this isn't a particularly common case, since we
+                // just checked that the path exists and will only attempt to
+                // open it if it does. However, the file *could* have been
+                // removed since when we checked if it exists, so do the right
+                // thing in this case anyway.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    return Ok(None);
+                }
+                Err(e) => {
+                    return Err(e).with_context(|| {
+                        format!("job {job} file {file}: failed to open {op:?}")
+                    })
+                }
+            };
             let md = f.metadata().await?;
             assert!(md.is_file());
             let fbs = FileBytesStream::new(f);
@@ -639,20 +657,36 @@ impl Central {
              */
             let key = self.file_object_key(job, file);
             let info = format!("object store at {}", key);
-            let obj = self
+            let res = self
                 .s3
                 .get_object()
                 .bucket(&self.config.storage.bucket)
                 .key(key)
                 .send()
-                .await?;
-
+                .await;
+            let obj = match res {
+                // The object doesn't exist. Return `None` rather than an error
+                // so that the API can respond with a 404 rather than 500.
+                Err(aws_smithy_http::result::SdkError::ServiceError(e))
+                    if e.err().is_no_such_key() =>
+                {
+                    return Ok(None);
+                }
+                Err(e) => {
+                    return Err(e).with_context(|| {
+                        format!(
+                        "job {job} file {file}: failed to get file {op:?} from S3"
+                    )
+                    })
+                }
+                Ok(obj) => obj,
+            };
             FileResponse {
                 info,
                 size: obj.content_length.try_into().unwrap(),
                 body: Body::wrap_stream(obj.body),
             }
-        })
+        }))
     }
 
     fn complete_job(

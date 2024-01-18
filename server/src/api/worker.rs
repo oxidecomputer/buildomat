@@ -237,10 +237,15 @@ pub(crate) async fn worker_job_input_download(
     let mut res = Response::builder();
     res = res.header(CONTENT_TYPE, "application/octet-stream");
 
-    let fr = c
+    let Some(fr) = c
         .file_response(i.other_job.unwrap_or(i.job), i.id.unwrap())
         .await
-        .or_500()?;
+        .or_500()?
+    else {
+        return Err(HttpError::for_internal_error(
+            "input file not found".to_string(),
+        ));
+    };
     info!(
         log,
         "worker {} job {} input {} name {:?} is in the {}",

@@ -25,17 +25,21 @@ pub(crate) async fn public_file_download(
 
     let p = path.into_inner();
 
+    let not_found = || {
+        HttpError::for_client_error(
+            None,
+            StatusCode::NOT_FOUND,
+            "published file not found".into(),
+        )
+    };
+
     /*
      * Load the user from the database.
      */
     let u = if let Some(au) = c.db.user_by_name(&p.username).or_500()? {
         au.id
     } else {
-        return Err(HttpError::for_client_error(
-            None,
-            StatusCode::NOT_FOUND,
-            "published file not found".into(),
-        ));
+        return Err(not_found());
     };
 
     let pf = if let Some(pf) =
@@ -44,17 +48,16 @@ pub(crate) async fn public_file_download(
     {
         pf
     } else {
-        return Err(HttpError::for_client_error(
-            None,
-            StatusCode::NOT_FOUND,
-            "published file not found".into(),
-        ));
+        return Err(not_found());
     };
 
     let mut res = Response::builder();
     res = res.header(CONTENT_TYPE, "application/octet-stream");
 
-    let fr = c.file_response(pf.job, pf.file).await.or_500()?;
+    let Some(fr) = c.file_response(pf.job, pf.file).await.or_500()? else {
+        return Err(not_found());
+    };
+
     info!(
         log,
         "published file: user {} series {} version {} name {} is in the {}",

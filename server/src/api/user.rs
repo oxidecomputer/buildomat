@@ -152,7 +152,13 @@ pub(crate) async fn job_output_download(
     let mut res = Response::builder();
     res = res.header(CONTENT_TYPE, "application/octet-stream");
 
-    let fr = c.file_response(t.id, o.id).await.or_500()?;
+    let Some(fr) = c.file_response(t.id, o.id).await.or_500()? else {
+        return Err(HttpError::for_client_error(
+            None,
+            hyper::StatusCode::NOT_FOUND,
+            "output file not found".into(),
+        ));
+    };
     info!(
         log,
         "job {} output {} path {:?} is in the {}", t.id, o.id, o.path, fr.info
