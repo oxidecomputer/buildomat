@@ -937,33 +937,32 @@ async fn bunyan_to_html(
     while let Some(bl) = dec.pop() {
         *num += 1;
 
-        let colour = match &bl {
+        let cssclass = match &bl {
             buildomat_bunyan::BunyanLine::Entry(be) => match be.level() {
-                buildomat_bunyan::BunyanLevel::Trace => "#96f5fa",
-                buildomat_bunyan::BunyanLevel::Debug => "#adc2ff",
-                buildomat_bunyan::BunyanLevel::Info => "#adffb0",
-                buildomat_bunyan::BunyanLevel::Warn => "#ffecad",
-                buildomat_bunyan::BunyanLevel::Error => "#ffb5ad",
-                buildomat_bunyan::BunyanLevel::Fatal => "#ffadf1",
+                buildomat_bunyan::BunyanLevel::Trace => "bunyan-trace",
+                buildomat_bunyan::BunyanLevel::Debug => "bunyan-debug",
+                buildomat_bunyan::BunyanLevel::Info => "bunyan-info",
+                buildomat_bunyan::BunyanLevel::Warn => "bunyan-warn",
+                buildomat_bunyan::BunyanLevel::Error => "bunyan-error",
+                buildomat_bunyan::BunyanLevel::Fatal => "bunyan-fatal",
             },
-            buildomat_bunyan::BunyanLine::Other(_) => "#ffffff",
+            buildomat_bunyan::BunyanLine::Other(_) => "bunyan-other",
         };
 
         /*
          * The first column ia a permalink with the line number.
          */
         let mut out = format!(
-            "<tr style=\"background-color: {}\">\
+            "<tr class=\"{cssclass}\">\
             <td style=\"vertical-align: top; text-align: right; \">\
-            <a id=\"L{}\">\
-            <a href=\"#L{}\" \
+            <a id=\"L{num}\">\
+            <a href=\"#L{num}\" \
             style=\"white-space: pre; \
             font-family: monospace; \
             text-decoration: none; \
             color: #111111; \
-            \">{}</a></a>\
+            \">{num}</a></a>\
             </td>",
-            colour, num, num, num,
         );
 
         match bl {
@@ -1142,10 +1141,26 @@ pub(crate) async fn artefact(
             let mut tf = tokio::fs::File::from_std(tempfile::tempfile()?);
 
             tf.write_all(
-                "<!doctype html><html>\
+                concat!("<!doctype html><html>\
                 <head><meta charset=\"UTF-8\"></head>\
+                <style>\n",
+                include_str!("../../www/bunyan.css"),
+                "</style>\n\
+                <script>\n",
+                include_str!("../../www/bunyan.js"),
+                "</script>\n\
                 <body>\n\
+                Max level shown:
+                <select id=\"select-max-level\" onchange=\"selectMaxLevel(this)\">
+                <option value=\".bunyan-trace\">TRCE</option>
+                <option value=\".bunyan-debug\">DEBG</option>
+                <option value=\".bunyan-info\" selected>INFO</option>
+                <option value=\".bunyan-warn\">WARN</option>
+                <option value=\".bunyan-error\">ERRO</option>
+                <option value=\".bunyan-fatal\">FATA</option>
+                </select>
                 <table style=\"border: none;\">\n"
+            )
                     .as_bytes(),
             )
             .await?;
