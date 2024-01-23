@@ -1,0 +1,27 @@
+.bunyan-trace {
+    background-color: #96f5fa;
+}
+
+.bunyan-debug {
+    background-color: #adc2ff;
+}
+
+.bunyan-info {
+    background-color: #adffb0;
+}
+
+.bunyan-warn {
+    background-color: #ffecad;
+}
+
+.bunyan-error {
+    background-color: #ffb5ad;
+}
+
+.bunyan-fatal {
+    background-color: #ffadf1;
+}
+
+.bunyan-other {
+    background-color: #ffffff;
+}
