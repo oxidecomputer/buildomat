@@ -572,6 +572,8 @@ async fn poll_job(l: &Level<Stuff>, id: &str, json: bool) -> Result<()> {
             last_state = t.state.to_string();
         }
 
+        let terminal = t.state == "completed" || t.state == "failed";
+
         if let Ok(events) = l
             .context()
             .user()
@@ -582,7 +584,7 @@ async fn poll_job(l: &Level<Stuff>, id: &str, json: bool) -> Result<()> {
             .await
         {
             if events.is_empty() {
-                if t.state == "completed" || t.state == "failed" {
+                if terminal {
                     /*
                      * EOF.
                      */
@@ -621,7 +623,9 @@ async fn poll_job(l: &Level<Stuff>, id: &str, json: bool) -> Result<()> {
             }
         }
 
-        sleep_ms(250).await;
+        if !terminal {
+            sleep_ms(250).await;
+        }
     }
 
     if exit_status != 0 {
