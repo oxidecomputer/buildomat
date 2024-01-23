@@ -1,8 +1,12 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
+use core::mem::size_of;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::{Seek, Write};
+use std::os::unix::prelude::FileExt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -11,8 +15,72 @@ use chrono::prelude::*;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use slog::{debug, error, info, warn, Logger};
+use tlvc_text::{Piece, Tag};
 
 use crate::{db, Central};
+
+pub const JOB_ARCHIVE_VERSION: u32 = 2;
+
+struct PreparedArchive {
+    id: db::JobId,
+    file: File,
+    file_len: usize,
+}
+
+#[derive(Clone)]
+struct FileReader {
+    f: Arc<std::fs::File>,
+    offset: u64,
+}
+
+impl tlvc::TlvcRead for FileReader {
+    type Error = std::io::Error;
+
+    fn extent(
+        &self,
+    ) -> std::result::Result<u64, tlvc::TlvcReadError<Self::Error>> {
+        /*
+         * We will offset all of our reads in the file, so we need to adjust the
+         * file size we're returning to the consumer to ignore the portion of
+         * the file we're skipping.  If the offset is past the end of the file,
+         * just return 0.
+         */
+        Ok(self
+            .f
+            .metadata()
+            .map_err(tlvc::TlvcReadError::User)?
+            .len()
+            .saturating_sub(self.offset))
+    }
+
+    fn read_exact(
+        &self,
+        offset: u64,
+        dest: &mut [u8],
+    ) -> std::result::Result<(), tlvc::TlvcReadError<Self::Error>> {
+        let Some(offset) = offset.checked_add(self.offset) else {
+            /*
+             * Simulate the error that we expect from read_exact_at().
+             */
+            return Err(tlvc::TlvcReadError::User(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "failed to fill whole buffer",
+            )));
+        };
+
+        self.f.read_exact_at(dest, offset).map_err(tlvc::TlvcReadError::User)
+    }
+}
+
+trait WrappedTlvcError<T> {
+    fn wrap(self) -> Result<T>;
+}
+
+impl<T> WrappedTlvcError<T> for Result<T, tlvc::TlvcReadError<std::io::Error>> {
+    fn wrap(self) -> Result<T> {
+        self.map_err(|e| anyhow!("tlvc read error: {e:?}"))
+    }
+}
 
 trait FromArchiveDate {
     fn restore_from_archive(&self) -> Result<db::IsoDate>;
@@ -376,8 +444,6 @@ impl From<(db::Worker, db::Factory)> for ArchivedWorkerInfo {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ArchivedJob {
-    v: String,
-
     id: String,
     name: String,
 
@@ -421,32 +487,92 @@ pub struct ArchivedJob {
     inputs: Vec<ArchivedInput>,
     outputs: Vec<ArchivedOutput>,
     times: HashMap<String, String>,
-    events: Vec<ArchivedEvent>,
     store: HashMap<String, ArchivedStoreEntry>,
     depends: HashMap<String, ArchivedDepend>,
 }
 
-impl ArchivedJob {
-    pub fn is_valid(&self) -> bool {
-        self.v == "1"
-    }
+pub struct LoadedArchivedJob {
+    id: db::JobId,
+    f: File,
+    job: ArchivedJob,
+    offset_index: u64,
+    offset_events: u64,
+}
 
-    pub fn version(&self) -> &str {
-        &self.v
-    }
+impl LoadedArchivedJob {
+    pub fn job_events(
+        &self,
+        minseq: usize,
+        limit: u64,
+    ) -> Result<Vec<db::JobEvent>> {
+        /*
+         * Locate the INDX record in the file so that we can read from it.
+         */
+        let mut tw = TlvcWrapper::new(&self.f, self.offset_index)?;
+        let idx = tw.next_with_tag(*b"INDX")?;
 
-    pub fn job_events(&self, minseq: usize) -> Result<Vec<db::JobEvent>> {
-        let job: db::JobId = self.id.parse()?;
+        /*
+         * Event sequence numbers start at 1, but we may end up with a zero
+         * value for minseq due to the way this function gets called.
+         */
+        let minseq = minseq.max(1);
 
-        self.events
-            .iter()
+        let idxlen: usize = idx.header().len.get().try_into().unwrap();
+        let count = idxlen / size_of::<u64>();
+
+        if minseq > count {
+            /*
+             * Attemping to read beyond the stream end results in an empty
+             * result set.
+             */
+            return Ok(Default::default());
+        }
+
+        let mut buf = [0u8; size_of::<u64>()];
+        idx.read_exact(
+            minseq
+                /*
+                 * The first index slot is for the event with a sequence number
+                 * of 1:
+                 */
+                .checked_sub(1)
+                .unwrap()
+                /*
+                 * Each index entry is a single u64 with the byte offset of the
+                 * associated event data:
+                 */
+                .checked_mul(size_of::<u64>())
+                .unwrap()
+                .try_into()
+                .unwrap(),
+            &mut buf,
+        )
+        .wrap()?;
+        let offset = u64::from_be_bytes(buf);
+
+        /*
+         * Locate the EVNT record using the offset we found in the index.
+         */
+        let mut tw = TlvcWrapper::new(
+            &self.f,
+            self.offset_events.checked_add(offset).unwrap(),
+        )?;
+        let mut out: Vec<ArchivedEvent> = Default::default();
+        while out.len() < limit.try_into().unwrap() {
+            let Some(evnt) = &tw.next_with_tag_as_string_opt(*b"EVNT")? else {
+                break;
+            };
+
+            out.push(serde_json::from_str(evnt)?);
+        }
+
+        out.into_iter()
             .enumerate()
-            .filter(|(seq, _)| *seq >= minseq)
             .map(|(seq, ev)| {
                 Ok(db::JobEvent {
-                    job,
+                    job: self.id,
                     task: ev.task,
-                    seq: seq.try_into().unwrap(),
+                    seq: minseq.checked_add(seq).unwrap().try_into().unwrap(),
                     stream: ev.stream.clone(),
                     time: ev.time.restore_from_archive()?,
                     payload: ev.payload.clone(),
@@ -461,13 +587,12 @@ impl ArchivedJob {
     }
 
     pub fn job_outputs(&self) -> Result<Vec<db::JobOutputAndFile>> {
-        let job: db::JobId = self.id.parse()?;
-
-        self.outputs
+        self.job
+            .outputs
             .iter()
             .map(|f| {
                 let output = db::JobOutput {
-                    job,
+                    job: self.id,
                     path: f.path.clone(),
                     id: f.file.id()?,
                 };
@@ -485,9 +610,10 @@ impl ArchivedJob {
     }
 
     pub fn job_output(&self, id: db::JobFileId) -> Result<db::JobOutput> {
-        let job: db::JobId = self.id.parse()?;
+        let job = self.id;
 
-        self.outputs
+        self.job
+            .outputs
             .iter()
             .find(|f| f.file.id().ok() == Some(id))
             .map(|f| {
@@ -501,7 +627,8 @@ impl ArchivedJob {
     }
 
     pub fn times(&self) -> Result<HashMap<String, DateTime<Utc>>> {
-        self.times
+        self.job
+            .times
             .iter()
             .map(|(name, time)| {
                 Ok((name.clone(), time.restore_from_archive()?.0))
@@ -510,13 +637,12 @@ impl ArchivedJob {
     }
 
     pub fn tags(&self) -> Result<HashMap<String, String>> {
-        Ok(self.tags.clone())
+        Ok(self.job.tags.clone())
     }
 
     pub fn output_rules(&self) -> Result<Vec<db::JobOutputRule>> {
-        let job: db::JobId = self.id.parse()?;
-
-        self.output_rules
+        self.job
+            .output_rules
             .iter()
             .enumerate()
             .map(|(seq, r)| {
@@ -528,7 +654,7 @@ impl ArchivedJob {
                 } = r;
 
                 Ok(db::JobOutputRule {
-                    job,
+                    job: self.id,
                     seq: seq.try_into().unwrap(),
                     rule: rule.clone(),
                     ignore: *ignore,
@@ -540,9 +666,8 @@ impl ArchivedJob {
     }
 
     pub fn tasks(&self) -> Result<Vec<db::Task>> {
-        let job: db::JobId = self.id.parse()?;
-
-        self.tasks
+        self.job
+            .tasks
             .iter()
             .map(|t| {
                 let ArchivedTask {
@@ -559,7 +684,7 @@ impl ArchivedJob {
                 } = t;
 
                 Ok(db::Task {
-                    job,
+                    job: self.id,
                     seq: *seq,
                     name: name.clone(),
                     script: script.clone(),
@@ -576,13 +701,165 @@ impl ArchivedJob {
     }
 
     pub fn store(&self) -> &HashMap<String, ArchivedStoreEntry> {
-        &self.store
+        &self.job.store
+    }
+
+    pub fn load_from_file(f: File) -> Result<LoadedArchivedJob> {
+        /*
+         * To begin with, we need to read from the start of the file to get the
+         * BMAT header.
+         */
+        let mut tw = TlvcWrapper::new(&f, 0)?;
+        {
+            let mut hdr = tw.next_with_tag_as_chunks(*b"BMAT")?;
+
+            let vers = hdr.next_with_tag_as_u32(*b"VERS")?;
+            if vers != 1 {
+                bail!("unsupported BMAT container version {vers}");
+            }
+
+            let ctype = hdr.next_with_tag_as_string(*b"TYPE")?;
+            if ctype != "archive" {
+                bail!("unsupported BMAT.TYPE {ctype}");
+            }
+
+            {
+                let mut arch = hdr.next_with_tag_as_chunks(*b"ARCH")?;
+                let avers = arch.next_with_tag_as_u32(*b"VERS")?;
+                if avers != JOB_ARCHIVE_VERSION {
+                    bail!(
+                        "unsupported BMAT.ARCH.VERS: got {avers}, \
+                want {JOB_ARCHIVE_VERSION}"
+                    );
+                }
+
+                let atype = arch.next_with_tag_as_string(*b"TYPE")?;
+                if atype != "job" {
+                    bail!("unsupported BMAT.ARCH.TYPE {atype}");
+                }
+            }
+        }
+
+        /*
+         * Load the job information from the file, which comes after
+         * the entire BMAT chunk.
+         */
+        let job: ArchivedJob =
+            serde_json::from_str(&tw.next_with_tag_as_string(*b"JOB\0")?)?;
+
+        /*
+         * The index comes right after the job information.  Save the offset so
+         * that we can look at it later.
+         */
+        let offset_index = tw.next_header_offset;
+        tw.next_with_tag(*b"INDX")?;
+
+        let offset_events = tw.next_header_offset;
+
+        Ok(LoadedArchivedJob {
+            id: job.id.parse()?,
+            f,
+            job,
+            offset_index,
+            offset_events,
+        })
     }
 }
 
-async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<bool> {
-    let start = Instant::now();
+struct TlvcWrapper {
+    reader: tlvc::TlvcReader<FileReader>,
+    next_header_offset: u64,
+}
 
+impl TlvcWrapper {
+    fn new(file: &std::fs::File, offset: u64) -> Result<TlvcWrapper> {
+        let reader = tlvc::TlvcReader::begin(FileReader {
+            f: Arc::new(file.try_clone()?),
+            offset,
+        })
+        .wrap()?;
+
+        Ok(TlvcWrapper { reader, next_header_offset: 0 })
+    }
+
+    fn next_with_tag_as_chunks(&mut self, tag: [u8; 4]) -> Result<TlvcWrapper> {
+        let ch = self.next_with_tag(tag)?;
+        Ok(TlvcWrapper { reader: ch.read_as_chunks(), next_header_offset: 0 })
+    }
+
+    fn next_with_tag_as_u32(&mut self, tag: [u8; 4]) -> Result<u32> {
+        let ch = self.next_with_tag(tag)?;
+        let body_len: usize = ch.header().len.get().try_into().unwrap();
+        if body_len != size_of::<u32>() {
+            bail!("tag {tag:?} has unexpected body length {body_len}");
+        }
+
+        let mut data = [0u8; size_of::<u32>()];
+        ch.read_exact(0, &mut data).wrap()?;
+
+        Ok(u32::from_be_bytes(data))
+    }
+
+    fn next_with_tag_as_string(&mut self, tag: [u8; 4]) -> Result<String> {
+        self.next_with_tag_as_string_opt(tag)?
+            .ok_or_else(|| anyhow!("expected tag {tag:?}, got EOF"))
+    }
+
+    fn next_with_tag_as_string_opt(
+        &mut self,
+        tag: [u8; 4],
+    ) -> Result<Option<String>> {
+        let Some(ch) = self.next_with_tag_opt(tag)? else {
+            return Ok(None);
+        };
+
+        let mut data = vec![0u8; ch.header().len.get().try_into().unwrap()];
+        ch.read_exact(0, &mut data).wrap()?;
+
+        Ok(Some(String::from_utf8(data)?))
+    }
+
+    fn next_with_tag_opt(
+        &mut self,
+        tag: [u8; 4],
+    ) -> Result<Option<tlvc::ChunkHandle<FileReader>>> {
+        self.reader
+            .next()
+            .wrap()?
+            .map(|ch| {
+                let actual = ch.header().tag;
+                if tag != actual {
+                    bail!("expected tag {tag:?}, got tag {actual:?}");
+                }
+
+                let mut trash = [0u8; 512];
+                ch.check_body_checksum(&mut trash).wrap()?;
+
+                self.next_header_offset = self
+                    .next_header_offset
+                    .checked_add(
+                        ch.header().total_len_in_bytes().try_into().unwrap(),
+                    )
+                    .unwrap();
+
+                Ok(ch)
+            })
+            .transpose()
+    }
+
+    fn next_with_tag(
+        &mut self,
+        tag: [u8; 4],
+    ) -> Result<tlvc::ChunkHandle<FileReader>> {
+        self.next_with_tag_opt(tag)?
+            .ok_or_else(|| anyhow!("expected tag {tag:?}, got EOF"))
+    }
+}
+
+fn archive_jobs_sync_work(
+    log: &Logger,
+    c: &Central,
+) -> Result<Option<PreparedArchive>> {
     let (reason, job) = if let Some(job) =
         c.inner.lock().unwrap().archive_queue.pop_front()
     {
@@ -593,11 +870,11 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<bool> {
         let job = c.db.job(job)?;
         if !job.complete {
             warn!(log, "job {} not complete; cannot archive yet", job.id);
-            return Ok(false);
+            return Ok(None);
         }
         if job.is_archived() {
             warn!(log, "job {} was already archived; ignoring request", job.id);
-            return Ok(false);
+            return Ok(None);
         }
         ("operator request", job)
     } else if c.config.job.auto_archive {
@@ -608,10 +885,10 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<bool> {
         if let Some(job) = c.db.job_next_unarchived()? {
             ("automatic", job)
         } else {
-            return Ok(false);
+            return Ok(None);
         }
     } else {
-        return Ok(false);
+        return Ok(None);
     };
 
     assert!(job.complete);
@@ -623,11 +900,6 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<bool> {
      * We need to collect a variety of materials together in order to create the
      * archive of the job.
      */
-    let events =
-        c.db.job_events(job.id, 0)?
-            .into_iter()
-            .map(ArchivedEvent::from)
-            .collect::<Vec<_>>();
     let tasks =
         c.db.job_tasks(job.id)?
             .into_iter()
@@ -686,8 +958,19 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<bool> {
         failed,
         worker,
         cancelled,
+
+        /*
+         * Jobs cannot be archived until they are completed, and if they are
+         * completed they cannot still be waiting.  These are dynamic flags that
+         * we don't need to include here.
+         */
         complete: _,
         waiting: _,
+
+        /*
+         * This field tracks when the job was successfully archived, and thus
+         * cannot appear in the archive itself.
+         */
         time_archived: _,
 
         /*
@@ -701,8 +984,15 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<bool> {
         bail!("could not locate user {owner}");
     };
 
+    /*
+     * This structure should store things that don't grow substantially for
+     * longer-running jobs that produce more output.  In particular, we store
+     * the job event stream in a different way.  This is important because we
+     * wil need to deserialize this object (at a cost of CPU and memory) in
+     * order to answer questions about the job: heavier jobs should not use more
+     * resources than lighter jobs.
+     */
     let aj = ArchivedJob {
-        v: "1".into(),
         id: id.to_string(),
         name,
         failed,
@@ -719,7 +1009,6 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<bool> {
         worker_id: worker.map(|i| i.to_string()),
         worker_info,
 
-        events,
         tasks,
         output_rules,
         tags,
@@ -730,12 +1019,153 @@ async fn archive_jobs_one(log: &Logger, c: &Central) -> Result<bool> {
         depends,
     };
 
-    c.archive_store(log, id, aj).await?;
+    /*
+     * Load job events from the database in chunks.  Serialize those chunks into
+     * a temporary file (the "back" file), and build an index of their positions
+     * within that temporary file.
+     */
+    let mut tf = tempfile::tempfile()?;
+    let mut minseq = 1;
+    let mut index: Vec<u64> = Default::default();
+    let mut pos = 0;
+    loop {
+        let events =
+            c.db.job_events(job.id, minseq, 100)?
+                .into_iter()
+                .map(ArchivedEvent::from)
+                .collect::<Vec<_>>();
+
+        if events.is_empty() {
+            break;
+        }
+        minseq += events.len();
+
+        for e in events {
+            let buf = tlvc_text::pack(&vec![Piece::Chunk(
+                Tag::new(*b"EVNT"),
+                vec![Piece::Bytes(serde_json::to_vec(&e)?)],
+            )]);
+
+            index.push(pos);
+            pos = pos.checked_add(buf.len().try_into().unwrap()).unwrap();
+
+            tf.write_all(&buf)?;
+        }
+    }
+    tf.flush()?;
+    let efl = tf.metadata()?.len();
+    if efl != pos {
+        bail!("event file length {efl} != pos {pos}");
+    }
+
+    /*
+     * Create another temporary file where we will assemble the file header, the
+     * top-level job information, and the event index.
+     */
+    let mut ftf = tempfile::tempfile()?;
+    ftf.write_all(&tlvc_text::pack(&vec![
+        /*
+         * The file starts with a BMAT chunk that identifies this as a job
+         * archive file of a particular version.
+         */
+        Piece::Chunk(
+            Tag::new(*b"BMAT"),
+            vec![
+                Piece::Chunk(
+                    Tag::new(*b"VERS"),
+                    /*
+                     * This version field is the version of the overall
+                     * container file format; in particular, of this BMAT file
+                     * header record.  This version does not need to change for
+                     * changes to job archiving data.
+                     */
+                    vec![Piece::Bytes(1u32.to_be_bytes().into())],
+                ),
+                Piece::Chunk(
+                    Tag::new(*b"TYPE"),
+                    vec![Piece::String("archive".into())],
+                ),
+                Piece::Chunk(
+                    Tag::new(*b"ARCH"),
+                    vec![
+                        Piece::Chunk(
+                            Tag::new(*b"VERS"),
+                            vec![Piece::Bytes(
+                                JOB_ARCHIVE_VERSION.to_be_bytes().into(),
+                            )],
+                        ),
+                        Piece::Chunk(
+                            Tag::new(*b"TYPE"),
+                            vec![Piece::String("job".into())],
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        /*
+         * The next chunk in a (TYPE=archive, ARCH.TYPE=job) file is a JOB chunk
+         * that contains the serialised job-level data:
+         */
+        Piece::Chunk(
+            Tag::new(*b"JOB\0"),
+            vec![Piece::Bytes(serde_json::to_vec(&aj)?)],
+        ),
+        /*
+         * Next is the INDX chunk, which contains a list of offsets in the file
+         * for each job event record.  The offsets are relative to the end of
+         * the INDX record; the EVNT records begin immediately after EVNT.  The
+         * index allows random access into the event stream without the need to
+         * seek through the entire file.
+         */
+        Piece::Chunk(
+            Tag::new(*b"INDX"),
+            vec![Piece::Bytes({
+                let mut v = Vec::with_capacity(index.len() * 8);
+                for i in index {
+                    v.extend(i.to_be_bytes());
+                }
+                v
+            })],
+        ),
+    ]))?;
+    ftf.flush()?;
+
+    /*
+     * XXX Copy the data from the back file onto the end of the file with the
+     * headers.  Ideally we should just be able to pass two files in order to
+     * the object store and have them be concatenated...
+     */
+    tf.rewind()?;
+    std::io::copy(&mut tf, &mut ftf)?;
+    drop(tf);
+
+    ftf.flush()?;
+    ftf.rewind()?;
+    let file_len = ftf.metadata()?.len().try_into().unwrap();
+
+    Ok(Some(PreparedArchive { id, file: ftf, file_len }))
+}
+
+async fn archive_jobs_one(log: &Logger, c: &Arc<Central>) -> Result<bool> {
+    let start = Instant::now();
+
+    /*
+     * The archiving work is synchronous and may take several seconds for larger
+     * jobs.  Avoid holding up other async tasks while we wait:
+     */
+    let Some(pa) =
+        tokio::task::block_in_place(|| archive_jobs_sync_work(log, c))?
+    else {
+        return Ok(false);
+    };
+    let id = pa.id;
+
+    c.archive_store(log, id, JOB_ARCHIVE_VERSION, pa.file, pa.file_len).await?;
 
     c.db.job_mark_archived(id, Utc::now())?;
 
     let dur = Instant::now().saturating_duration_since(start);
-    info!(log, "job {id} archived"; "duration_ms" => dur.as_millis());
+    info!(log, "job {id} archived"; "duration_msec" => dur.as_millis());
 
     Ok(true)
 }

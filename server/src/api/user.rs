@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use super::prelude::*;
@@ -85,8 +85,10 @@ pub(crate) async fn job_events_get(
     let owner = c.require_user(log, &rqctx.request).await?;
     let j = c.load_job_for_user(log, &owner, p.job()?).await?;
 
-    let jevs =
-        c.load_job_events(log, &j, q.minseq.unwrap_or(0)).await.or_500()?;
+    let jevs = c
+        .load_job_events(log, &j, q.minseq.unwrap_or(0), 1000)
+        .await
+        .or_500()?;
 
     Ok(HttpResponseOk(
         jevs.iter()
@@ -443,7 +445,7 @@ impl Job {
         job: &db::Job,
     ) -> Result<Job> {
         let (tasks, output_rules, tags, target, times) = if job.is_archived() {
-            let aj = c.archive_load(log, job.id).await.or_500()?;
+            let aj = c.archive_load(log, job.id).await?;
 
             (
                 aj.tasks().or_500()?,

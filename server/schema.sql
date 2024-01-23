@@ -283,3 +283,6 @@ ALTER TABLE job ADD COLUMN
 -- v 44
 ALTER TABLE factory ADD COLUMN
     enable          INTEGER NOT NULL    DEFAULT 1;
+
+-- v 45
+UPDATE job SET time_archived = NULL;

@@ -1292,7 +1292,44 @@ pub(crate) async fn details(
             \">DETAILS</td>\n";
         out += "</tr>\n";
 
-        for ev in bm.job_events_get().job(jid).send().await?.into_inner() {
+        /*
+         * Job event streams have no definite limit in length.  Because we are
+         * assembling this page in memory, we don't want to load and render too
+         * many records.
+         */
+        let mut events = Vec::with_capacity(10_000);
+        let mut payload_size = 0;
+        let mut minseq = 0;
+        const PAYLOAD_SIZE_MAX: usize = 15 * 1024 * 1024;
+        let truncated = 'outer: loop {
+            let page = bm
+                .job_events_get()
+                .job(jid)
+                .minseq(minseq)
+                .send()
+                .await?
+                .into_inner();
+            if page.is_empty() {
+                /*
+                 * We reached the (current) end of the event stream.  Note that
+                 * if the job is still executing there may be more records
+                 * later.
+                 */
+                break false;
+            }
+
+            for ev in page {
+                minseq = ev.seq + 1;
+                payload_size += ev.payload.as_bytes().len();
+                events.push(ev);
+
+                if payload_size > PAYLOAD_SIZE_MAX {
+                    break 'outer true;
+                }
+            }
+        };
+
+        for ev in events {
             if ev.task != last {
                 let cols = if local_time { 4 } else { 3 };
                 out += &format!("<tr><td colspan=\"{cols}\">&nbsp;</td></tr>");
@@ -1389,6 +1426,19 @@ pub(crate) async fn details(
             out += "</tr>";
         }
         out += "\n</table>\n";
+
+        if truncated {
+            /*
+             * For now, at least report truncation.  In the future perhaps we
+             * will do something pedestrian, like a "Next page" link, or
+             * something fancy, like use Javascript to do infinite scroll.
+             */
+            out += &format!(
+                "<br><b>NOTE:</b> This job exceeds {PAYLOAD_SIZE_MAX} bytes \
+                of text output, and this page has been truncated!  The full \
+                log is still available through the buildomat API."
+            );
+        }
     }
 
     Ok(out)

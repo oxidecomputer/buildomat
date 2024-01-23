@@ -51,7 +51,7 @@ async fn worker_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
              * timestamp on the first control event.
              */
             let control =
-                c.db.job_events(j.id, 0)?
+                c.db.job_events(j.id, 0, 10_000)?
                     .iter()
                     .find(|jev| jev.stream == "control")
                     .cloned();

@@ -17,6 +17,7 @@ aws-smithy-http = "0.55.3"
 aws-types = "0.55.3"
 chrono = { workspace = true }
 dropshot = { workspace = true }
+futures = { workspace = true }
 getopts = { workspace = true }
 hyper = { workspace = true }
 hyper-staticfile = { workspace = true }
@@ -27,5 +28,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 slog = { workspace = true }
 tempfile = { workspace = true }
+tlvc = { workspace = true }
+tlvc-text = { workspace = true }
 tokio = { workspace = true }
 usdt = { workspace = true }

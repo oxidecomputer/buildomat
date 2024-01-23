@@ -6,7 +6,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use std::collections::VecDeque;
-use std::io::Write;
+use std::io::{Seek, Write};
 use std::path::PathBuf;
 use std::process::exit;
 use std::result::Result as SResult;
@@ -19,6 +19,7 @@ use dropshot::{
     endpoint, ApiDescription, ConfigDropshot, HttpError, HttpServerStarter,
     Query as TypedQuery, RequestContext, RequestInfo,
 };
+use futures::TryStreamExt;
 use getopts::Options;
 use hyper::{header::AUTHORIZATION, Body, Response, StatusCode};
 use hyper_staticfile::FileBytesStream;
@@ -328,7 +329,7 @@ impl Central {
 
     fn archive_path(&self, job: JobId) -> Result<PathBuf> {
         let mut p = self.archive_dir()?;
-        p.push(format!("{job}.json"));
+        p.push(format!("{job}.tlvc"));
         Ok(p)
     }
 
@@ -341,39 +342,35 @@ impl Central {
         format!("{}/{collection}/{suffix}", self.config.storage.prefix)
     }
 
-    fn archive_object_key(
-        &self,
-        job: JobId,
-        archive: &archive::jobs::ArchivedJob,
-    ) -> String {
-        self.archive_object_key_with_version(job, archive.version())
-    }
-
-    fn archive_object_key_with_version(
-        &self,
-        job: JobId,
-        version: &str,
-    ) -> String {
-        self.object_key("job", &format!("{version}/{job}.json"))
+    fn archive_object_key(&self, job: JobId, version: u32) -> String {
+        self.object_key("job", &format!("{version}/{job}.tlvc"))
     }
 
     async fn archive_store(
         &self,
         log: &Logger,
         job: JobId,
-        archive: archive::jobs::ArchivedJob,
+        archive_version: u32,
+        body: std::fs::File,
+        body_len: usize,
     ) -> Result<()> {
         let start = Instant::now();
-        let akey = self.archive_object_key(job, &archive);
+        let akey = self.archive_object_key(job, archive_version);
         let bucket = &self.config.storage.bucket;
-        let body = serde_json::to_vec_pretty(&archive)?;
+
+        let body = aws_smithy_http::byte_stream::ByteStream::read_from()
+            .file(body.into())
+            .offset(0)
+            .buffer_size(256 * 1024)
+            .build()
+            .await?;
 
         self.s3
             .put_object()
             .bucket(bucket)
             .key(&akey)
-            .content_length(body.len().try_into().unwrap())
-            .body(body.into())
+            .content_length(body_len.try_into().unwrap())
+            .body(body)
             .send()
             .await?;
 
@@ -388,7 +385,7 @@ impl Central {
         &self,
         log: &Logger,
         job: JobId,
-    ) -> Result<archive::jobs::ArchivedJob> {
+    ) -> Result<archive::jobs::LoadedArchivedJob> {
         /*
          * First, check for the archive locally.  If we have already retrieved
          * it from the object store we do not need to do so again.
@@ -396,18 +393,8 @@ impl Central {
         let apath = self.archive_path(job)?;
         match std::fs::File::open(&apath) {
             Ok(f) => {
-                let br = std::io::BufReader::new(f);
-                let aj: archive::jobs::ArchivedJob =
-                    serde_json::from_reader(br)?;
-                if aj.is_valid() {
-                    info!(log, "loaded archive of job {job} from {apath:?}");
-                    return Ok(aj);
-                }
-                error!(
-                    log,
-                    "archive of job {job} at {apath:?} is invalid; unlinking"
-                );
-                std::fs::remove_file(&apath)?;
+                let aj = archive::jobs::LoadedArchivedJob::load_from_file(f)?;
+                return Ok(aj);
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 /*
@@ -419,33 +406,59 @@ impl Central {
         };
 
         let start = Instant::now();
-        let akey = self.archive_object_key_with_version(job, "1");
+        let akey =
+            self.archive_object_key(job, archive::jobs::JOB_ARCHIVE_VERSION);
         let bucket = &self.config.storage.bucket;
 
-        let res = self.s3.get_object().bucket(bucket).key(&akey).send().await?;
-        let body = res.body.collect().await?.to_vec();
+        let mut res =
+            self.s3.get_object().bucket(bucket).key(&akey).send().await?;
+        let clen: u64 = res.content_length().try_into().unwrap();
 
         /*
-         * First, make sure the data we read from S3 is valid:
-         */
-        let aj: archive::jobs::ArchivedJob = serde_json::from_slice(&body)?;
-        if !aj.is_valid() {
-            bail!("archive of job {job} at {bucket}:{akey} is invalid");
-        }
-        let dur = Instant::now().saturating_duration_since(start);
-        info!(log, "loaded archive of job {job} from {bucket}:{akey}";
-            "duration_msec" => dur.as_millis());
-
-        /*
-         * Cache the loaded data in the local file system:
+         * Download the data from S3 into a temporary file in the local file
+         * system.
          */
         let mut tf = tempfile::NamedTempFile::new_in(self.archive_dir()?)?;
-        tf.write_all(&body)?;
-        tf.flush()?;
-        tf.as_file_mut().sync_all()?;
-        tf.persist(self.archive_path(job)?)?;
+        while let Some(b) = res.body.try_next().await? {
+            tf.write_all(&b)?;
+        }
 
-        Ok(aj)
+        /*
+         * Syncing the file to disk and then loading the contents of the file
+         * may take a while and hold up other async tasks.
+         */
+        tokio::task::block_in_place(|| {
+            tf.flush()?;
+            tf.as_file_mut().sync_all()?;
+            tf.rewind()?;
+            let tflen = tf.as_file().metadata()?.len();
+            if clen != tflen {
+                bail!("expected {clen} bytes, but saved {tflen}?");
+            }
+
+            /*
+             * Make sure the data we read from S3 is valid:
+             */
+            archive::jobs::LoadedArchivedJob::load_from_file(
+                /*
+                 * It's alright to use a cloned open file here, because we have
+                 * been careful to use only pread() (i.e., read with an explicit
+                 * offset) in the archive loader code.
+                 */
+                tf.as_file().try_clone()?,
+            )?;
+            let dur = Instant::now().saturating_duration_since(start);
+            info!(log, "loaded archive of job {job} from {bucket}:{akey}";
+                "duration_msec" => dur.as_millis());
+
+            /*
+             * Rename the file so that it can be found on the next lookup for
+             * this job ID.
+             */
+            let mut f = tf.persist(self.archive_path(job)?)?;
+            f.rewind()?;
+            archive::jobs::LoadedArchivedJob::load_from_file(f)
+        })
     }
 
     fn chunk_dir(&self) -> Result<PathBuf> {
@@ -768,13 +781,14 @@ impl Central {
         log: &Logger,
         job: &Job,
         minseq: usize,
+        limit: u64,
     ) -> Result<Vec<JobEvent>> {
         if job.is_archived() {
             let aj = self.archive_load(log, job.id).await?;
 
-            aj.job_events(minseq)
+            aj.job_events(minseq, limit)
         } else {
-            Ok(self.db.job_events(job.id, minseq)?)
+            Ok(self.db.job_events(job.id, minseq, limit)?)
         }
     }
 }

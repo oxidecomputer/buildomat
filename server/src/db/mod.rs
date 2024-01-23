@@ -876,6 +876,7 @@ impl Database {
         &self,
         job: JobId,
         minseq: usize,
+        limit: u64,
     ) -> DBResult<Vec<JobEvent>> {
         self.sql.tx(|h| {
             h.get_rows(
@@ -885,6 +886,7 @@ impl Database {
                     .order_by(JobEventDef::Seq, Order::Asc)
                     .and_where(Expr::col(JobEventDef::Job).eq(job))
                     .and_where(Expr::col(JobEventDef::Seq).gte(minseq as i64))
+                    .limit(limit)
                     .to_owned(),
             )
         })

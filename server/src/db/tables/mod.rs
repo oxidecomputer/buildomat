@@ -81,34 +81,6 @@ impl std::ops::Deref for AuthUser {
     }
 }
 
-/*
- * This implementation allows us to use the existing tx_get_row() routine to
- * fish out a MAX() value for the task "seq" column.
- */
-// XXX impl FromRow for Option<u32> {
-// XXX     fn columns() -> Vec<ColumnRef> {
-// XXX         unimplemented!()
-// XXX     }
-// XXX
-// XXX     fn from_row(row: &Row) -> rusqlite::Result<Option<u32>> {
-// XXX         row.get(0)
-// XXX     }
-// XXX }
-
-/*
- * This implementation allows us to use the existing tx_get_row() routine to
- * fish out a COUNT() value.
- */
-// XXX impl FromRow for usize {
-// XXX     fn columns() -> Vec<ColumnRef> {
-// XXX         unimplemented!()
-// XXX     }
-// XXX
-// XXX     fn from_row(row: &Row) -> rusqlite::Result<usize> {
-// XXX         Ok(row.get::<_, i64>(0)?.try_into().unwrap())
-// XXX     }
-// XXX }
-
 /**
  * This synthetic model object represents the left outer join of Inputs and
  * Files.  When an input is created, it may not yet have an associated File, at
