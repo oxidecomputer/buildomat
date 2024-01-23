@@ -22,7 +22,8 @@ pub mod gen {
 pub mod prelude {
     pub use super::ext::*;
     pub use super::gen::prelude::*;
-    pub use futures::StreamExt;
+    pub use futures::{StreamExt, TryStreamExt};
+    pub use reqwest::StatusCode;
 }
 pub use gen::{types, Client, Error};
 

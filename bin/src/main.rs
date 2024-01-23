@@ -11,10 +11,10 @@ use std::str::FromStr;
 use std::time::Instant;
 
 use anyhow::{anyhow, bail, Result};
-use buildomat_client::{ext::*, types::*, Client, ClientBuilder};
+use buildomat_client::prelude::*;
+use buildomat_client::{types::*, ClientBuilder};
 use buildomat_common::*;
 use chrono::prelude::*;
-use futures::{StreamExt, TryStreamExt};
 use hiercmd::prelude::*;
 use rusty_ulid::Ulid;
 
@@ -22,6 +22,67 @@ const WIDTH_ISODATE: usize = 20;
 const WIDTH_ID: usize = 26;
 
 mod config;
+
+trait ErrorWrapper<T, F> {
+    fn wrap_with(self, makemsg: F) -> Result<T>
+    where
+        F: Fn() -> String;
+}
+
+impl<T, F> ErrorWrapper<T, F>
+    for std::result::Result<
+        buildomat_client::gen::ResponseValue<T>,
+        buildomat_client::Error<buildomat_client::types::Error>,
+    >
+{
+    fn wrap_with(self, makemsg: F) -> Result<T>
+    where
+        F: Fn() -> String,
+    {
+        Ok(self
+            .map_err(|e| {
+                let msg = match e {
+                    buildomat_client::Error::ErrorResponse(ref e) => {
+                        match e.status() {
+                            StatusCode::NOT_FOUND => {
+                                Some(format!("{} was not found", makemsg()))
+                            }
+                            _ => None,
+                        }
+                    }
+                    buildomat_client::Error::InvalidResponsePayload(ref e) => {
+                        match e.status() {
+                            None if e.is_decode() => {
+                                /*
+                                 * If the buildomat backend service is offline,
+                                 * nginx will return a HTML-formatted page
+                                 * instead of a JSON-formatted message.  For
+                                 * right now, assume that this means the server
+                                 * is offline, rather than emitting a less
+                                 * helpful "Invalid Response Payload: error
+                                 * decoding response body: expected value at
+                                 * line 1 column 1" message.
+                                 */
+                                Some(
+                                    "invalid response: server may be offline!"
+                                        .to_string(),
+                                )
+                            }
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                };
+
+                if let Some(msg) = msg {
+                    anyhow!("{}", msg)
+                } else {
+                    anyhow!("{e}")
+                }
+            })?
+            .into_inner())
+    }
+}
 
 #[derive(Default)]
 struct Stuff {
@@ -83,7 +144,7 @@ impl Stuff {
                 }
             }
 
-            bail!("could not locate user with name {name:?}");
+            bail!("user {name:?} was not found");
         }
     }
 
@@ -1278,7 +1339,14 @@ async fn do_user_show(mut l: Level<Stuff>) -> Result<()> {
     }
     let id = l.context().user_to_id(&a.args()[0]).await?;
 
-    let res = l.context().admin().user_get().user(&id).send().await?;
+    let res = l
+        .context()
+        .admin()
+        .user_get()
+        .user(&id)
+        .send()
+        .await
+        .wrap_with(|| format!("user {:?}", a.args()[0]))?;
 
     println!("id:          {}", res.id);
     println!("name:        {}", res.name);
