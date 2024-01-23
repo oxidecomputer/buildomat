@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use crate::{App, FlushOut, FlushState};
@@ -1141,27 +1141,31 @@ pub(crate) async fn artefact(
             let mut tf = tokio::fs::File::from_std(tempfile::tempfile()?);
 
             tf.write_all(
-                concat!("<!doctype html><html>\
-                <head><meta charset=\"UTF-8\"></head>\
-                <style>\n",
-                include_str!("../../www/bunyan.css"),
-                "</style>\n\
-                <script>\n",
-                include_str!("../../www/bunyan.js"),
-                "</script>\n\
-                <body>\n\
-                Max level shown:
-                <select id=\"select-max-level\" onchange=\"selectMaxLevel(this)\">
-                <option value=\".bunyan-trace\">TRCE</option>
-                <option value=\".bunyan-debug\">DEBG</option>
-                <option value=\".bunyan-info\" selected>INFO</option>
-                <option value=\".bunyan-warn\">WARN</option>
-                <option value=\".bunyan-error\">ERRO</option>
-                <option value=\".bunyan-fatal\">FATA</option>
-                </select>
-                <table style=\"border: none;\">\n"
-            )
-                    .as_bytes(),
+                concat!(
+                    "<!doctype html><html>\n\
+                    <head>\n\
+                    <meta charset=\"UTF-8\">\n\
+                    <style>\n",
+                    include_str!("../../www/bunyan.css"),
+                    "</style>\n\
+                    <script>\n",
+                    include_str!("../../www/bunyan.js"),
+                    "</script>\n\
+                    </head>\n\
+                    <body>\n\
+                    Max level shown:\n\
+                    <select id=\"select-max-level\" \
+                    onchange=\"selectMaxLevel(this)\">\n\
+                    <option value=\"bunyan-trace\" selected>TRCE</option>\n\
+                    <option value=\"bunyan-debug\">DEBG</option>\n\
+                    <option value=\"bunyan-info\">INFO</option>\n\
+                    <option value=\"bunyan-warn\">WARN</option>\n\
+                    <option value=\"bunyan-error\">ERRO</option>\n\
+                    <option value=\"bunyan-fatal\">FATA</option>\n\
+                    </select>\n\
+                    <table style=\"border: none;\">\n"
+                )
+                .as_bytes(),
             )
             .await?;
 
@@ -1177,7 +1181,7 @@ pub(crate) async fn artefact(
             dec.fin()?;
             bunyan_to_html(&mut tf, &mut dec, &mut num).await?;
 
-            tf.write_all("</table></body></html>\n".as_bytes()).await?;
+            tf.write_all("</table>\n</body>\n</html>\n".as_bytes()).await?;
             tf.flush().await?;
 
             /*
