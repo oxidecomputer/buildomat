@@ -815,14 +815,15 @@ pub(crate) async fn run(
                     git clone \"https://github.com/$GITHUB_REPOSITORY\" \
                         \"/work/$GITHUB_REPOSITORY\"\n\
                     cd \"/work/$GITHUB_REPOSITORY\"\n\
+                    git fetch origin \"$GITHUB_SHA\"\n\
                     if [[ -n $GITHUB_BRANCH ]]; then\n\
-                        git fetch origin \"$GITHUB_BRANCH\"\n\
-                        git checkout -B \"$GITHUB_BRANCH\" \
-                            \"remotes/origin/$GITHUB_BRANCH\"\n\
-                    else\n\
-                        git fetch origin \"$GITHUB_SHA\"\n\
+                        current=$(git branch --show-current)\n\
+                        if [[ $current != $GITHUB_BRANCH ]]; then\n\
+                            git branch -f \"$GITHUB_BRANCH\" \"$GITHUB_SHA\"\n\
+                            git checkout -f \"$GITHUB_BRANCH\"\n\
+                        fi\n\
                     fi\n\
-                    git reset --hard \"$GITHUB_SHA\"
+                    git reset --hard \"$GITHUB_SHA\"\n\
                     "
                 .into(),
             });
