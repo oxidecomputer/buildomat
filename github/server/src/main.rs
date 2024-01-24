@@ -755,7 +755,8 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                     continue;
                 }
 
-                let suite_id = if let Some(suite) = suites.check_suites.get(0) {
+                let suite_id = if let Some(suite) = suites.check_suites.first()
+                {
                     info!(
                         log,
                         "delivery {}: found check suite {} for {}",

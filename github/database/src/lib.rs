@@ -301,8 +301,22 @@ impl Database {
         self.sql.tx(|h| h.get_row(CheckRun::find(id)))
     }
 
+    pub fn load_check_run_opt(
+        &self,
+        id: CheckRunId,
+    ) -> DBResult<Option<CheckRun>> {
+        self.sql.tx(|h| h.get_row_opt(CheckRun::find(id)))
+    }
+
     pub fn load_check_suite(&self, id: CheckSuiteId) -> DBResult<CheckSuite> {
         self.sql.tx(|h| h.get_row(CheckSuite::find(id)))
+    }
+
+    pub fn load_check_suite_opt(
+        &self,
+        id: CheckSuiteId,
+    ) -> DBResult<Option<CheckSuite>> {
+        self.sql.tx(|h| h.get_row_opt(CheckSuite::find(id)))
     }
 
     pub fn load_check_suite_by_github_id(

@@ -3,7 +3,7 @@
  */
 
 use anyhow::{anyhow, bail, Result};
-use buildomat_client::ext::*;
+use buildomat_client::prelude::*;
 use buildomat_common::*;
 use buildomat_github_database::types::*;
 use chrono::prelude::*;
@@ -31,24 +31,54 @@ fn sign(body: &[u8], secret: &str) -> String {
     out
 }
 
+/**
+ * Log and return a machine-readable internal error when something goes wrong
+ * and we'd like the client to have another go.  This is only appropriate for
+ * endpoints made for software (e.g., webhook delivery) not for people (e.g.,
+ * status pages and log output).
+ */
 fn interr<T>(log: &slog::Logger, msg: &str) -> SResult<T, dropshot::HttpError> {
     error!(log, "internal error: {}", msg);
     Err(dropshot::HttpError::for_internal_error(msg.to_string()))
 }
 
-trait ToHttpError<T> {
-    fn to_500(self) -> SResult<T, HttpError>;
+/**
+ * Return a 404 error HTML page for a browser user.
+ */
+fn html_404() -> SResult<hyper::Response<hyper::Body>, HttpError> {
+    let body = include_bytes!("../../../www/notfound.html").as_slice();
+
+    Ok(hyper::Response::builder()
+        .status(hyper::StatusCode::NOT_FOUND)
+        .header(hyper::header::CONTENT_TYPE, "text/html; charset=utf-8")
+        .header(hyper::header::CONTENT_LENGTH, body.len())
+        .body(body.into())?)
 }
 
-impl<T> ToHttpError<T>
-    for SResult<T, buildomat_github_database::DatabaseError>
-{
-    fn to_500(self) -> SResult<T, HttpError> {
-        self.map_err(|e| {
-            let msg = format!("internal error: {}", e);
-            HttpError::for_internal_error(msg)
-        })
-    }
+/**
+ * Return a generic 500 error HTML page for a browser user, including the
+ * request ID of the failed request in case they want to report the failure.
+ */
+fn html_500(req_id: &str) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+    let body = include_str!("../../../www/error.html")
+        .replace(
+            "<!-- %EXTRA% -->",
+            &format!(
+                "<div class=\"second\">Your request ID was &nbsp; \
+                <b>{req_id}</b></div>\n",
+            ),
+        )
+        .into_bytes();
+
+    Ok(hyper::Response::builder()
+        .status(hyper::StatusCode::NOT_FOUND)
+        .header(hyper::header::CONTENT_TYPE, "text/html; charset=utf-8")
+        .header(hyper::header::CONTENT_LENGTH, body.len())
+        .body(body.into())?)
+}
+
+trait ToHttpError<T> {
+    fn to_500(self) -> SResult<T, HttpError>;
 }
 
 impl<T> ToHttpError<T> for Result<T> {
@@ -60,22 +90,62 @@ impl<T> ToHttpError<T> for Result<T> {
     }
 }
 
-impl<T> ToHttpError<T> for SResult<T, rusty_ulid::DecodingError> {
-    fn to_500(self) -> SResult<T, HttpError> {
-        self.map_err(|e| {
-            let msg = format!("internal error: {}", e);
-            HttpError::for_internal_error(msg)
-        })
+/**
+ * This trait is implemented by the path objects for endpoints that operate on a
+ * particular check run.  These URLs contain a "secret" key to make them less
+ * easily to guess, without going as far as having a full authentication and
+ * authorisation system, and to allow people to paste these URLs into chat
+ * messages or issues to expose them to other people.
+ */
+trait LoadCheckSuiteAndRun {
+    fn parsed_check_suite_id(&self) -> Option<CheckSuiteId>;
+    fn parsed_check_run_id(&self) -> Option<CheckRunId>;
+    fn url_key(&self) -> &str;
+
+    /**
+     * Load the check suite and check run from the URL and check that the secret
+     * key matches the one we have on file.  This routine will return Ok(None)
+     * if the suite or run are not found, or if the key does not match (to
+     * prevent enumeration).  Any error should be returned to the client as a
+     * server error; i.e., a 500-series error.
+     */
+    fn load(
+        &self,
+        rc: &RequestContext<Arc<App>>,
+    ) -> Result<Option<CheckSuiteAndRun>> {
+        let Some((csid, crid)) =
+            self.parsed_check_suite_id().zip(self.parsed_check_run_id())
+        else {
+            /*
+             * If the IDs in the path do not parse correctly, we do not even
+             * need to look them up to know they do not exist.
+             */
+            return Ok(None);
+        };
+
+        let app = rc.context();
+        let cs = match app.db.load_check_suite_opt(csid) {
+            Ok(Some(cs)) => cs,
+            Ok(None) => return Ok(None),
+            Err(e) => bail!("database error: check suite {csid}: {e}"),
+        };
+        let cr = match app.db.load_check_run_opt(crid) {
+            Ok(Some(cr)) => cr,
+            Ok(None) => return Ok(None),
+            Err(e) => bail!("database error: check run {crid}: {e}"),
+        };
+
+        if cs.url_key == self.url_key() {
+            Ok(Some(CheckSuiteAndRun { cs, cr }))
+        } else {
+            Ok(None)
+        }
     }
 }
 
-impl<T, E> ToHttpError<T> for SResult<T, buildomat_client::Error<E>> {
-    fn to_500(self) -> SResult<T, HttpError> {
-        self.map_err(|e| {
-            let msg = format!("internal error: {}", e.into_untyped());
-            HttpError::for_internal_error(msg)
-        })
-    }
+struct CheckSuiteAndRun {
+    cs: CheckSuite,
+    cr: CheckRun,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -87,13 +157,17 @@ struct ArtefactPath {
     pub name: String,
 }
 
-impl ArtefactPath {
-    fn check_suite(&self) -> SResult<CheckSuiteId, HttpError> {
-        self.check_suite.parse::<CheckSuiteId>().to_500()
+impl LoadCheckSuiteAndRun for ArtefactPath {
+    fn parsed_check_suite_id(&self) -> Option<CheckSuiteId> {
+        self.check_suite.parse().ok()
     }
 
-    fn check_run(&self) -> SResult<CheckRunId, HttpError> {
-        self.check_run.parse::<CheckRunId>().to_500()
+    fn parsed_check_run_id(&self) -> Option<CheckRunId> {
+        self.check_run.parse().ok()
+    }
+
+    fn url_key(&self) -> &str {
+        &self.url_key
     }
 }
 
@@ -115,37 +189,47 @@ async fn artefact(
     let path = path.into_inner();
     let query = query.into_inner();
 
-    let cs = app.db.load_check_suite(path.check_suite()?).to_500()?;
-    let cr = app.db.load_check_run(path.check_run()?).to_500()?;
-    if cs.url_key != path.url_key {
-        return interr(&rc.log, "url key mismatch");
-    }
-
-    let response = match cr.variety {
-        CheckRunVariety::Basic => variety::basic::artefact(
-            app,
-            &cs,
-            &cr,
-            &path.output,
-            &path.name,
-            query.format.as_deref(),
-        )
-        .await
-        .to_500()?,
-        _ => None,
+    let load = match path.load(&rc) {
+        Ok(Some(load)) => load,
+        Ok(None) => return html_404(),
+        Err(e) => {
+            error!(rc.log, "artefact: load: {e}");
+            return html_500(&rc.request_id);
+        }
     };
 
-    if let Some(response) = response {
-        Ok(response)
-    } else {
-        let out = "<html><head><title>404 Not Found</title>\
-            <body>Artefact not found!</body></html>";
+    let res = match load.cr.variety {
+        CheckRunVariety::Basic => {
+            variety::basic::artefact(
+                app,
+                &load.cs,
+                &load.cr,
+                &path.output,
+                &path.name,
+                query.format.as_deref(),
+            )
+            .await
+        }
+        /*
+         * No other variety exposes output artefacts:
+         */
+        _ => Ok(None),
+    };
 
-        Ok(hyper::Response::builder()
-            .status(hyper::StatusCode::NOT_FOUND)
-            .header(hyper::header::CONTENT_TYPE, "text/html")
-            .header(hyper::header::CONTENT_LENGTH, out.as_bytes().len())
-            .body(hyper::Body::from(out))?)
+    match res {
+        Ok(Some(res)) => {
+            /*
+             * Pass the response on from the variety-specific code as-is.  It is
+             * likely a large streamed response, from either a local file or an
+             * object store.
+             */
+            Ok(res)
+        }
+        Ok(None) => html_404(),
+        Err(e) => {
+            error!(rc.log, "artefact: variety: {e}");
+            html_500(&rc.request_id)
+        }
     }
 }
 
@@ -156,13 +240,17 @@ struct DetailsPath {
     pub check_run: String,
 }
 
-impl DetailsPath {
-    fn check_suite(&self) -> SResult<CheckSuiteId, HttpError> {
-        self.check_suite.parse::<CheckSuiteId>().to_500()
+impl LoadCheckSuiteAndRun for DetailsPath {
+    fn parsed_check_suite_id(&self) -> Option<CheckSuiteId> {
+        self.check_suite.parse().ok()
     }
 
-    fn check_run(&self) -> SResult<CheckRunId, HttpError> {
-        self.check_run.parse::<CheckRunId>().to_500()
+    fn parsed_check_run_id(&self) -> Option<CheckRunId> {
+        self.check_run.parse().ok()
+    }
+
+    fn url_key(&self) -> &str {
+        &self.url_key
     }
 }
 
@@ -186,45 +274,61 @@ async fn details(
     let query = query.into_inner();
     let local_time = query.ts.as_deref() == Some("all");
 
-    let cs = app.db.load_check_suite(path.check_suite()?).to_500()?;
-    let cr = app.db.load_check_run(path.check_run()?).to_500()?;
-    if cs.url_key != path.url_key {
-        return interr(&rc.log, "url key mismatch");
-    }
+    let load = match path.load(&rc) {
+        Ok(Some(load)) => load,
+        Ok(None) => return html_404(),
+        Err(e) => {
+            error!(rc.log, "details: load: {e}");
+            return html_500(&rc.request_id);
+        }
+    };
 
     let mut out = String::new();
-    out += "<html>\n";
-    out += &format!("<head><title>Check Run: {}</title></head>\n", cr.name);
+    out += "<!doctype html>\n<html>\n";
+    out +=
+        &format!("<head><title>Check Run: {}</title></head>\n", load.cr.name);
     out += "<body>\n";
-    out += &format!("<h1>{}: {}</h1>\n", cr.id, cr.name);
+    out += &format!("<h1>{}: {}</h1>\n", load.cr.id, load.cr.name);
 
-    match cr.variety {
+    out += &match load.cr.variety {
         CheckRunVariety::Control => {
-            out += &variety::control::details(app, &cs, &cr, local_time)
+            match variety::control::details(app, &load.cs, &load.cr, local_time)
                 .await
-                .to_500()?;
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    error!(rc.log, "details: control: {e}");
+                    return html_500(&rc.request_id);
+                }
+            }
         }
         CheckRunVariety::FailFirst => {
-            let p: super::FailFirstPrivate = cr.get_private().to_500()?;
-            out += &format!("<pre>{:#?}</pre>\n", p);
+            let p: super::FailFirstPrivate = load.cr.get_private().to_500()?;
+            format!("<pre>{:#?}</pre>\n", p)
         }
         CheckRunVariety::AlwaysPass => {
-            let p: super::AlwaysPassPrivate = cr.get_private().to_500()?;
-            out += &format!("<pre>{:#?}</pre>\n", p);
+            let p: super::AlwaysPassPrivate = load.cr.get_private().to_500()?;
+            format!("<pre>{:#?}</pre>\n", p)
         }
         CheckRunVariety::Basic => {
-            out += &variety::basic::details(app, &cs, &cr, local_time)
+            match variety::basic::details(app, &load.cs, &load.cr, local_time)
                 .await
-                .to_500()?;
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    error!(rc.log, "details: basic: {e}");
+                    return html_500(&rc.request_id);
+                }
+            }
         }
-    }
+    };
 
     out += "</body>\n";
     out += "</html>\n";
 
     Ok(hyper::Response::builder()
         .status(hyper::StatusCode::OK)
-        .header(hyper::header::CONTENT_TYPE, "text/html")
+        .header(hyper::header::CONTENT_TYPE, "text/html; charset=utf-8")
         .header(hyper::header::CONTENT_LENGTH, out.as_bytes().len())
         .body(hyper::Body::from(out))?)
 }
@@ -331,6 +435,18 @@ async fn webhook(
 async fn status(
     rc: RequestContext<Arc<App>>,
 ) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+    match status_impl(&rc).await {
+        Ok(res) => Ok(res),
+        Err(e) => {
+            error!(rc.log, "status page: {e:?}");
+            html_500(&rc.request_id)
+        }
+    }
+}
+
+async fn status_impl(
+    rc: &RequestContext<Arc<App>>,
+) -> Result<hyper::Response<hyper::Body>> {
     let app = rc.context();
     let b = app.buildomat_admin();
 
@@ -343,10 +459,9 @@ async fn status(
     /*
      * Load active jobs, recently completed jobs, and active workers:
      */
-    let jobs = b.admin_jobs_get().active(true).send().await.to_500()?;
+    let jobs = b.admin_jobs_get().active(true).send().await?;
     let oldjobs = {
-        let mut oldjobs =
-            b.admin_jobs_get().completed(40).send().await.to_500()?;
+        let mut oldjobs = b.admin_jobs_get().completed(100).send().await?;
         /*
          * Display most recent job first by sorting the ID backwards; a ULID
          * begins with a timestamp prefix, so a lexicographical sort is ordered
@@ -355,21 +470,16 @@ async fn status(
         oldjobs.sort_by(|a, b| b.id.cmp(&a.id));
         oldjobs
     };
-    let workers = b
-        .workers_list()
-        .active(true)
-        .stream()
-        .try_collect::<Vec<_>>()
-        .await
-        .to_500()?;
+    let workers =
+        b.workers_list().active(true).stream().try_collect::<Vec<_>>().await?;
     let targets = b
         .targets_list()
         .send()
-        .await
-        .to_500()?
-        .iter()
-        .map(|t| (t.id.to_string(), t.name.to_string()))
-        .collect::<HashMap<String, String>>();
+        .await?
+        .into_inner()
+        .into_iter()
+        .map(|t| (t.id, t.name))
+        .collect::<HashMap<_, _>>();
     let mut users: HashMap<String, String> = Default::default();
 
     fn github_url(tags: &HashMap<String, String>) -> Option<String> {
@@ -504,11 +614,10 @@ async fn status(
             }
             out += &format!(
                 " created {} ({} ago)\n",
-                w.id()
-                    .to_500()?
+                w.id()?
                     .creation()
                     .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-                w.id().to_500()?.age().render(),
+                w.id()?.age().render(),
             );
 
             if !w.jobs.is_empty() {
@@ -518,12 +627,8 @@ async fn status(
                     seen.insert(job.id.to_string());
 
                     if !users.contains_key(&job.owner) {
-                        let owner = b
-                            .user_get()
-                            .user(&job.owner)
-                            .send()
-                            .await
-                            .to_500()?;
+                        let owner =
+                            b.user_get().user(&job.owner).send().await?;
                         users.insert(job.owner.clone(), owner.name.to_string());
                     }
 
@@ -588,8 +693,7 @@ async fn status(
             }
 
             if !users.contains_key(&job.owner) {
-                let owner =
-                    b.user_get().user(&job.owner).send().await.to_500()?;
+                let owner = b.user_get().user(&job.owner).send().await?;
                 users.insert(job.owner.clone(), owner.name.to_string());
             }
 
@@ -613,7 +717,7 @@ async fn status(
         }
 
         if !users.contains_key(&job.owner) {
-            let owner = b.user_get().user(&job.owner).send().await.to_500()?;
+            let owner = b.user_get().user(&job.owner).send().await?;
             users.insert(job.owner.clone(), owner.name.to_string());
         }
 
@@ -670,24 +774,18 @@ async fn published_file(
     /*
      * Determine the buildomat username for this GitHub owner/repository:
      */
-    let bmu = if let Some(repo) =
-        app.db.lookup_repository(&path.owner, &path.repo).to_500()?
-    {
-        app.buildomat_username(&repo)
-    } else {
-        let out = "<html><head><title>404 Not Found</title>\
-            <body>Artefact not found!</body></html>";
-
-        return Ok(hyper::Response::builder()
-            .status(hyper::StatusCode::NOT_FOUND)
-            .header(hyper::header::CONTENT_TYPE, "text/html")
-            .header(hyper::header::CONTENT_LENGTH, out.as_bytes().len())
-            .body(hyper::Body::from(out))?);
+    let bmu = match app.db.lookup_repository(&path.owner, &path.repo) {
+        Ok(Some(repo)) => app.buildomat_username(&repo),
+        Ok(None) => return html_404(),
+        Err(e) => {
+            error!(rc.log, "published file: lookup: {e:?}");
+            return html_500(&rc.request_id);
+        }
     };
 
     let b = app.buildomat_admin();
 
-    let backend = b
+    let backend = match b
         .public_file_download()
         .username(&bmu)
         .series(&path.series)
@@ -695,7 +793,37 @@ async fn published_file(
         .name(&path.name)
         .send()
         .await
-        .to_500()?;
+    {
+        Ok(r) => {
+            /*
+             * Pass the response on from the buildomat API as-is.  It is likely
+             * a large streamed response, from either a local file or an object
+             * store.
+             */
+            r
+        }
+        Err(e) => match e {
+            buildomat_client::Error::ErrorResponse(ref e) => {
+                match e.status() {
+                    StatusCode::NOT_FOUND => {
+                        /*
+                         * The backend believes this published file does not
+                         * exist at all.
+                         */
+                        return html_404();
+                    }
+                    e => {
+                        error!(rc.log, "published file: buildomat: {e:?}");
+                        return html_500(&rc.request_id);
+                    }
+                }
+            }
+            other => {
+                error!(rc.log, "published file: buildomat: {other:?}");
+                return html_500(&rc.request_id);
+            }
+        },
+    };
 
     let ct = guess_mime_type(&path.name);
     let cl = backend.content_length().unwrap();
@@ -722,40 +850,65 @@ async fn branch_to_commit(
     rc: RequestContext<Arc<App>>,
     path: dropshot::Path<BranchToCommitPath>,
 ) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+    let log = &rc.log;
     let app = rc.context();
     let path = path.into_inner();
 
     /*
      * Make sure we know about this repository before we even bother to look it
-     * up.
+     * up on GitHub.
      */
-    let Some(repo) =
-        app.db.lookup_repository(&path.owner, &path.repo).to_500()?
-    else {
-        let out = "<html><head><title>404 Not Found</title>\
-            <body>Not found!</body></html>";
-
-        return Ok(hyper::Response::builder()
-            .status(hyper::StatusCode::NOT_FOUND)
-            .header(hyper::header::CONTENT_TYPE, "text/html")
-            .header(hyper::header::CONTENT_LENGTH, out.as_bytes().len())
-            .body(hyper::Body::from(out))?);
+    let repo = match app.db.lookup_repository(&path.owner, &path.repo) {
+        Ok(Some(repo)) => repo,
+        Ok(None) => return html_404(),
+        Err(e) => {
+            error!(log, "branch to commit: {e:?}");
+            return html_500(&rc.request_id);
+        }
     };
 
     /*
      * We need to use the credentials for the installation owned by the user
      * that owns this repo:
      */
-    let install = app.db.repo_to_install(&repo).map_err(|e| {
-        HttpError::for_internal_error(format!("repo {repo:?} to install: {e}"))
-    })?;
+    let install = match app.db.repo_to_install(&repo) {
+        Ok(install) => install,
+        Err(_) => {
+            /*
+             * We may know about a repository (e.g., from pull requests made
+             * from forks from outside an organisation) but not actually have a
+             * GitHub App installation that we can use for credentials.  Treat
+             * this as if we could not locate the repository.
+             */
+            return html_404();
+        }
+    };
 
-    let branch = app
+    let branch = match app
         .install_client(install.id)
         .repos()
         .get_branch(&repo.owner, &repo.name, &path.branch)
         .await
-        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+    {
+        Ok(branch) => branch,
+        Err(e) => {
+            /*
+             * The GitHub client we are using does not have fantastically
+             * nuanced error handling available.  Ideally we would not arrive
+             * here, anyway, as we've confirmed that (we believe!) the
+             * repository exists above.
+             */
+            error!(
+                log,
+                "install {} getting branch ({:?}, {:?}, {:?}): {e}",
+                install.id,
+                repo.owner,
+                repo.name,
+                path.branch,
+            );
+            return html_500(&rc.request_id);
+        }
+    };
 
     let body = format!("{}\n", branch.commit.sha);
 
@@ -764,6 +917,69 @@ async fn branch_to_commit(
         .header(hyper::header::CONTENT_TYPE, "text/plain")
         .header(hyper::header::CONTENT_LENGTH, body.as_bytes().len())
         .body(body.into())?)
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct StaticPath {
+    pub name: String,
+}
+
+#[endpoint {
+    method = GET,
+    path = "/static/{name}",
+}]
+async fn static_file(
+    _rc: RequestContext<Arc<App>>,
+    path: dropshot::Path<StaticPath>,
+) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+    let path = path.into_inner();
+
+    let (code, ctype, bytes) = match path.name.as_str() {
+        "index.html" => (
+            hyper::StatusCode::OK,
+            "text/html; charset=utf-8",
+            include_bytes!("../../../www/index.html").as_slice(),
+        ),
+        "buildomat.png" => (
+            hyper::StatusCode::OK,
+            "image/png",
+            include_bytes!("../../../www/buildomat.png").as_slice(),
+        ),
+        "favicon.ico" => (
+            hyper::StatusCode::OK,
+            "image/png",
+            include_bytes!("../../../www/favicon.ico").as_slice(),
+        ),
+        "notfound.html" => (
+            /*
+             * If you specifically request the 404 error page, we'll return that
+             * with a 200 code.
+             */
+            hyper::StatusCode::OK,
+            "text/html; charset=utf-8",
+            include_bytes!("../../../www/notfound.html").as_slice(),
+        ),
+        "error.html" => (
+            /*
+             * If you specifically request the generic error page, we'll return
+             * that with a 200 code.
+             */
+            hyper::StatusCode::OK,
+            "text/html; charset=utf-8",
+            include_bytes!("../../../www/error.html").as_slice(),
+        ),
+        _ => (
+            hyper::StatusCode::NOT_FOUND,
+            "text/html; charset=utf-8",
+            include_bytes!("../../../www/notfound.html").as_slice(),
+        ),
+    };
+
+    Ok(hyper::Response::builder()
+        .status(code)
+        .header(hyper::header::CONTENT_TYPE, ctype)
+        .header(hyper::header::CONTENT_LENGTH, bytes.len())
+        .body(bytes.into())?)
 }
 
 pub(crate) async fn server(
@@ -784,6 +1000,7 @@ pub(crate) async fn server(
     api.register(status).unwrap();
     api.register(published_file).unwrap();
     api.register(branch_to_commit).unwrap();
+    api.register(static_file).unwrap();
 
     let log = app.log.clone();
     let s = dropshot::HttpServerStarter::new(&cd, api, app, &log)
