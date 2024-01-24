@@ -24,6 +24,8 @@ const MAX_OUTPUTS: usize = 25;
 const MAX_TAIL_LINES: usize = 20;
 const MAX_LINE_LENGTH: usize = 90;
 
+const MAX_RENDERED_LOG: u64 = 100 * 1024 * 1024;
+
 #[derive(Debug, Serialize, Deserialize)]
 struct BasicConfig {
     #[serde(default)]
@@ -1131,7 +1133,7 @@ pub(crate) async fn artefact(
                 bail!("cannot reformat a file that is not plain text");
             }
 
-            if cl > 100 * 1024 * 1024 {
+            if cl > MAX_RENDERED_LOG {
                 bail!("file too large for reformat");
             }
 
@@ -1268,10 +1270,11 @@ pub(crate) async fn details(
                     html_escape::encode_safe(&bo.path),
                     bo.size,
                 );
-                if bo.path.ends_with(".log") {
+                if bo.path.ends_with(".log") && o.size < MAX_RENDERED_LOG {
                     /*
-                     * Add an additional link to view a pretty-printed copy of
-                     * what might be a bunyan log:
+                     * If the file might be a bunyan log and is not larger than
+                     * we are willing to render, add an additional link to view
+                     * a pretty-printed copy:
                      */
                     out += &format!(
                         " <a href=\"{}?format=x-bunyan\">[rendered]</a>\n",
