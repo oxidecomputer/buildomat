@@ -286,3 +286,10 @@ ALTER TABLE factory ADD COLUMN
 
 -- v 45
 UPDATE job SET time_archived = NULL;
+
+-- v 46
+CREATE INDEX job_file_by_job_id ON job_file (id);
+
+-- v 47
+CREATE INDEX job_archiving_queue ON job (id, complete, time_archived)
+    WHERE complete = true AND time_archived IS NULL;
