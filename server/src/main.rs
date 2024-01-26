@@ -912,6 +912,7 @@ async fn main() -> Result<()> {
     ad.register(api::admin::admin_job_get).api_check()?;
     ad.register(api::admin::admin_job_archive_request).api_check()?;
     ad.register(api::admin::admin_jobs_get).api_check()?;
+    ad.register(api::admin::admin_jobs_list).api_check()?;
     ad.register(api::admin::factory_create).api_check()?;
     ad.register(api::admin::factory_enable).api_check()?;
     ad.register(api::admin::factory_disable).api_check()?;
@@ -935,7 +936,8 @@ async fn main() -> Result<()> {
     ad.register(api::user::job_add_input).api_check()?;
     ad.register(api::user::job_add_input_sync).api_check()?;
     ad.register(api::user::job_cancel).api_check()?;
-    ad.register(api::user::jobs_get).api_check()?;
+    ad.register(api::user::jobs_list).api_check()?;
+    ad.register(api::user::jobs_get_old).api_check()?;
     ad.register(api::user::quota).api_check()?;
     ad.register(api::user::whoami).api_check()?;
     ad.register(api::worker::worker_bootstrap).api_check()?;

@@ -17,5 +17,6 @@ hiercmd = { workspace = true }
 rusty_ulid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sigpipe = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }

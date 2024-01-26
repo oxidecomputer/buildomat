@@ -73,7 +73,7 @@ async fn job_assignment_one(log: &Logger, c: &Central) -> Result<()> {
         freeworkers.entry(w.target()).or_default().push(w.id);
     });
 
-    for j in c.db.jobs_active()?.iter() {
+    for j in c.db.jobs_active(10_000)?.iter() {
         assert!(!j.complete);
         assert!(!j.waiting);
         assert!(!j.is_archived());
@@ -151,7 +151,7 @@ async fn job_waiters_one(log: &Logger, c: &Central) -> Result<()> {
      *
      * Process dependencies first.
      */
-    'job: for j in c.db.jobs_waiting()?.iter() {
+    'job: for j in c.db.jobs_waiting(10_000)?.iter() {
         assert!(j.waiting);
         assert!(!j.is_archived());
 

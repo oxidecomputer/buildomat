@@ -403,8 +403,9 @@ pub(crate) async fn job_get(
 #[endpoint {
     method = GET,
     path = "/0/jobs",
+    unpublished = true,
 }]
-pub(crate) async fn jobs_get(
+pub(crate) async fn jobs_get_old(
     rqctx: RequestContext<Arc<Central>>,
 ) -> DSResult<HttpResponseOk<Vec<Job>>> {
     let c = rqctx.context();
@@ -412,14 +413,174 @@ pub(crate) async fn jobs_get(
 
     let owner = c.require_user(log, &rqctx.request).await?;
 
-    let jobs = c.db.user_jobs(owner.id).or_500()?;
+    /*
+     * XXX Consumers should switch to the paginated version of this call, but
+     * for now we will load a certain number of jobs into memory ourselves, but
+     * in chunks to allow other callers somewhat concurrent access to the
+     * database.
+     */
+    let mut out = Vec::with_capacity(100);
+    let mut marker = None;
+    while out.len() < 100_000 {
+        let page =
+            c.db.jobs_page(true, marker, 100, Some(owner.id), None, None, None)
+                .or_500()?;
+        if page.is_empty() {
+            break;
+        }
 
-    let mut out = Vec::new();
-    for job in jobs {
-        out.push(super::user::Job::load(log, c, &job).await.or_500()?);
+        /*
+         * The result set is in ascending order of Job ID, so grab the last ID
+         * so we can find the next page of results:
+         */
+        marker = Some(page.last().unwrap().id);
+
+        for job in page {
+            out.push(super::user::Job::load(log, c, &job).await.or_500()?);
+        }
+
+        /*
+         * Let other people have a turn...
+         */
+        tokio::task::yield_now().await;
     }
 
     Ok(HttpResponseOk(out))
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JobScan {
+    #[serde(default)]
+    recent_first: bool,
+    tag: Option<String>,
+}
+
+impl From<JobSelect> for JobScan {
+    fn from(sel: JobSelect) -> Self {
+        JobScan { recent_first: sel.recent_first, tag: sel.tag }
+    }
+}
+
+impl JobScan {
+    /*
+     * XXX Parse the tag filter specifier: NAME=VALUE|NAME=VALUE|...
+     */
+    fn tag(&self) -> DSResult<Option<Vec<(String, String)>>> {
+        if let Some(tag) = self.tag.as_deref() {
+            let mut out = Vec::new();
+
+            for s in tag.split('|') {
+                if let Some((k, v)) = s.split_once('=') {
+                    out.push((k.to_string(), v.to_string()));
+                } else {
+                    return Err(HttpError::for_bad_request(
+                        Some("EINVAL".into()),
+                        "invalid tag filter".into(),
+                    ));
+                }
+            }
+
+            Ok(Some(out))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub(crate) struct JobSelect {
+    id: String,
+    #[serde(default)]
+    recent_first: bool,
+    tag: Option<String>,
+}
+
+impl JobSelect {
+    fn id(&self) -> DSResult<db::JobId> {
+        db::JobId::from_str(&self.id).or_500()
+    }
+
+    fn from_scan(scan: &JobScan, id: &str) -> Self {
+        JobSelect {
+            id: id.to_string(),
+            recent_first: scan.recent_first,
+            tag: scan.tag.clone(),
+        }
+    }
+}
+
+#[endpoint {
+    method = GET,
+    path = "/1/jobs",
+}]
+pub(crate) async fn jobs_list(
+    rqctx: RequestContext<Arc<Central>>,
+    pag: TypedQuery<PaginationParams<JobScan, JobSelect>>,
+) -> DSResult<HttpResponseOk<ResultsPage<JobListEntry>>> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let owner = c.require_user(log, &rqctx.request).await?;
+
+    let pag = pag.into_inner();
+    let (marker, scan) = match pag.page {
+        WhichPage::First(scan) => (None, scan),
+        WhichPage::Next(sel) => (Some(sel.id()?), sel.into()),
+    };
+
+    Ok(HttpResponseOk(ResultsPage::new(
+        c.db.jobs_page(
+            /*
+             * If the user requests recent jobs first in the result set, we need
+             * a descending sort by job ID.  (ULIDs sort properly by creation
+             * time.)
+             */
+            !scan.recent_first,
+            marker,
+            1000,
+            Some(owner.id),
+            None,
+            None,
+            scan.tag()?,
+        )
+        .or_500()?
+        .into_iter()
+        .map(JobListEntry::from)
+        .collect(),
+        &scan,
+        |a, scan| JobSelect::from_scan(scan, &a.id),
+    )?))
+}
+
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct JobListEntry {
+    pub(crate) id: String,
+    owner: String,
+    name: String,
+    state: String,
+    cancelled: bool,
+    /**
+     * The original target name specified by the user when the job was created.
+     */
+    target: String,
+    /**
+     * The resolved ID of the concrete target on which this job ran.
+     */
+    target_id: String,
+}
+
+impl From<db::Job> for JobListEntry {
+    fn from(job: db::Job) -> Self {
+        JobListEntry {
+            state: format_job_state(&job),
+            target_id: job.target().to_string(),
+            id: job.id.to_string(),
+            name: job.name,
+            owner: job.owner.to_string(),
+            cancelled: job.cancelled,
+            target: job.target,
+        }
+    }
 }
 
 #[derive(Serialize, JsonSchema)]

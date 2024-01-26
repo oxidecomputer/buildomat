@@ -13,6 +13,7 @@ mod prelude {
         Path as TypedPath, Query as TypedQuery, RequestContext, ResultsPage,
         TypedBody, UntypedBody, WhichPage,
     };
+    pub use futures::TryStreamExt;
     pub use hyper::header::{CONTENT_LENGTH, CONTENT_TYPE};
     pub use hyper::StatusCode;
     pub use hyper::{Body, Response};

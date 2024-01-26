@@ -781,6 +781,7 @@ async fn do_job_list(mut l: Level<Stuff>) -> Result<()> {
 
     l.optmulti("T", "", "job tag filter", "TAG=VALUE");
     l.optopt("F", "", "job state filter", "STATE");
+    l.optflag("U", "", "do not sort locally; just stream results from server");
 
     let a = no_args!(l);
     let ftags = a
@@ -793,18 +794,29 @@ async fn do_job_list(mut l: Level<Stuff>) -> Result<()> {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
         })
         .collect::<Result<Vec<_>>>()?;
+
     let fstate = a.opts().opt_str("F");
+    let unsorted = a.opts().opt_present("U");
 
     let mut t = a.table();
 
-    for job in l.context().user().jobs_get().send().await?.into_inner() {
-        if ftags.iter().any(|(k, v)| {
-            let jv = job.tags.get(k);
-            jv != Some(v)
-        }) {
-            continue;
-        }
+    if unsorted {
+        print!("{}", t.output_unsorted_header()?);
+    }
 
+    let mut jobs = l.context().user().jobs_list();
+    if !ftags.is_empty() {
+        jobs = jobs.tag(
+            ftags
+                .into_iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+                .join("|"),
+        );
+    }
+    let mut jobs = jobs.recent_first(unsorted).stream();
+
+    while let Some(job) = jobs.try_next().await? {
         if let Some(s) = &fstate {
             if s != &job.state {
                 continue;
@@ -839,10 +851,17 @@ async fn do_job_list(mut l: Level<Stuff>) -> Result<()> {
             );
             r.add_str("state", &job.state);
         }
-        t.add_row(r);
+
+        if unsorted {
+            print!("{}", t.output_unsorted(r)?);
+        } else {
+            t.add_row(r);
+        }
     }
 
-    print!("{}", t.output()?);
+    if !unsorted {
+        print!("{}", t.output()?);
+    }
     Ok(())
 }
 
@@ -2143,7 +2162,134 @@ async fn do_admin_job_archive(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_admin_job_list(mut l: Level<Stuff>) -> Result<()> {
+    l.add_column("id", WIDTH_ID, true);
+    l.add_column("age", 8, true);
+    l.add_column("s", 1, true);
+    l.add_column("name", 32, true);
+    l.add_column("state", 15, false);
+    l.add_column("user", 30, true);
+    l.add_column("target", 20, true);
+    l.add_column("creation", WIDTH_ISODATE, false);
+
+    l.optmulti("T", "", "job tag filter", "TAG=VALUE");
+    l.optopt("F", "", "job state filter", "STATE");
+    l.optflag("U", "", "do not sort locally; just stream results from server");
+
+    let a = no_args!(l);
+    let ftags = a
+        .opts()
+        .opt_strs("T")
+        .iter()
+        .map(|a| {
+            a.split_once('=')
+                .ok_or_else(|| anyhow!("invalid tag filter"))
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let fstate = a.opts().opt_str("F");
+    let unsorted = a.opts().opt_present("U");
+
+    let mut t = a.table();
+
+    if unsorted {
+        print!("{}", t.output_unsorted_header()?);
+    }
+
+    /*
+     * Get a list of targets first so that we can print resolved target names in
+     * a column.
+     */
+    let targs = l.context().admin().targets_list().send().await?.into_inner();
+    let users = l.context().admin().users_list().send().await?.into_inner();
+
+    let mut jobs = l.context().admin().admin_jobs_list();
+    if !ftags.is_empty() {
+        jobs = jobs.tag(
+            ftags
+                .into_iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+                .join("|"),
+        );
+    }
+    let mut jobs = jobs.recent_first(unsorted).stream();
+
+    while let Some(job) = jobs.try_next().await? {
+        if let Some(s) = &fstate {
+            if s != &job.state {
+                continue;
+            }
+        }
+
+        let id = job.id()?;
+
+        let mut r = Row::default();
+        r.add_str("id", &job.id);
+        r.add_str("name", &job.name);
+        r.add_str(
+            "creation",
+            id.creation().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        );
+        r.add_age("age", id.age());
+        if job.state == "failed" && job.cancelled {
+            r.add_str("s", "X");
+            r.add_str("state", "cancelled");
+        } else {
+            r.add_str(
+                "s",
+                match job.state.as_str() {
+                    /*
+                     * Terminal states in upper case:
+                     */
+                    "failed" => "F",
+                    "completed" => "C",
+                    /*
+                     * Non-terminal states in lower case:
+                     */
+                    "running" => "r",
+                    "waiting" => "w",
+                    "queued" => "q",
+
+                    _ => "?",
+                },
+            );
+            r.add_str("state", &job.state);
+        }
+        if let Some(t) = targs.iter().find(|t| t.id == job.target_id) {
+            r.add_str("target", &t.name);
+        } else {
+            /*
+             * This should not happen.  It implies a target was used for a job
+             * in the past, but is now missing from the system.
+             */
+            r.add_str("target", "?MISSING");
+        }
+        if let Some(u) = users.iter().find(|u| u.id == job.owner) {
+            r.add_str("user", &u.name);
+        } else {
+            /*
+             * This should not happen.  It implies a user ran this job, but is
+             * now missing.
+             */
+            r.add_str("user", "?MISSING");
+        }
+
+        if unsorted {
+            print!("{}", t.output_unsorted(r)?);
+        } else {
+            t.add_row(r);
+        }
+    }
+
+    if !unsorted {
+        print!("{}", t.output()?);
+    }
+    Ok(())
+}
 async fn do_admin_job(mut l: Level<Stuff>) -> Result<()> {
+    l.cmda("list", "ls", "list jobs", cmd!(do_admin_job_list))?;
     l.cmd("archive", "request archive of a job", cmd!(do_admin_job_archive))?;
     l.cmd("dump", "dump information about jobs", cmd!(do_admin_job_dump))?;
 
@@ -2164,6 +2310,8 @@ async fn do_admin(mut l: Level<Stuff>) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    sigpipe::reset();
+
     let mut l = Level::new("buildomat", Stuff::default());
     l.optopt("p", "profile", "authentication and server profile", "PROFILE");
     l.optopt("D", "delegate", "act as another user account", "USERNAME");

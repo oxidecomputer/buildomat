@@ -278,8 +278,8 @@ pub(crate) async fn admin_jobs_get(
         /*
          * We have been asked to list only active jobs:
          */
-        let mut jobs = c.db.jobs_active().or_500()?;
-        jobs.extend(c.db.jobs_waiting().or_500()?);
+        let mut jobs = c.db.jobs_active(10_000).or_500()?;
+        jobs.extend(c.db.jobs_waiting(10_000).or_500()?);
         jobs
     } else if let Some(n) = &q.completed {
         /*
@@ -288,9 +288,13 @@ pub(crate) async fn admin_jobs_get(
         c.db.jobs_completed((*n).try_into().unwrap()).or_500()?
     } else {
         /*
-         * By default we list all jobs in the database.
+         * We refuse to list jobs without a filter as there are potentially
+         * hundreds of thousands of jobs in the database.
          */
-        c.db.jobs_all().or_500()?
+        return Err(HttpError::for_bad_request(
+            Some("EINVAL".into()),
+            "cannot list jobs without a filter".into(),
+        ));
     };
 
     let mut out = Vec::new();
@@ -299,6 +303,107 @@ pub(crate) async fn admin_jobs_get(
     }
 
     Ok(HttpResponseOk(out))
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JobScan {
+    #[serde(default)]
+    recent_first: bool,
+    tag: Option<String>,
+}
+
+impl From<JobSelect> for JobScan {
+    fn from(sel: JobSelect) -> Self {
+        JobScan { recent_first: sel.recent_first, tag: sel.tag }
+    }
+}
+
+impl JobScan {
+    fn tag(&self) -> DSResult<Option<Vec<(String, String)>>> {
+        if let Some(tag) = self.tag.as_deref() {
+            let mut out = Vec::new();
+
+            for s in tag.split('|') {
+                if let Some((k, v)) = s.split_once('=') {
+                    out.push((k.to_string(), v.to_string()));
+                } else {
+                    return Err(HttpError::for_bad_request(
+                        Some("EINVAL".into()),
+                        "invalid tag filter".into(),
+                    ));
+                }
+            }
+
+            Ok(Some(out))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub(crate) struct JobSelect {
+    id: String,
+    #[serde(default)]
+    recent_first: bool,
+    tag: Option<String>,
+}
+
+impl JobSelect {
+    fn id(&self) -> DSResult<db::JobId> {
+        db::JobId::from_str(&self.id).or_500()
+    }
+
+    fn from_scan(scan: &JobScan, id: &str) -> Self {
+        JobSelect {
+            id: id.to_string(),
+            recent_first: scan.recent_first,
+            tag: scan.tag.clone(),
+        }
+    }
+}
+
+#[endpoint {
+    method = GET,
+    path = "/1/admin/jobs",
+}]
+pub(crate) async fn admin_jobs_list(
+    rqctx: RequestContext<Arc<Central>>,
+    pag: TypedQuery<PaginationParams<JobScan, JobSelect>>,
+) -> DSResult<HttpResponseOk<ResultsPage<super::user::JobListEntry>>> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    c.require_admin(log, &rqctx.request, "job.read").await?;
+
+    let pag = pag.into_inner();
+    let (marker, scan) = match pag.page {
+        WhichPage::First(scan) => (None, scan),
+        WhichPage::Next(sel) => (Some(sel.id()?), sel.into()),
+    };
+
+    Ok(HttpResponseOk(ResultsPage::new(
+        c.db.jobs_page(
+            /*
+             * If the user requests recent jobs first in the result set, we need
+             * a descending sort by job ID.  (ULIDs sort properly by creation
+             * time.)
+             */
+            !scan.recent_first,
+            marker,
+            1000,
+            None,
+            None,
+            None,
+            scan.tag()?,
+        )
+        .or_500()?
+        .into_iter()
+        .map(super::user::JobListEntry::from)
+        .collect(),
+        &scan,
+        |a, scan| JobSelect::from_scan(scan, &a.id),
+    )?))
 }
 
 #[endpoint {

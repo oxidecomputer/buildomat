@@ -1,3 +1,7 @@
+/*
+ * Copyright 2024 Oxide Computer Company
+ */
+
 use anyhow::Result;
 use rusty_ulid::Ulid;
 use std::{str::FromStr, time::Duration};
@@ -34,6 +38,12 @@ impl ClientIdExt for crate::types::Worker {
 }
 
 impl ClientIdExt for crate::types::Job {
+    fn id(&self) -> Result<Ulid> {
+        to_ulid(&self.id)
+    }
+}
+
+impl ClientIdExt for crate::types::JobListEntry {
     fn id(&self) -> Result<Ulid> {
         to_ulid(&self.id)
     }

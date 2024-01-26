@@ -10,7 +10,10 @@ use buildomat_common::*;
 use buildomat_database::{conflict, DBResult, FromRow, Handle, Sqlite};
 use buildomat_types::*;
 use chrono::prelude::*;
-use sea_query::{Asterisk, Expr, Order, Query, SelectStatement};
+use sea_query::{
+    all, Alias, Asterisk, Cond, Expr, Iden, Order, Query, SeaRc,
+    SelectStatement, TableRef,
+};
 #[allow(unused_imports)]
 use slog::{debug, error, info, warn, Logger};
 
@@ -616,73 +619,155 @@ impl Database {
     }
 
     /**
-     * Enumerate all jobs.
+     * Fetch a page of jobs from the database according to the specified
+     * filters.
      */
-    pub fn jobs_all(&self) -> DBResult<Vec<Job>> {
-        self.sql.tx(|h| {
-            h.get_rows(
-                Query::select()
-                    .from(JobDef::Table)
-                    .columns(Job::columns())
-                    .order_by(JobDef::Id, Order::Asc)
-                    .to_owned(),
+    pub fn jobs_page(
+        &self,
+        ascending: bool,
+        marker: Option<JobId>,
+        limit: usize,
+        owner: Option<UserId>,
+        complete: Option<bool>,
+        waiting: Option<bool>,
+        tags: Option<Vec<(String, String)>>,
+    ) -> DBResult<Vec<Job>> {
+        let mut q = Query::select()
+            .from(JobDef::Table)
+            .columns(Job::columns())
+            .and_where_option(
+                owner
+                    .map(|id| Expr::col((JobDef::Table, JobDef::Owner)).eq(id)),
             )
-        })
+            .and_where_option(
+                complete.map(|v| {
+                    Expr::col((JobDef::Table, JobDef::Complete)).eq(v)
+                }),
+            )
+            .and_where_option(
+                waiting
+                    .map(|v| Expr::col((JobDef::Table, JobDef::Waiting)).eq(v)),
+            )
+            .conditions(
+                ascending,
+                |q| {
+                    q.and_where_option(marker.map(|id| {
+                        Expr::col((JobDef::Table, JobDef::Id)).gt(id)
+                    }));
+                },
+                |q| {
+                    q.and_where_option(marker.map(|id| {
+                        Expr::col((JobDef::Table, JobDef::Id)).lt(id)
+                    }));
+                },
+            )
+            .limit(limit.try_into().unwrap())
+            .to_owned();
+
+        let q = if let Some(tags) = tags {
+            if tags.is_empty() {
+                conflict!("if tags are specified the list must not be empty");
+            }
+
+            if tags.len() > 8 {
+                conflict!("too many tags specified");
+            }
+
+            /*
+             * Build up the conjunction of all tag-value queries:
+             */
+            let mut tagcond = Cond::all();
+
+            /*
+             * Querying by tag is complex: each tag-value pair is in its own
+             * row, but we only want a single row per job in the output if _all_
+             * of the requested tag-value filters match.  To achieve this, we
+             * join with the tags table multiple times, as if there were a table
+             * per tag name.  Care must be taken to ensure that we can actually
+             * use the indexes on the tag table to keep this relatively cheap.
+             */
+            for (i, (k, v)) in tags.into_iter().enumerate() {
+                /*
+                 * We need to be able to refer to each alias of the tags table
+                 * that appears in the join.  Create a unique alias:
+                 */
+                let tagn: SeaRc<dyn Iden> = SeaRc::new(Alias::new(format!(
+                    "{}{i}",
+                    JobTagDef::Table.to_string(),
+                )));
+
+                tagcond = tagcond.add(all![
+                    Expr::col((tagn.clone(), JobTagDef::Name)).eq(k),
+                    Expr::col((tagn.clone(), JobTagDef::Value)).eq(v),
+                ]);
+
+                /*
+                 * Add the join for this tag-value filter using the alias we
+                 * created:
+                 */
+                q = q
+                    .inner_join(
+                        TableRef::TableAlias(
+                            SeaRc::new(JobTagDef::Table),
+                            tagn.clone(),
+                        ),
+                        Expr::col((tagn.clone(), JobTagDef::Job))
+                            .eq(Expr::col((JobDef::Table, JobDef::Id))),
+                    )
+                    .to_owned();
+
+                /*
+                 * If this is the first alias in the list, use the job field to
+                 * sort.  Using the job field from the tags table, rather than
+                 * the ID field from the jobs table, appears to convince SQLite
+                 * that it need not do a temporary sort at the end.
+                 */
+                if i == 0 {
+                    q = q
+                        .order_by(
+                            (tagn.clone(), JobTagDef::Job),
+                            if ascending { Order::Asc } else { Order::Desc },
+                        )
+                        .to_owned();
+                }
+            }
+
+            q.cond_where(tagcond).to_owned()
+        } else {
+            q.order_by(
+                (JobDef::Table, JobDef::Id),
+                if ascending { Order::Asc } else { Order::Desc },
+            )
+            .to_owned()
+        };
+
+        self.sql.tx(|h| h.get_rows(q))
     }
 
     /**
      * Enumerate jobs that are active; i.e., not yet complete, but not waiting.
      */
-    pub fn jobs_active(&self) -> DBResult<Vec<Job>> {
-        self.sql.tx(|h| {
-            h.get_rows(
-                Query::select()
-                    .from(JobDef::Table)
-                    .columns(Job::columns())
-                    .order_by(JobDef::Id, Order::Asc)
-                    .and_where(Expr::col(JobDef::Complete).eq(false))
-                    .and_where(Expr::col(JobDef::Waiting).eq(false))
-                    .to_owned(),
-            )
-        })
+    pub fn jobs_active(&self, limit: usize) -> DBResult<Vec<Job>> {
+        self.jobs_page(true, None, limit, None, Some(false), Some(false), None)
     }
 
     /**
      * Enumerate jobs that are waiting for inputs, or for dependees to complete.
      */
-    pub fn jobs_waiting(&self) -> DBResult<Vec<Job>> {
-        self.sql.tx(|h| {
-            h.get_rows(
-                Query::select()
-                    .from(JobDef::Table)
-                    .columns(Job::columns())
-                    .order_by(JobDef::Id, Order::Asc)
-                    .and_where(Expr::col(JobDef::Complete).eq(false))
-                    .and_where(Expr::col(JobDef::Waiting).eq(true))
-                    .to_owned(),
-            )
-        })
+    pub fn jobs_waiting(&self, limit: usize) -> DBResult<Vec<Job>> {
+        self.jobs_page(true, None, limit, None, Some(false), Some(true), None)
     }
 
     /**
      * Enumerate some number of the most recently complete jobs.
      */
     pub fn jobs_completed(&self, limit: usize) -> DBResult<Vec<Job>> {
-        self.sql.tx(|h| {
-            let mut res = h.get_rows(
-                Query::select()
-                    .from(JobDef::Table)
-                    .columns(Job::columns())
-                    .order_by(JobDef::Id, Order::Desc)
-                    .and_where(Expr::col(JobDef::Complete).eq(true))
-                    .limit(limit.try_into().unwrap())
-                    .to_owned(),
-            )?;
+        let mut res =
+            self.jobs_page(false, None, limit, None, Some(true), None, None)?;
 
-            res.reverse();
+        res.reverse();
 
-            Ok(res)
-        })
+        Ok(res)
     }
 
     fn q_job_tasks(&self, job: JobId) -> SelectStatement {
@@ -1774,18 +1859,6 @@ impl Database {
         assert_eq!(ic, 1);
 
         Ok(())
-    }
-
-    pub fn user_jobs(&self, owner: UserId) -> DBResult<Vec<Job>> {
-        self.sql.tx(|h| {
-            h.get_rows(
-                Query::select()
-                    .from(JobDef::Table)
-                    .columns(Job::columns())
-                    .and_where(Expr::col(JobDef::Owner).eq(owner))
-                    .to_owned(),
-            )
-        })
     }
 
     pub fn worker_job(&self, worker: WorkerId) -> DBResult<Option<Job>> {
