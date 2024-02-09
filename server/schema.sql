@@ -296,3 +296,7 @@ CREATE INDEX job_archiving_queue ON job (id, complete, time_archived)
 
 -- v 48
 CREATE INDEX job_tag_search ON job_tag (name, value, job);
+
+-- v 49
+CREATE INDEX job_file_archiving_queue ON job_file (id, time_archived)
+    WHERE time_archived IS NULL;

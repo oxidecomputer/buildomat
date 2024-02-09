@@ -1340,9 +1340,9 @@ impl Database {
         self.sql.tx(|h| {
             h.get_row_opt(
                 Query::select()
-                    .from(JobDef::Table)
+                    .from(JobFileDef::Table)
                     .inner_join(
-                        JobFileDef::Table,
+                        JobDef::Table,
                         Expr::col((JobDef::Table, JobDef::Id)).eq(Expr::col((
                             JobFileDef::Table,
                             JobFileDef::Job,
