@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 #![allow(clippy::many_single_char_names)]
@@ -33,6 +33,7 @@ use buildomat_types::*;
 mod control;
 mod download;
 mod exec;
+mod shadow;
 #[cfg(target_os = "illumos")]
 mod uadmin;
 mod upload;
@@ -41,9 +42,11 @@ use control::protocol::Payload;
 use exec::ExitDetails;
 
 const CONFIG_PATH: &str = "/opt/buildomat/etc/agent.json";
+const JOB_PATH: &str = "/opt/buildomat/etc/job.json";
 const AGENT: &str = "/opt/buildomat/lib/agent";
 const INPUT_PATH: &str = "/input";
 const CONTROL_PROGRAM: &str = "bmat";
+const SHADOW: &str = "/etc/shadow";
 #[cfg(target_os = "illumos")]
 mod os_constants {
     pub const METHOD: &str = "/opt/buildomat/lib/start.sh";
@@ -297,6 +300,18 @@ impl ClientWrap {
         }
     }
 
+    async fn report_failure(&self) {
+        loop {
+            match self.client.worker_fail().send().await {
+                Ok(_) => return,
+                Err(e) => {
+                    println!("ERROR: reporting failure: {:?}", e);
+                    sleep_ms(1000).await;
+                }
+            }
+        }
+    }
+
     async fn chunk(&self, buf: bytes::Bytes) -> String {
         loop {
             match self
@@ -542,6 +557,19 @@ fn hard_reset() -> Result<()> {
     Ok(())
 }
 
+fn set_root_password_hash(hash: &str) -> Result<()> {
+    /*
+     * Install the provided root password hash into shadow(5) so that console
+     * logins are possible.
+     */
+    let mut f = shadow::ShadowFile::load(SHADOW)?;
+    f.password_set("root", hash)?;
+    f.write(SHADOW)?;
+
+    println!("root password hash was set!");
+    Ok(())
+}
+
 enum Stage {
     Ready,
     Download(mpsc::Receiver<download::Activity>),
@@ -549,6 +577,7 @@ enum Stage {
     Child(mpsc::Receiver<exec::Activity>, WorkerPingTask, Option<bool>),
     Upload(mpsc::Receiver<upload::Activity>),
     Complete,
+    Broken,
 }
 
 async fn cmd_install(mut l: Level<()>) -> Result<()> {
@@ -740,9 +769,50 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
     let mut bgprocs = exec::BackgroundProcesses::new();
 
     let mut metadata: Option<metadata::FactoryMetadata> = None;
+    let mut set_root_password = false;
+
+    /*
+     * Check for a file containing a description of the job we are running.  If
+     * this file exists, it must have been written by a previous agent process
+     * inside this same worker.  Neither the agent process nor the job model in
+     * general can really handle tasks being started a second time.  If we find
+     * any evidence that we've done this before, we must report it to the
+     * central server and do nothing else.
+     */
+    if PathBuf::from(JOB_PATH).try_exists()? {
+        println!("ERROR: found previously assigned job; reporting failure");
+
+        /*
+         * Report this condition to the server:
+         */
+        cw.report_failure().await;
+
+        /*
+         * We need to park and do nothing other than continue to ping the server
+         * waiting to be told to power off the instance.
+         */
+        stage = Stage::Broken;
+    }
 
     let mut do_ping = true;
     loop {
+        if let Some(md) = &metadata {
+            if !set_root_password {
+                if let Some(rph) = md.root_password_hash() {
+                    if let Err(e) = set_root_password_hash(rph) {
+                        println!("ERROR: setting root password: {e}");
+                    }
+
+                    /*
+                     * This facility is just for diagnostic purposes.  If for
+                     * some reason it does not work out, don't try again and
+                     * don't interrupt the other operation of the agent.
+                     */
+                    set_root_password = true;
+                }
+            }
+        }
+
         if do_ping {
             match cw.client.worker_ping().send().await {
                 Err(e) => {
@@ -764,7 +834,8 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                     /*
                      * If we have not yet been assigned a task, check for one:
                      */
-                    if cw.job_id().is_none() {
+                    if !matches!(stage, Stage::Broken) && cw.job_id().is_none()
+                    {
                         assert!(matches!(stage, Stage::Ready));
 
                         if let Some(j) = &p.job {
@@ -777,6 +848,24 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                                 j.id,
                                 j.tasks.len()
                             );
+
+                            /*
+                             * Write the job assignment to a file for diagnostic
+                             * purposes, and to serve as a marker file in case
+                             * of agent or system restart.
+                             */
+                            {
+                                let diag = serde_json::to_vec_pretty(&p)?;
+                                let mut jf = std::fs::OpenOptions::new()
+                                    .create_new(true)
+                                    .create(false)
+                                    .write(true)
+                                    .open(JOB_PATH)?;
+                                jf.write_all(&diag)?;
+                                jf.flush()?;
+                                jf.sync_all()?;
+                            }
+
                             tasks.clear();
                             tasks.extend(j.tasks.iter().cloned());
                             cw.start_job(j.clone()).await;
@@ -837,14 +926,12 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                         Err(e) => Payload::Error(e.to_string()),
                     }
                 }
-                Payload::MetadataAddresses => {
-                    Payload::MetadataAddressesResult(match metadata.as_ref() {
-                        Some(metadata::FactoryMetadata::V1(md)) => {
-                            md.addresses.clone()
-                        }
-                        _ => Default::default(),
-                    })
-                }
+                Payload::MetadataAddresses => Payload::MetadataAddressesResult(
+                    metadata
+                        .as_ref()
+                        .map(|md| md.addresses().to_vec())
+                        .unwrap_or_default(),
+                ),
                 Payload::ProcessStart {
                     name,
                     cmd,
@@ -866,7 +953,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
         }
 
         match &mut stage {
-            Stage::Ready | Stage::Complete => {
+            Stage::Ready | Stage::Complete | Stage::Broken => {
                 /*
                  * If we are not working on something, just sleep for a
                  * second and ping again in case there is a new directive.

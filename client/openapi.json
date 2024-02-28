@@ -104,6 +104,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FactoryEnable"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "204": {
             "description": "resource updated"
@@ -421,9 +431,71 @@
         }
       }
     },
+    "/0/admin/worker/{worker}/hold": {
+      "post": {
+        "operationId": "worker_hold_mark",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerHoldMark"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/0/admin/worker/{worker}/recycle": {
       "post": {
         "operationId": "worker_recycle",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/0/admin/worker/{worker}/release": {
+      "post": {
+        "operationId": "worker_hold_release",
         "parameters": [
           {
             "in": "path",
@@ -1521,6 +1593,22 @@
         }
       }
     },
+    "/0/worker/fail": {
+      "post": {
+        "operationId": "worker_fail",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/0/worker/job/{job}/chunk": {
       "post": {
         "operationId": "worker_job_upload_chunk",
@@ -2279,6 +2367,9 @@
           "enable": {
             "type": "boolean"
           },
+          "hold_workers": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           },
@@ -2293,6 +2384,7 @@
         },
         "required": [
           "enable",
+          "hold_workers",
           "id",
           "name"
         ]
@@ -2360,6 +2452,15 @@
           "token"
         ]
       },
+      "FactoryEnable": {
+        "type": "object",
+        "properties": {
+          "hold_workers": {
+            "default": false,
+            "type": "boolean"
+          }
+        }
+      },
       "FactoryLease": {
         "type": "object",
         "properties": {
@@ -2399,6 +2500,10 @@
                 "items": {
                   "$ref": "#/components/schemas/FactoryAddresses"
                 }
+              },
+              "root_password_hash": {
+                "nullable": true,
+                "type": "string"
               },
               "v": {
                 "type": "string",
@@ -2444,6 +2549,9 @@
           "bootstrap": {
             "type": "string"
           },
+          "hold": {
+            "type": "boolean"
+          },
           "id": {
             "type": "string"
           },
@@ -2460,6 +2568,7 @@
         },
         "required": [
           "bootstrap",
+          "hold",
           "id",
           "online",
           "recycle"
@@ -3197,6 +3306,14 @@
             "nullable": true,
             "type": "string"
           },
+          "hold": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkerHold"
+              }
+            ]
+          },
           "id": {
             "type": "string"
           },
@@ -3363,6 +3480,33 @@
         },
         "required": [
           "failed"
+        ]
+      },
+      "WorkerHold": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "reason",
+          "time"
+        ]
+      },
+      "WorkerHoldMark": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
         ]
       },
       "WorkerJob": {

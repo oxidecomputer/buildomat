@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use super::prelude::*;
@@ -206,13 +206,50 @@ pub(crate) async fn worker_ping(
         }
     };
 
-    let res = WorkerPingResult {
-        poweroff: w.recycle || w.deleted,
-        job,
-        factory_metadata,
+    let poweroff = if w.is_held() {
+        /*
+         * If the worker is on hold, we don't want to power it off as this would
+         * destroy at least some of the evidence we are trying to preserve for
+         * investigation.
+         */
+        false
+    } else {
+        w.recycle || w.deleted
     };
 
+    let res = WorkerPingResult { poweroff, job, factory_metadata };
+
     Ok(HttpResponseOk(res))
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/worker/fail",
+}]
+pub(crate) async fn worker_fail(
+    rqctx: RequestContext<Arc<Central>>,
+) -> DSResult<HttpResponseUpdatedNoContent> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let w = c.require_worker(log, &rqctx.request).await?;
+
+    warn!(log, "worker failed!"; "id" => w.id.to_string());
+
+    /*
+     * Record in the database that the worker has failed.  This routine will
+     * take care of reporting failure in any assigned jobs, marking the worker
+     * as held, etc.
+     */
+    let failed_jobs = c.db.worker_mark_failed(w.id).or_500()?;
+    if !failed_jobs.is_empty() {
+        warn!(
+            log,
+            "worker {} failing caused jobs {:?} to fail", w.id, failed_jobs,
+        );
+    }
+
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 #[endpoint {

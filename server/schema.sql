@@ -300,3 +300,15 @@ CREATE INDEX job_tag_search ON job_tag (name, value, job);
 -- v 49
 CREATE INDEX job_file_archiving_queue ON job_file (id, time_archived)
     WHERE time_archived IS NULL;
+
+-- v 50
+ALTER TABLE worker ADD COLUMN
+    hold_time       TEXT;
+
+-- v 51
+ALTER TABLE worker ADD COLUMN
+    hold_reason     TEXT;
+
+-- v 52
+ALTER TABLE factory ADD COLUMN
+    hold_workers    INTEGER NOT NULL    DEFAULT 0;

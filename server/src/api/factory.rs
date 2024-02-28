@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use super::prelude::*;
@@ -74,6 +74,7 @@ pub(crate) struct FactoryWorker {
     recycle: bool,
     bootstrap: String,
     online: bool,
+    hold: bool,
 }
 
 impl From<&db::Worker> for FactoryWorker {
@@ -81,9 +82,16 @@ impl From<&db::Worker> for FactoryWorker {
         FactoryWorker {
             id: w.id.to_string(),
             private: w.factory_private.as_ref().map(|s| s.to_string()),
-            recycle: w.recycle,
+            /*
+             * If a worker is marked on hold, do not tell the factory to recycle
+             * that worker even if it is otherwise eligible.  When investigation
+             * of the instance is over, the hold can be lifted and recycling can
+             * begin.
+             */
+            recycle: !w.is_held() && w.recycle,
             bootstrap: w.bootstrap.to_string(),
             online: w.token.is_some(),
+            hold: w.is_held(),
         }
     }
 }
@@ -372,7 +380,13 @@ pub(crate) async fn factory_worker_create(
     let t = c.db.target(b.target()?).or_500()?;
     let j = b.job()?;
 
-    let w = c.db.worker_create(&f, &t, j, b.wait_for_flush).or_500()?;
+    let hold = if f.hold_workers {
+        Some("factory is configured to hold all created workers")
+    } else {
+        None
+    };
+
+    let w = c.db.worker_create(&f, &t, j, b.wait_for_flush, hold).or_500()?;
     info!(log, "factory {} worker {} created (job {:?})", f.id, t.id, j);
 
     Ok(HttpResponseCreated(FactoryWorker::from(&w)))

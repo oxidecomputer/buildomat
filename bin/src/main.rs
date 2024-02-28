@@ -23,6 +23,39 @@ const WIDTH_ID: usize = 26;
 
 mod config;
 
+trait FlagsExt {
+    fn add_flags(&mut self, name: &'static str) -> Flags;
+}
+
+impl FlagsExt for Row {
+    #[must_use]
+    fn add_flags(&mut self, name: &'static str) -> Flags {
+        Flags { row: self, name, out: String::new() }
+    }
+}
+
+struct Flags<'a> {
+    row: &'a mut Row,
+    name: &'static str,
+    out: String,
+}
+
+impl<'a> Flags<'a> {
+    #[must_use]
+    fn flag(mut self, c: char, b: bool) -> Self {
+        if b {
+            self.out.push(c);
+        } else {
+            self.out.push('-');
+        }
+        self
+    }
+
+    fn build(self) {
+        self.row.add_str(self.name, &self.out);
+    }
+}
+
 trait ErrorWrapper<T, F> {
     fn wrap_with(self, makemsg: F) -> Result<T>
     where
@@ -1201,10 +1234,8 @@ async fn do_job_store_list(mut l: Level<Stuff>) -> Result<()> {
     for (name, ent) in store {
         let mut r = Row::default();
 
-        let flags = if ent.secret { "S" } else { "-" };
-
         r.add_str("name", &name);
-        r.add_str("flags", flags);
+        r.add_flags("flags").flag('S', ent.secret).build();
         r.add_str("value", ent.value.as_deref().unwrap_or("-"));
         r.add_str("source", &ent.source);
         r.add_age(
@@ -1396,12 +1427,17 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("creation", WIDTH_ISODATE, true);
     l.add_column("age", 8, true);
     l.add_column("info", 20, false);
+    l.add_column("target", WIDTH_ID, false);
+    l.add_column("hold_time", WIDTH_ISODATE, false);
+    l.add_column("hold_reason", 32, false);
 
     l.optflag("A", "active", "display only workers not yet destroyed");
+    l.optflag("h", "held", "display only workers that are marked on hold");
     l.optflag("U", "", "do not sort locally; just stream results from server");
 
     let a = no_args!(l);
     let active = a.opts().opt_present("active");
+    let held = a.opts().opt_present("held");
     let unsorted = a.opts().opt_present("U");
     let c = l.context();
 
@@ -1417,15 +1453,11 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
             continue;
         }
 
-        let id = w.id()?;
+        if held && (w.deleted || w.hold.is_none()) {
+            continue;
+        }
 
-        let flags = format!(
-            "{}{}{}{}",
-            if w.bootstrap { "B" } else { "-" },
-            if !w.jobs.is_empty() { "J" } else { "-" },
-            if w.recycle { "R" } else { "-" },
-            if w.deleted { "D" } else { "-" },
-        );
+        let id = w.id()?;
 
         let mut r = Row::default();
         r.add_str("id", &w.id);
@@ -1434,8 +1466,26 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
             id.creation().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         );
         r.add_age("age", id.age());
-        r.add_str("flags", flags);
+        r.add_flags("flags")
+            .flag('B', w.bootstrap)
+            .flag('J', !w.jobs.is_empty())
+            .flag('R', w.recycle)
+            .flag('D', w.deleted)
+            .flag('H', w.hold.is_some())
+            .build();
         r.add_str("info", w.factory_private.as_deref().unwrap_or("-"));
+        r.add_str("target", &w.target);
+
+        if let Some(hold) = &w.hold {
+            r.add_str("hold_reason", &hold.reason);
+            r.add_str(
+                "hold_time",
+                hold.time.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            );
+        } else {
+            r.add_str("hold_reason", "-");
+            r.add_str("hold_time", "-");
+        }
 
         if unsorted {
             print!("{}", t.output_unsorted(r)?);
@@ -1469,9 +1519,61 @@ async fn do_worker_recycle(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_worker_hold(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("WORKER..."));
+    l.reqopt("r", "", "specify the reason for the hold", "REASON");
+
+    let a = args!(l);
+    if a.args().is_empty() {
+        bad_args!(l, "specify a worker to mark as held");
+    }
+
+    let reason = a.opts().opt_str("r").unwrap();
+    if reason.trim().len() < 8 {
+        bail!("please specify a more in depth reason for the hold");
+    }
+
+    for arg in a.args() {
+        if let Err(e) = l
+            .context()
+            .admin()
+            .worker_hold_mark()
+            .worker(arg)
+            .body_map(|b| b.reason(reason.trim()))
+            .send()
+            .await
+        {
+            bail!("ERROR: marking {arg} as held: {e:?}");
+        }
+    }
+
+    Ok(())
+}
+
+async fn do_worker_release(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("WORKER..."));
+
+    let a = args!(l);
+    if a.args().is_empty() {
+        bad_args!(l, "specify a worker to release");
+    }
+
+    for arg in a.args() {
+        if let Err(e) =
+            l.context().admin().worker_hold_release().worker(arg).send().await
+        {
+            bail!("ERROR: releasing hold on {arg}: {e:?}");
+        }
+    }
+
+    Ok(())
+}
+
 async fn do_worker(mut l: Level<Stuff>) -> Result<()> {
     l.cmda("list", "ls", "list workers", cmd!(do_worker_list))?;
     l.cmd("recycle", "recycle a worker", cmd!(do_worker_recycle))?;
+    l.cmd("hold", "mark a worker as held", cmd!(do_worker_hold))?;
+    l.cmd("release", "release a held worker", cmd!(do_worker_release))?;
 
     sel!(l).run().await
 }
@@ -1525,15 +1627,23 @@ async fn do_factory_create(mut l: Level<Stuff>) -> Result<()> {
 
 async fn do_factory_enable(mut l: Level<Stuff>) -> Result<()> {
     l.usage_args(Some("FACTORY_ID|NAME"));
+    l.optflag("h", "", "mark new workers created by this factory as held");
 
     let a = args!(l);
+    let hold_workers = a.opts().opt_present("h");
 
     if a.args().len() != 1 {
         bad_args!(l, "specify name or ID of factory");
     }
     let id = l.context().factory_to_id(&a.args()[0]).await?;
 
-    l.context().admin().factory_enable().factory(&id).send().await?;
+    l.context()
+        .admin()
+        .factory_enable()
+        .factory(&id)
+        .body_map(|b| b.hold_workers(hold_workers))
+        .send()
+        .await?;
     Ok(())
 }
 
@@ -1608,14 +1718,12 @@ async fn do_factory_list(mut l: Level<Stuff>) -> Result<()> {
     let mut t = a.table();
 
     for f in l.context().admin().factories_list().send().await?.into_inner() {
-        let flags = [f.enable.then_some("E").unwrap_or("-")].join("");
-
         let mut r = Row::default();
         r.add_str("id", &f.id);
         r.add_str("name", &f.name);
         r.add_str(
             "last_ping",
-            &f.last_ping
+            f.last_ping
                 .map(|d| d.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
                 .as_deref()
                 .unwrap_or("-"),
@@ -1626,7 +1734,10 @@ async fn do_factory_list(mut l: Level<Stuff>) -> Result<()> {
                 .map(|d| d.age().as_secs().to_string())
                 .unwrap_or_else(|| "-".to_string()),
         );
-        r.add_str("flags", &flags);
+        r.add_flags("flags")
+            .flag('E', f.enable)
+            .flag('H', f.hold_workers)
+            .build();
         t.add_row(r);
     }
 

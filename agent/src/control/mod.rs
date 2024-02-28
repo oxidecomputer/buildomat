@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use std::{io::Read, ops::Range, time::Duration};
@@ -180,7 +180,7 @@ async fn cmd_address_list(mut l: Level<Stuff>) -> Result<()> {
                 r.add_str("cidr", &net.to_string());
                 r.add_str("first", &first.to_string());
                 r.add_str("last", &last.to_string());
-                r.add_u64("count", addr.count.try_into().unwrap());
+                r.add_u64("count", addr.count.into());
                 r.add_str("family", "inet");
                 r.add_str("network", &net.network().to_string());
                 r.add_str("mask", &net.netmask().to_string());

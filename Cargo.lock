@@ -680,6 +680,7 @@ dependencies = [
  "base64 0.13.1",
  "buildomat-client",
  "buildomat-common",
+ "buildomat-types",
  "chrono",
  "getopts",
  "rusoto_core",

@@ -909,6 +909,8 @@ async fn main() -> Result<()> {
     ad.register(api::admin::workers_list_old).api_check()?;
     ad.register(api::admin::workers_recycle).api_check()?;
     ad.register(api::admin::worker_recycle).api_check()?;
+    ad.register(api::admin::worker_hold_mark).api_check()?;
+    ad.register(api::admin::worker_hold_release).api_check()?;
     ad.register(api::admin::admin_job_get).api_check()?;
     ad.register(api::admin::admin_job_archive_request).api_check()?;
     ad.register(api::admin::admin_jobs_get).api_check()?;
@@ -942,6 +944,7 @@ async fn main() -> Result<()> {
     ad.register(api::user::whoami).api_check()?;
     ad.register(api::worker::worker_bootstrap).api_check()?;
     ad.register(api::worker::worker_ping).api_check()?;
+    ad.register(api::worker::worker_fail).api_check()?;
     ad.register(api::worker::worker_job_append).api_check()?;
     ad.register(api::worker::worker_job_append_one).api_check()?;
     ad.register(api::worker::worker_job_complete).api_check()?;

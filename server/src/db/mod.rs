@@ -11,7 +11,7 @@ use buildomat_database::{conflict, DBResult, FromRow, Handle, Sqlite};
 use buildomat_types::*;
 use chrono::prelude::*;
 use sea_query::{
-    all, Alias, Asterisk, Cond, Expr, Iden, Order, Query, SeaRc,
+    all, Alias, Asterisk, Cond, Expr, Iden, Keyword, Order, Query, SeaRc,
     SelectStatement, TableRef,
 };
 #[allow(unused_imports)]
@@ -189,16 +189,22 @@ impl Database {
         })
     }
 
+    pub fn i_worker_jobs(
+        &self,
+        h: &mut Handle,
+        worker: WorkerId,
+    ) -> DBResult<Vec<Job>> {
+        h.get_rows(
+            Query::select()
+                .from(JobDef::Table)
+                .columns(Job::columns())
+                .and_where(Expr::col(JobDef::Worker).eq(worker))
+                .to_owned(),
+        )
+    }
+
     pub fn worker_jobs(&self, worker: WorkerId) -> DBResult<Vec<Job>> {
-        self.sql.tx(|h| {
-            h.get_rows(
-                Query::select()
-                    .from(JobDef::Table)
-                    .columns(Job::columns())
-                    .and_where(Expr::col(JobDef::Worker).eq(worker))
-                    .to_owned(),
-            )
-        })
+        self.sql.tx(|h| self.i_worker_jobs(h, worker))
     }
 
     pub fn free_workers(&self) -> DBResult<Vec<Worker>> {
@@ -228,6 +234,14 @@ impl Database {
                         Expr::col((WorkerDef::Table, WorkerDef::Token))
                             .is_not_null(),
                     )
+                    /*
+                     * Workers that are marked as on hold are not eligible for
+                     * job assignment.
+                     */
+                    .and_where(
+                        Expr::col((WorkerDef::Table, WorkerDef::HoldTime))
+                            .is_null(),
+                    )
                     .to_owned(),
             )
         })
@@ -245,17 +259,19 @@ impl Database {
         })
     }
 
+    fn i_worker_recycle(&self, h: &mut Handle, id: WorkerId) -> DBResult<bool> {
+        Ok(h.exec_update(
+            Query::update()
+                .table(WorkerDef::Table)
+                .values([(WorkerDef::Recycle, true.into())])
+                .and_where(Expr::col(WorkerDef::Id).eq(id))
+                .and_where(Expr::col(WorkerDef::Deleted).eq(false))
+                .to_owned(),
+        )? > 0)
+    }
+
     pub fn worker_recycle(&self, id: WorkerId) -> DBResult<bool> {
-        self.sql.tx(|h| {
-            Ok(h.exec_update(
-                Query::update()
-                    .table(WorkerDef::Table)
-                    .values([(WorkerDef::Recycle, true.into())])
-                    .and_where(Expr::col(WorkerDef::Id).eq(id))
-                    .and_where(Expr::col(WorkerDef::Deleted).eq(false))
-                    .to_owned(),
-            )? > 0)
-        })
+        self.sql.tx(|h| self.i_worker_recycle(h, id))
     }
 
     pub fn worker_flush(&self, id: WorkerId) -> DBResult<bool> {
@@ -294,6 +310,135 @@ impl Database {
                     .to_owned(),
             )? > 0)
         })
+    }
+
+    fn i_worker_mark_on_hold(
+        &self,
+        h: &mut Handle,
+        id: WorkerId,
+        reason: &str,
+    ) -> DBResult<()> {
+        let w = self.i_worker(h, id)?;
+        if w.deleted {
+            conflict!("worker {id} is deleted; cannot be held");
+        }
+
+        if let Some(hold) = w.hold() {
+            conflict!("worker {id} is already on hold: {hold:?}");
+        }
+
+        let c = h.exec_update(
+            Query::update()
+                .table(WorkerDef::Table)
+                .value(WorkerDef::HoldTime, IsoDate::now())
+                .value(WorkerDef::HoldReason, reason)
+                .and_where(Expr::col(WorkerDef::Id).eq(w.id))
+                .and_where(Expr::col(WorkerDef::Deleted).eq(false))
+                .and_where(Expr::col(WorkerDef::HoldTime).is_null())
+                .and_where(Expr::col(WorkerDef::HoldReason).is_null())
+                .to_owned(),
+        )?;
+        assert_eq!(c, 1);
+
+        Ok(())
+    }
+
+    pub fn worker_mark_on_hold(
+        &self,
+        id: WorkerId,
+        reason: &str,
+    ) -> DBResult<()> {
+        self.sql.tx_immediate(|h| self.i_worker_mark_on_hold(h, id, reason))
+    }
+
+    pub fn worker_hold_release(&self, id: WorkerId) -> DBResult<bool> {
+        self.sql.tx_immediate(|h| {
+            let w = self.i_worker(h, id)?;
+            if !w.is_held() {
+                return Ok(false);
+            }
+
+            let c = h.exec_update(
+                Query::update()
+                    .table(WorkerDef::Table)
+                    .value(WorkerDef::HoldTime, Keyword::Null)
+                    .value(WorkerDef::HoldReason, Keyword::Null)
+                    .and_where(Expr::col(WorkerDef::Id).eq(w.id))
+                    .and_where(Expr::col(WorkerDef::Deleted).eq(false))
+                    .and_where(Expr::col(WorkerDef::HoldTime).is_not_null())
+                    .and_where(Expr::col(WorkerDef::HoldReason).is_not_null())
+                    .to_owned(),
+            )?;
+            assert_eq!(c, 1);
+
+            Ok(true)
+        })
+    }
+
+    pub fn worker_mark_failed(&self, id: WorkerId) -> DBResult<Vec<JobId>> {
+        self.sql.tx_immediate(|h| {
+            let w = self.i_worker(h, id)?;
+            if w.recycle || w.deleted {
+                /*
+                 * This worker has already been marked for deletion.
+                 */
+                return Ok(Default::default());
+            }
+
+            /*
+             * If a worker fails while a job was in flight, we need to report
+             * that condition in the job event stream and then mark that job as
+             * failed.
+             */
+            let mut failed_jobs: Vec<JobId> = Default::default();
+            for job in self.i_worker_jobs(h, id)? {
+                if job.complete || job.failed || job.cancelled {
+                    /*
+                     * The job is already finished one way or another, so don't
+                     * report anything here.
+                     */
+                    continue;
+                }
+
+                self.i_job_control_event_insert(
+                    h,
+                    job.id,
+                    "worker agent experienced a fatal error; aborting job",
+                )?;
+
+                self.i_job_complete(h, &job, true)?;
+
+                failed_jobs.push(job.id);
+            }
+
+            /*
+             * Mark the worker as on hold so that an operator can inspect it.
+             */
+            let mut reason = "agent reported failure".to_string();
+            if !failed_jobs.is_empty() {
+                reason.push_str(" during job execution");
+            }
+            self.i_worker_mark_on_hold(h, w.id, &reason)?;
+
+            /*
+             * The worker must not be re-used for a new job, so mark it recycled
+             * now.  The hold flag will prevent this from taking effect until
+             * after the operator releases the hold.
+             */
+            let recycled = self.i_worker_recycle(h, w.id)?;
+            assert!(recycled);
+
+            Ok(failed_jobs)
+        })
+    }
+
+    fn i_job_control_event_insert(
+        &self,
+        h: &mut Handle,
+        id: JobId,
+        msg: &str,
+    ) -> DBResult<()> {
+        self.i_job_event_insert(h, id, None, "control", Utc::now(), None, msg)
     }
 
     pub fn i_worker_assign_job(
@@ -346,13 +491,9 @@ impl Database {
             "".to_string()
         };
 
-        self.i_job_event_insert(
+        self.i_job_control_event_insert(
             h,
             j.id,
-            None,
-            "control",
-            Utc::now(),
-            None,
             &format!("job assigned to worker {}{}", w.id, wait),
         )?;
 
@@ -364,6 +505,10 @@ impl Database {
             let w = self.i_worker(h, wid)?;
             if w.deleted || w.recycle {
                 conflict!("worker {} already deleted, cannot assign job", w.id);
+            }
+
+            if w.is_held() {
+                conflict!("worker {} is on hold, cannot assign job", w.id);
             }
 
             self.i_worker_assign_job(h, &w, jid)?;
@@ -582,7 +727,18 @@ impl Database {
         target: &Target,
         job: Option<JobId>,
         wait_for_flush: bool,
+        hold_reason: Option<&str>,
     ) -> DBResult<Worker> {
+        /*
+         * Allow a held worker to be created in the held state for debugging
+         * purposes.
+         */
+        let (hold_time, hold_reason) = if let Some(hr) = hold_reason {
+            (Some(IsoDate::now()), Some(hr.to_string()))
+        } else {
+            (None, None)
+        };
+
         let w = Worker {
             id: WorkerId::generate(),
             bootstrap: genkey(64),
@@ -595,6 +751,8 @@ impl Database {
             factory: Some(factory.id),
             target: Some(target.id),
             wait_for_flush,
+            hold_time,
+            hold_reason,
         };
 
         self.sql.tx(|h| {
@@ -1466,15 +1624,7 @@ impl Database {
             {
                 msg += &format!(" (waiting for {})", dur.render());
             }
-            self.i_job_event_insert(
-                h,
-                j.id,
-                None,
-                "control",
-                Utc::now(),
-                None,
-                &msg,
-            )?;
+            self.i_job_control_event_insert(h, j.id, &msg)?;
 
             let uc = h.exec_update(
                 Query::update()
@@ -1504,15 +1654,7 @@ impl Database {
                 return Ok(false);
             }
 
-            self.i_job_event_insert(
-                h,
-                j.id,
-                None,
-                "control",
-                Utc::now(),
-                None,
-                "job cancelled",
-            )?;
+            self.i_job_control_event_insert(h, j.id, "job cancelled")?;
 
             let uc = h.exec_update(
                 Query::update()
@@ -1531,90 +1673,91 @@ impl Database {
     pub fn job_complete(&self, job: JobId, failed: bool) -> DBResult<bool> {
         self.sql.tx_immediate(|h| {
             let j: Job = h.get_row(Job::find(job))?;
-            if j.complete {
-                /*
-                 * This job is already complete.
-                 */
-                return Ok(false);
-            }
+            self.i_job_complete(h, &j, failed)
+        })
+    }
 
-            if j.cancelled && !failed {
-                conflict!("job {} cancelled; cannot succeed", j.id);
-            }
-
+    pub fn i_job_complete(
+        &self,
+        h: &mut Handle,
+        j: &Job,
+        failed: bool,
+    ) -> DBResult<bool> {
+        if j.complete {
             /*
-             * Mark any tasks that have not yet completed as failed, as they
-             * will not be executed.
+             * This job is already complete.
              */
-            let mut tasks_failed = false;
-            let tasks: Vec<Task> = h.get_rows(self.q_job_tasks(j.id))?;
-            for t in tasks {
-                if t.failed {
-                    tasks_failed = true;
-                }
-                if t.failed || t.complete || j.cancelled {
-                    continue;
-                }
+            return Ok(false);
+        }
 
-                self.i_job_event_insert(
-                    h,
-                    j.id,
-                    None,
-                    "control",
-                    Utc::now(),
-                    None,
-                    &format!("task {} was incomplete, marked failed", t.seq),
-                )?;
+        if j.cancelled && !failed {
+            conflict!("job {} cancelled; cannot succeed", j.id);
+        }
 
-                let uc = h.exec_update(
-                    Query::update()
-                        .table(TaskDef::Table)
-                        .and_where(Expr::col(TaskDef::Job).eq(j.id))
-                        .and_where(Expr::col(TaskDef::Seq).eq(t.seq))
-                        .and_where(Expr::col(TaskDef::Complete).eq(false))
-                        .value(TaskDef::Failed, true)
-                        .value(TaskDef::Complete, true)
-                        .to_owned(),
-                )?;
-                assert_eq!(uc, 1);
+        /*
+         * Mark any tasks that have not yet completed as failed, as they will
+         * not be executed.
+         */
+        let mut tasks_failed = false;
+        let tasks: Vec<Task> = h.get_rows(self.q_job_tasks(j.id))?;
+        for t in tasks {
+            if t.failed {
+                tasks_failed = true;
+            }
+            if t.failed || t.complete || j.cancelled {
+                continue;
             }
 
-            let failed = if failed {
-                true
-            } else if tasks_failed {
-                /*
-                 * If a task failed, we must report job-level failure even if
-                 * the job was for some reason not explicitly failed.
-                 */
-                self.i_job_event_insert(
-                    h,
-                    j.id,
-                    None,
-                    "control",
-                    Utc::now(),
-                    None,
-                    "job failed because at least one task failed",
-                )?;
-                true
-            } else {
-                false
-            };
+            self.i_job_control_event_insert(
+                h,
+                j.id,
+                &format!("task {} was incomplete, marked failed", t.seq),
+            )?;
 
             let uc = h.exec_update(
                 Query::update()
-                    .table(JobDef::Table)
-                    .and_where(Expr::col(JobDef::Id).eq(j.id))
-                    .and_where(Expr::col(JobDef::Complete).eq(false))
-                    .value(JobDef::Failed, failed)
-                    .value(JobDef::Complete, true)
+                    .table(TaskDef::Table)
+                    .and_where(Expr::col(TaskDef::Job).eq(j.id))
+                    .and_where(Expr::col(TaskDef::Seq).eq(t.seq))
+                    .and_where(Expr::col(TaskDef::Complete).eq(false))
+                    .value(TaskDef::Failed, true)
+                    .value(TaskDef::Complete, true)
                     .to_owned(),
             )?;
             assert_eq!(uc, 1);
+        }
 
-            self.i_job_time_record(h, j.id, "complete", Utc::now())?;
+        let failed = if failed {
+            true
+        } else if tasks_failed {
+            /*
+             * If a task failed, we must report job-level failure even if the
+             * job was for some reason not explicitly failed.
+             */
+            self.i_job_control_event_insert(
+                h,
+                j.id,
+                "job failed because at least one task failed",
+            )?;
+            true
+        } else {
+            false
+        };
 
-            Ok(true)
-        })
+        let uc = h.exec_update(
+            Query::update()
+                .table(JobDef::Table)
+                .and_where(Expr::col(JobDef::Id).eq(j.id))
+                .and_where(Expr::col(JobDef::Complete).eq(false))
+                .value(JobDef::Failed, failed)
+                .value(JobDef::Complete, true)
+                .to_owned(),
+        )?;
+        assert_eq!(uc, 1);
+
+        self.i_job_time_record(h, j.id, "complete", Utc::now())?;
+
+        Ok(true)
     }
 
     pub fn i_job_time_record(
@@ -2108,6 +2251,7 @@ impl Database {
             token: genkey(64),
             lastping: None,
             enable: true,
+            hold_workers: false,
         };
 
         self.sql.tx(|h| h.exec_insert(f.insert()))?;
@@ -2143,6 +2287,7 @@ impl Database {
                 token: "".into(),
                 lastping: None,
                 enable: true,
+                hold_workers: false,
             });
         }
 
@@ -2200,6 +2345,24 @@ impl Database {
                     .table(FactoryDef::Table)
                     .and_where(Expr::col(FactoryDef::Id).eq(id))
                     .value(FactoryDef::Enable, enable)
+                    .to_owned(),
+            )?;
+
+            Ok(())
+        })
+    }
+
+    pub fn factory_hold_workers(
+        &self,
+        id: FactoryId,
+        hold_workers: bool,
+    ) -> DBResult<()> {
+        self.sql.tx(|h| {
+            h.exec_update(
+                Query::update()
+                    .table(FactoryDef::Table)
+                    .and_where(Expr::col(FactoryDef::Id).eq(id))
+                    .value(FactoryDef::HoldWorkers, hold_workers)
                     .to_owned(),
             )?;
 

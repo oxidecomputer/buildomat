@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use super::sublude::*;
@@ -18,6 +18,8 @@ pub struct Worker {
     pub target: Option<TargetId>,
     pub wait_for_flush: bool,
     pub factory_metadata: Option<JsonValue>,
+    pub hold_time: Option<IsoDate>,
+    pub hold_reason: Option<String>,
 }
 
 impl FromRow for Worker {
@@ -34,6 +36,8 @@ impl FromRow for Worker {
             WorkerDef::Target,
             WorkerDef::WaitForFlush,
             WorkerDef::FactoryMetadata,
+            WorkerDef::HoldTime,
+            WorkerDef::HoldReason,
         ]
         .into_iter()
         .map(|col| {
@@ -58,6 +62,8 @@ impl FromRow for Worker {
             target: row.get(8)?,
             wait_for_flush: row.get(9)?,
             factory_metadata: row.get(10)?,
+            hold_time: row.get(11)?,
+            hold_reason: row.get(12)?,
         })
     }
 }
@@ -87,6 +93,8 @@ impl Worker {
                 self.target.into(),
                 self.wait_for_flush.into(),
                 self.factory_metadata.clone().into(),
+                self.hold_time.into(),
+                self.hold_reason.clone().into(),
             ])
             .to_owned()
     }
@@ -138,4 +146,28 @@ impl Worker {
             .map(|j| Ok(serde_json::from_value(j.0.clone())?))
             .transpose()
     }
+
+    pub fn is_held(&self) -> bool {
+        assert_eq!(self.hold_time.is_some(), self.hold_reason.is_some());
+
+        self.hold_time.is_some()
+    }
+
+    pub fn hold(&self) -> Option<Hold> {
+        if let Some(IsoDate(time)) = self.hold_time {
+            let reason = self.hold_reason.as_ref().unwrap().to_string();
+
+            Some(Hold { time, reason })
+        } else {
+            assert!(self.hold_reason.is_none());
+
+            None
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Hold {
+    pub time: DateTime<Utc>,
+    pub reason: String,
 }

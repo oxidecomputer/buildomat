@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Result};
 use buildomat_client::types::*;
+use buildomat_types::metadata;
 use chrono::prelude::*;
 use rusoto_core::{HttpClient, Region};
 use rusoto_credential::StaticProvider;
@@ -303,7 +304,19 @@ async fn aws_worker_one(
                         c.client
                             .factory_worker_associate()
                             .worker(&w.id)
-                            .body_map(|body| body.private(&i.id))
+                            .body_map(|body| {
+                                body.private(&i.id).metadata(Some(
+                                    metadata::FactoryMetadata::V1(
+                                        metadata::FactoryMetadataV1 {
+                                            addresses: Default::default(),
+                                            root_password_hash: config
+                                                .aws
+                                                .root_password_hash
+                                                .clone(),
+                                        },
+                                    ),
+                                ))
+                            })
                             .send()
                             .await?;
                     }
@@ -532,7 +545,19 @@ async fn aws_worker_one(
         c.client
             .factory_worker_associate()
             .worker(&w.id)
-            .body_map(|body| body.private(&instance_id))
+            .body_map(|body| {
+                body.private(&instance_id).metadata(Some(
+                    metadata::FactoryMetadata::V1(
+                        metadata::FactoryMetadataV1 {
+                            addresses: Default::default(),
+                            root_password_hash: config
+                                .aws
+                                .root_password_hash
+                                .clone(),
+                        },
+                    ),
+                ))
+            })
             .send()
             .await?;
     }

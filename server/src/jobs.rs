@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use std::collections::{BTreeMap, HashMap};
@@ -261,6 +261,14 @@ async fn recycle_on_complete_one(log: &Logger, c: &Central) -> Result<()> {
         assert!(!w.deleted);
 
         if w.recycle {
+            continue;
+        }
+
+        if w.is_held() {
+            /*
+             * If this worker is marked on hold, leave it alone no matter how
+             * long it may have sat idle.
+             */
             continue;
         }
 

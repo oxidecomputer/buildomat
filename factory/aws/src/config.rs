@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use std::collections::HashMap;
@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ConfigFile {
     pub aws: ConfigFileAws,
     pub general: ConfigFileGeneral,
@@ -15,16 +16,19 @@ pub(crate) struct ConfigFile {
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ConfigFileGeneral {
     pub baseurl: String,
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ConfigFileFactory {
     pub token: String,
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ConfigFileAwsTarget {
     pub instance_type: String,
     pub root_size_gb: i64,
@@ -32,6 +36,7 @@ pub(crate) struct ConfigFileAwsTarget {
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ConfigFileAws {
     pub access_key_id: String,
     pub secret_access_key: String,
@@ -42,4 +47,5 @@ pub(crate) struct ConfigFileAws {
     pub key: String,
     pub security_group: String,
     pub limit_total: usize,
+    pub root_password_hash: Option<String>,
 }

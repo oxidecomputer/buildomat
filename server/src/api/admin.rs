@@ -18,6 +18,7 @@ pub struct Factory {
     name: String,
     last_ping: Option<DateTime<Utc>>,
     enable: bool,
+    hold_workers: bool,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -500,6 +501,18 @@ struct WorkerJob {
 }
 
 #[derive(Serialize, JsonSchema)]
+struct WorkerHold {
+    time: DateTime<Utc>,
+    reason: String,
+}
+
+impl From<db::Hold> for WorkerHold {
+    fn from(db::Hold { time, reason }: db::Hold) -> Self {
+        WorkerHold { time, reason }
+    }
+}
+
+#[derive(Serialize, JsonSchema)]
 struct Worker {
     pub id: String,
     pub factory: String,
@@ -510,6 +523,7 @@ struct Worker {
     pub recycle: bool,
     pub lastping: Option<DateTime<Utc>>,
     pub jobs: Vec<WorkerJob>,
+    pub hold: Option<WorkerHold>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -571,6 +585,7 @@ pub(crate) async fn workers_list_old(
                 bootstrap: w.token.is_some(),
                 deleted: w.deleted,
                 recycle: w.recycle,
+                hold: w.hold().map(|h| h.into()),
                 lastping: w.lastping.map(|x| x.into()),
                 jobs,
             }
@@ -669,6 +684,7 @@ pub(crate) async fn workers_list(
                     bootstrap: w.token.is_some(),
                     deleted: w.deleted,
                     recycle: w.recycle,
+                    hold: w.hold().map(|h| h.into()),
                     lastping: w.lastping.map(|x| x.into()),
                     jobs,
                 }
@@ -714,6 +730,55 @@ pub(crate) async fn worker_recycle(
 
     c.db.worker_recycle(wid).or_500()?;
     info!(log, "ADMIN: recycled worker {}", wid);
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct WorkerHoldMark {
+    reason: String,
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/admin/worker/{worker}/hold",
+}]
+pub(crate) async fn worker_hold_mark(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<WorkerPath>,
+    body: TypedBody<WorkerHoldMark>,
+) -> DSResult<HttpResponseUpdatedNoContent> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    c.require_admin(log, &rqctx.request, "control").await?;
+
+    let wid = path.into_inner().worker()?;
+    let reason = body.into_inner().reason;
+
+    c.db.worker_mark_on_hold(wid, &reason).or_500()?;
+    info!(log, "ADMIN: marked worker {wid} as on hold ({reason})");
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/admin/worker/{worker}/release",
+}]
+pub(crate) async fn worker_hold_release(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<WorkerPath>,
+) -> DSResult<HttpResponseUpdatedNoContent> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    c.require_admin(log, &rqctx.request, "control").await?;
+
+    let wid = path.into_inner().worker()?;
+
+    let was_held = c.db.worker_hold_release(wid).or_500()?;
+    info!(log, "ADMIN: released hold on worker {wid}"; "was_held" => was_held);
 
     Ok(HttpResponseUpdatedNoContent())
 }
@@ -774,6 +839,7 @@ pub(crate) async fn factories_list(
                 name: f.name,
                 last_ping: f.lastping.map(|d| d.0),
                 enable: f.enable,
+                hold_workers: f.hold_workers,
             })
             .collect::<Vec<_>>();
 
@@ -804,6 +870,12 @@ pub(crate) async fn factory_disable(
     Ok(HttpResponseUpdatedNoContent())
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct FactoryEnable {
+    #[serde(default)]
+    hold_workers: bool,
+}
+
 #[endpoint {
     method = POST,
     path = "/0/admin/factory/{factory}/enable",
@@ -811,6 +883,7 @@ pub(crate) async fn factory_disable(
 pub(crate) async fn factory_enable(
     rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<FactoryPath>,
+    body: TypedBody<FactoryEnable>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let log = &rqctx.log;
@@ -822,8 +895,12 @@ pub(crate) async fn factory_enable(
      */
     let f = c.db.factory(path.into_inner().factory()?).or_500()?;
 
+    let hold_workers = body.into_inner().hold_workers;
+
     c.db.factory_enable(f.id, true).or_500()?;
-    info!(rqctx.log, "factory {} ({:?}) enabled", f.id, f.name);
+    c.db.factory_hold_workers(f.id, hold_workers).or_500()?;
+    info!(rqctx.log, "factory {} ({:?}) enabled", f.id, f.name;
+        "hold_workers" => hold_workers);
 
     Ok(HttpResponseUpdatedNoContent())
 }

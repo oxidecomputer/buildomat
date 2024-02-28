@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use std::str::FromStr;
@@ -282,7 +282,10 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
                         .body_map(|body| {
                             body.private(i.id()).metadata(Some(
                                 metadata::FactoryMetadata::V1(
-                                    metadata::FactoryMetadataV1 { addresses },
+                                    metadata::FactoryMetadataV1 {
+                                        addresses,
+                                        root_password_hash: None,
+                                    },
                                 ),
                             ))
                         })

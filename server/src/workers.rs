@@ -24,6 +24,14 @@ async fn worker_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
             continue;
         }
 
+        if w.is_held() {
+            /*
+             * If the worker is marked on hold, leave it and any related jobs
+             * alone.
+             */
+            continue;
+        }
+
         let jobs = c.db.worker_jobs(w.id)?;
         if jobs.is_empty() {
             /*
