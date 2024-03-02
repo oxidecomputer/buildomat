@@ -1430,14 +1430,16 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("target", WIDTH_ID, false);
     l.add_column("hold_time", WIDTH_ISODATE, false);
     l.add_column("hold_reason", 32, false);
+    l.add_column("ping", 4, true);
+    l.add_column("last_ping", WIDTH_ISODATE, false);
 
     l.optflag("A", "active", "display only workers not yet destroyed");
     l.optflag("h", "held", "display only workers that are marked on hold");
     l.optflag("U", "", "do not sort locally; just stream results from server");
 
     let a = no_args!(l);
-    let active = a.opts().opt_present("active");
     let held = a.opts().opt_present("held");
+    let active = a.opts().opt_present("active");
     let unsorted = a.opts().opt_present("U");
     let c = l.context();
 
@@ -1447,7 +1449,15 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
         print!("{}", t.output_unsorted_header()?);
     }
 
-    let mut workers = c.admin().workers_list().active(active).stream();
+    let mut workers = c
+        .admin()
+        .workers_list()
+        /*
+         * Workers can only be held while still active; reduce the cost of the
+         * query in the held case by only fetching active workers:
+         */
+        .active(active | held)
+        .stream();
     while let Some(w) = workers.try_next().await? {
         if active && w.deleted {
             continue;
@@ -1486,6 +1496,20 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
             r.add_str("hold_reason", "-");
             r.add_str("hold_time", "-");
         }
+
+        r.add_str(
+            "last_ping",
+            w.lastping
+                .map(|d| d.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+                .as_deref()
+                .unwrap_or("-"),
+        );
+        r.add_str(
+            "ping",
+            w.lastping
+                .map(|d| d.age().as_secs().to_string())
+                .unwrap_or_else(|| "-".to_string()),
+        );
 
         if unsorted {
             print!("{}", t.output_unsorted(r)?);
