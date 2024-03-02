@@ -324,6 +324,18 @@ async fn aws_worker_one(
                             .await?;
                     }
 
+                    if w.hold {
+                        /*
+                         * If a worker is held, we don't want to mess with it at
+                         * all.
+                         */
+                        debug!(
+                            log,
+                            "instance {} is for held worker {}", i.id, w.id
+                        );
+                        continue;
+                    }
+
                     if w.recycle {
                         /*
                          * If the worker has been deleted through the
@@ -418,7 +430,16 @@ async fn aws_worker_one(
      * instance, they must be scrubbed from the database as detritus from prior
      * failed runs.
      */
+    let mut nheld = 0;
     for w in c.client.factory_workers().send().await?.into_inner() {
+        if w.hold {
+            /*
+             * If a worker is held, we don't want to mess with it at all.
+             */
+            nheld += 1;
+            continue;
+        }
+
         let rm = if let Some(instance_id) = w.private.as_deref() {
             /*
              * There is a record of a particular instance ID for this worker.
@@ -499,6 +520,7 @@ async fn aws_worker_one(
     info!(log, "worker stats";
         "instances" => c_insts,
         "freeslots" => freeslots,
+        "nheld" => nheld,
     );
 
     let mut created = 0;
