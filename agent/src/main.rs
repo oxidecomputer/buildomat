@@ -570,6 +570,108 @@ fn set_root_password_hash(hash: &str) -> Result<()> {
     Ok(())
 }
 
+fn zfs_exists(dataset: &str) -> Result<bool> {
+    let out = Command::new("/sbin/zfs")
+        .arg("get")
+        .args(["-Ho", "value"])
+        .arg("type")
+        .arg(dataset)
+        .env_clear()
+        .current_dir("/")
+        .output()?;
+
+    if !out.status.success() {
+        let e = String::from_utf8_lossy(&out.stderr);
+        if e.contains("dataset does not exist") {
+            return Ok(false);
+        }
+
+        bail!("could not check for dataset {dataset:?}: {}", out.info());
+    }
+
+    Ok(true)
+}
+
+fn zfs_get(dataset: &str, prop: &str) -> Result<String> {
+    let out = Command::new("/sbin/zfs")
+        .arg("get")
+        .args(["-Ho", "value"])
+        .arg(prop)
+        .arg(dataset)
+        .env_clear()
+        .current_dir("/")
+        .output()?;
+
+    if !out.status.success() {
+        bail!("zfs get {prop:?} {dataset:?}: {}", out.info());
+    }
+
+    let o = String::from_utf8(out.stdout)?;
+    let l = o.lines().collect::<Vec<_>>();
+    if l.len() != 1 {
+        bail!("zfs get {prop:?} {dataset:?}: weird output {l:?}");
+    }
+
+    Ok(l[0].to_string())
+}
+
+fn zfs_create_volume(dataset: &str, size_mb: u32) -> Result<()> {
+    let out = Command::new("/sbin/zfs")
+        .arg("create")
+        .args(["-V", &format!("{size_mb}M")])
+        .arg(dataset)
+        .env_clear()
+        .current_dir("/")
+        .output()?;
+
+    if !out.status.success() {
+        bail!("zfs create {dataset:?}: {}", out.info());
+    }
+
+    Ok(())
+}
+
+fn ensure_dump_device(mbsz: u32) -> Result<()> {
+    /*
+     * First, make sure the "rpool/dump" zvol exists.
+     */
+    if !zfs_exists("rpool/dump")? {
+        zfs_create_volume("rpool/dump", mbsz)?;
+    } else if zfs_get("rpool/dump", "type")? != "volume" {
+        bail!("rpool/dump is not a volume?!");
+    }
+
+    let out = Command::new("/usr/sbin/dumpadm")
+        .arg("-y")
+        .args(["-z", "on"])
+        .args(["-d", "/dev/zvol/dsk/rpool/dump"])
+        .env_clear()
+        .current_dir("/")
+        .output()?;
+
+    if !out.status.success() {
+        bail!("dumpadm: {}", out.info());
+    }
+
+    /*
+     * The boot archive contains the dump configuration, and savecore(8) does
+     * not always notice the dump after a reboot if we have not refreshed the
+     * archive with the new configuration prior to panicking.
+     */
+    let out = Command::new("/sbin/bootadm")
+        .arg("update-archive")
+        .env_clear()
+        .current_dir("/")
+        .output()?;
+
+    if !out.status.success() {
+        bail!("bootadm update-archive: {}", out.info());
+    }
+
+    println!("dump device was configured!");
+    Ok(())
+}
+
 enum Stage {
     Ready,
     Download(mpsc::Receiver<download::Activity>),
@@ -770,6 +872,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
 
     let mut metadata: Option<metadata::FactoryMetadata> = None;
     let mut set_root_password = false;
+    let mut dump_device_configured = false;
 
     /*
      * Check for a file containing a description of the job we are running.  If
@@ -809,6 +912,16 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                      * don't interrupt the other operation of the agent.
                      */
                     set_root_password = true;
+                }
+            }
+
+            if !dump_device_configured {
+                if let Some(mbsz) = md.dump_to_rpool() {
+                    if let Err(e) = ensure_dump_device(mbsz) {
+                        println!("ERROR: ensuring dump device: {e}");
+                    }
+
+                    dump_device_configured = true;
                 }
             }
         }

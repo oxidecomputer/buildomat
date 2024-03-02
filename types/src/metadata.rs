@@ -10,6 +10,8 @@ pub struct FactoryMetadataV1 {
     #[serde(default)]
     pub addresses: Vec<FactoryAddresses>,
     pub root_password_hash: Option<String>,
+    #[serde(default)]
+    pub dump_to_rpool: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, Eq, PartialEq)]
@@ -39,6 +41,16 @@ impl FactoryMetadata {
     pub fn addresses(&self) -> &[FactoryAddresses] {
         match self {
             FactoryMetadata::V1(md) => md.addresses.as_ref(),
+        }
+    }
+
+    /**
+     * Return the size in megabytes of the dump device to create, if one should
+     * be created.
+     */
+    pub fn dump_to_rpool(&self) -> Option<u32> {
+        match self {
+            FactoryMetadata::V1(md) => md.dump_to_rpool,
         }
     }
 }

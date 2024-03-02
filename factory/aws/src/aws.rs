@@ -313,6 +313,9 @@ async fn aws_worker_one(
                                                 .aws
                                                 .root_password_hash
                                                 .clone(),
+                                            dump_to_rpool: config
+                                                .aws
+                                                .dump_to_rpool,
                                         },
                                     ),
                                 ))
@@ -554,6 +557,7 @@ async fn aws_worker_one(
                                 .aws
                                 .root_password_hash
                                 .clone(),
+                            dump_to_rpool: config.aws.dump_to_rpool,
                         },
                     ),
                 ))

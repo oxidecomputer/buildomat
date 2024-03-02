@@ -285,6 +285,7 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
                                     metadata::FactoryMetadataV1 {
                                         addresses,
                                         root_password_hash: None,
+                                        dump_to_rpool: None,
                                     },
                                 ),
                             ))

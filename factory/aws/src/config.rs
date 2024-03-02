@@ -48,4 +48,5 @@ pub(crate) struct ConfigFileAws {
     pub security_group: String,
     pub limit_total: usize,
     pub root_password_hash: Option<String>,
+    pub dump_to_rpool: Option<u32>,
 }
