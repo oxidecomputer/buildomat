@@ -31,7 +31,7 @@ while :; do
 		continue
 	fi
 	chmod +rx /var/tmp/agent
-	if ! /var/tmp/agent install '%URL%' '%STRAP%'; then
+	if ! /var/tmp/agent install -N '%NODENAME%' '%URL%' '%STRAP%'; then
 		sleep 1
 		continue
 	fi

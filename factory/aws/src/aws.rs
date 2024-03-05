@@ -94,6 +94,7 @@ async fn create_instance(
     let id = worker.id.to_string();
 
     let script = include_str!("../scripts/user_data.sh")
+        .replace("%NODENAME%", &format!("w-{id}"))
         .replace("%URL%", &config.general.baseurl)
         .replace("%STRAP%", &worker.bootstrap);
 

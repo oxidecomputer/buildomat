@@ -570,6 +570,70 @@ fn set_root_password_hash(hash: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "illumos")]
+fn set_nodename(name: &str) -> Result<()> {
+    write_text("/etc/nodename", &format!("{name}\n"))?;
+    write_text(
+        "/etc/inet/hosts",
+        &format!(
+            concat!(
+                "#\n",
+                "# Internet host table\n",
+                "#\n",
+                "::1            localhost\n",
+                "127.0.0.1      localhost loghost {}\n",
+            ),
+            name
+        ),
+    )?;
+
+    let out = Command::new("/bin/uname")
+        .args(["-S", name])
+        .env_clear()
+        .current_dir("/")
+        .output()?;
+
+    if !out.status.success() {
+        bail!("uname -S {name:?}: {}", out.info());
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn set_nodename(name: &str) -> Result<()> {
+    write_text("/etc/hostname", &format!("{name}\n"))?;
+    write_text(
+        "/etc/hosts",
+        &format!(
+            concat!(
+                "127.0.0.1       localhost\n",
+                "127.0.1.1       {}\n",
+                "\n",
+                "# The following lines are desirable for IPv6 capable hosts\n",
+                "::1     ip6-localhost ip6-loopback\n",
+                "fe00::0 ip6-localnet\n",
+                "ff00::0 ip6-mcastprefix\n",
+                "ff02::1 ip6-allnodes\n",
+                "ff02::2 ip6-allrouters\n",
+            ),
+            name
+        ),
+    )?;
+
+    let out = Command::new("/bin/hostname")
+        .arg(name)
+        .env_clear()
+        .current_dir("/")
+        .output()?;
+
+    if !out.status.success() {
+        bail!("hostname {name:?}: {}", out.info());
+    }
+
+    Ok(())
+}
+
 fn zfs_exists(dataset: &str) -> Result<bool> {
     let out = Command::new("/sbin/zfs")
         .arg("get")
@@ -684,6 +748,7 @@ enum Stage {
 
 async fn cmd_install(mut l: Level<()>) -> Result<()> {
     l.usage_args(Some("BASEURL BOOTSTRAP_TOKEN"));
+    l.optopt("N", "", "set nodename of machine", "NODENAME");
 
     let a = args!(l);
 
@@ -697,6 +762,12 @@ async fn cmd_install(mut l: Level<()>) -> Result<()> {
      */
     let baseurl = a.args()[0].to_string();
     let bootstrap = a.args()[1].to_string();
+
+    if let Some(nodename) = a.opts().opt_str("N") {
+        if let Err(e) = set_nodename(&nodename) {
+            eprintln!("ERROR: setting nodename: {e}");
+        }
+    }
 
     /*
      * Write /opt/buildomat/etc/agent.json with this configuration.
