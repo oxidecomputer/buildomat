@@ -16,7 +16,8 @@ use rusoto_credential::StaticProvider;
 use rusoto_ec2::{
     BlockDeviceMapping, DescribeInstancesRequest, EbsBlockDevice, Ec2,
     Ec2Client, Filter, InstanceNetworkInterfaceSpecification,
-    RunInstancesRequest, Tag, TagSpecification, TerminateInstancesRequest,
+    RunInstancesRequest, StopInstancesRequest, Tag, TagSpecification,
+    TerminateInstancesRequest,
 };
 use rusty_ulid::Ulid;
 use slog::{debug, error, info, o, warn, Logger};
@@ -72,8 +73,28 @@ async fn destroy_instance(
     log: &Logger,
     ec2: &Ec2Client,
     id: &str,
+    force_stop: bool,
 ) -> Result<()> {
-    info!(log, "destroying instance {}...", id);
+
+    /*
+     * Before terminating an instance, attempt to initiate a forced shutdown.
+     * There is regrettably no force flag for termination (!) and if we don't do
+     * this first, AWS will sometimes wait rather a long (and billable) time
+     * before actually terminating a guest.  It is difficult, as the saying
+     * goes, to get a man to understand something, when his salary depends upon
+     * his not understanding it.
+     */
+    if force_stop {
+        info!(log, "forcing stop of instance {id}...");
+        ec2.stop_instances(StopInstancesRequest {
+            instance_ids: vec![id.to_string()],
+            force: Some(true),
+            ..Default::default()
+        })
+        .await?;
+    }
+
+    info!(log, "terminating instance {id}...");
     ec2.terminate_instances(TerminateInstancesRequest {
         instance_ids: vec![id.to_string()],
         ..Default::default()
@@ -421,7 +442,7 @@ async fn aws_worker_one(
                 || &i.state == "stopped"
                 || &i.state == "pending")
         {
-            destroy_instance(log, ec2, &i.id).await?;
+            destroy_instance(log, ec2, &i.id, &i.state == "running").await?;
         }
     }
 

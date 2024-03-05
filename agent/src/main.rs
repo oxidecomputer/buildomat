@@ -34,8 +34,6 @@ mod control;
 mod download;
 mod exec;
 mod shadow;
-#[cfg(target_os = "illumos")]
-mod uadmin;
 mod upload;
 
 use control::protocol::Payload;
@@ -539,24 +537,6 @@ fn write_script(script: &str) -> Result<String> {
     Ok(targ)
 }
 
-fn hard_reset() -> Result<()> {
-    /*
-     * For whatever reason, attempting to power off the AWS guest does not
-     * result in a speedy termination.  Doing an immediate reset without even
-     * bothering to sync file systems, however, seems to make destruction much
-     * quicker!
-     */
-    #[cfg(target_os = "illumos")]
-    {
-        use anyhow::Context;
-
-        uadmin::uadmin(uadmin::Action::Reboot(uadmin::Next::Boot))
-            .context("hard_reset: uadmin")?;
-    }
-
-    Ok(())
-}
-
 fn set_root_password_hash(hash: &str) -> Result<()> {
     /*
      * Install the provided root password hash into shadow(5) so that console
@@ -1007,10 +987,9 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                     let p = p.into_inner();
 
                     if p.poweroff {
-                        println!("powering off at server request");
-                        if let Err(e) = hard_reset() {
-                            println!("ERROR: {:?}", e);
-                        }
+                        /*
+                         * If we're being recycled, just hold here and wait.
+                         */
                         sleep_ms(1000).await;
                         continue;
                     }
