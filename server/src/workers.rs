@@ -3,14 +3,47 @@
  */
 
 use chrono::prelude::*;
-use std::sync::Arc;
 use std::time::Duration;
+use std::{sync::Arc, time::Instant};
 
 use anyhow::Result;
 #[allow(unused_imports)]
 use slog::{error, info, warn, Logger};
 
 use super::Central;
+
+const TEN_MINUTES: Duration = Duration::from_secs(10 * 60);
+
+async fn worker_liveness_one(log: &Logger, c: &Central) -> Result<()> {
+    for w in c.db.workers_without_pings(TEN_MINUTES)? {
+        assert!(!w.deleted);
+        assert!(!w.recycle);
+        assert!(!w.is_held());
+
+        let ping = w.lastping.unwrap().age().as_secs();
+        warn!(log, "worker stopped responding to pings!";
+            "id" => w.id.to_string(),
+            "lastping" => ping);
+
+        /*
+         * Record in the database that the worker has failed.  This routine will
+         * take care of reporting failure in any assigned jobs, marking the
+         * worker as held, etc.
+         */
+        let failed_jobs =
+            c.db.worker_mark_failed(w.id, "agent became unresponsive")?;
+        if !failed_jobs.is_empty() {
+            let jobs = failed_jobs
+                .into_iter()
+                .map(|j| j.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            warn!(log, "worker {} failing caused job {jobs} to fail", w.id);
+        }
+    }
+
+    Ok(())
+}
 
 async fn worker_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
     /*
@@ -96,12 +129,34 @@ async fn worker_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
 }
 
 pub(crate) async fn worker_cleanup(log: Logger, c: Arc<Central>) -> Result<()> {
+    let start = Instant::now();
+    let mut liveness_checks = false;
+
     let delay = Duration::from_secs(47);
     info!(log, "start worker cleanup task");
 
     loop {
         if let Err(e) = worker_cleanup_one(&log, &c).await {
             error!(log, "worker cleanup task error: {:?}", e);
+        }
+
+        if !liveness_checks {
+            /*
+             * The liveness worker will compare worker ping times against a
+             * threshold.  The ping times are stored in the database, but if the
+             * server is down for a measurable period agents might not have had
+             * a chance to phone in again and update them immediately after the
+             * server comes back.  Only check liveness once the server has been
+             * up long enough to know the difference:
+             */
+            if Instant::now().saturating_duration_since(start) > TEN_MINUTES {
+                info!(log, "starting worker liveness checks");
+                liveness_checks = true;
+            }
+        } else {
+            if let Err(e) = worker_liveness_one(&log, &c).await {
+                error!(log, "worker liveness task error: {:?}", e);
+            }
         }
 
         tokio::time::sleep(delay).await;

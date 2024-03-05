@@ -2,8 +2,8 @@
  * Copyright 2024 Oxide Computer Company
  */
 
-use std::collections::HashMap;
 use std::path::Path;
+use std::{collections::HashMap, time::Duration};
 
 use anyhow::Result;
 use buildomat_common::*;
@@ -167,6 +167,53 @@ impl Database {
                     .columns(Worker::columns())
                     .order_by(WorkerDef::Id, Order::Asc)
                     .and_where(Expr::col(WorkerDef::Deleted).eq(false))
+                    .to_owned(),
+            )
+        })
+    }
+
+    pub fn workers_without_pings(
+        &self,
+        age: Duration,
+    ) -> DBResult<Vec<Worker>> {
+        /*
+         * Create a date in the past, based on the maximum ping age threshold,
+         * that we can use for comparison:
+         */
+        let Some(dt) = Utc::now()
+            .checked_sub_signed(chrono::Duration::from_std(age).unwrap())
+        else {
+            conflict!("could not calculate date in the past");
+        };
+
+        self.sql.tx(|h| {
+            h.get_rows(
+                Query::select()
+                    .from(WorkerDef::Table)
+                    .columns(Worker::columns())
+                    .order_by(WorkerDef::Id, Order::Asc)
+                    /*
+                     * Once the recycle bit has been set on a worker, it is up
+                     * to the factory to get it to the deleted state.  We can
+                     * ignore workers in this state where the agents have
+                     * stopped phoning in.
+                     */
+                    .and_where(Expr::col(WorkerDef::Recycle).eq(false))
+                    .and_where(Expr::col(WorkerDef::Deleted).eq(false))
+                    /*
+                     * Look for any worker that has phoned in at least once, but
+                     * has then not done so since the threshold has passed:
+                     */
+                    .and_where(Expr::col(WorkerDef::Lastping).is_not_null())
+                    .and_where(Expr::col(WorkerDef::Lastping).lt(IsoDate(dt)))
+                    /*
+                     * Ignore held workers as they are presumably already being
+                     * dealt with by the operator.
+                     */
+                    .and_where(
+                        Expr::col((WorkerDef::Table, WorkerDef::HoldTime))
+                            .is_null(),
+                    )
                     .to_owned(),
             )
         })
@@ -375,7 +422,11 @@ impl Database {
         })
     }
 
-    pub fn worker_mark_failed(&self, id: WorkerId) -> DBResult<Vec<JobId>> {
+    pub fn worker_mark_failed(
+        &self,
+        id: WorkerId,
+        reason: &str,
+    ) -> DBResult<Vec<JobId>> {
         self.sql.tx_immediate(|h| {
             let w = self.i_worker(h, id)?;
             if w.recycle || w.deleted {
@@ -414,7 +465,7 @@ impl Database {
             /*
              * Mark the worker as on hold so that an operator can inspect it.
              */
-            let mut reason = "agent reported failure".to_string();
+            let mut reason = reason.to_string();
             if !failed_jobs.is_empty() {
                 reason.push_str(" during job execution");
             }
@@ -1781,7 +1832,7 @@ impl Database {
         job: JobId,
         from: &str,
         until: &str,
-    ) -> DBResult<Option<std::time::Duration>> {
+    ) -> DBResult<Option<Duration>> {
         let from = if let Some(from) =
             h.get_row_opt::<JobTime>(JobTime::find(job, from))?
         {

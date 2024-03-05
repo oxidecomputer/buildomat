@@ -241,12 +241,15 @@ pub(crate) async fn worker_fail(
      * take care of reporting failure in any assigned jobs, marking the worker
      * as held, etc.
      */
-    let failed_jobs = c.db.worker_mark_failed(w.id).or_500()?;
+    let failed_jobs =
+        c.db.worker_mark_failed(w.id, "agent reported failure").or_500()?;
     if !failed_jobs.is_empty() {
-        warn!(
-            log,
-            "worker {} failing caused jobs {:?} to fail", w.id, failed_jobs,
-        );
+        let jobs = failed_jobs
+            .into_iter()
+            .map(|j| j.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        warn!(log, "worker {} failing caused jobs {jobs} to fail", w.id);
     }
 
     Ok(HttpResponseUpdatedNoContent())
