@@ -9,6 +9,7 @@ members = [
 	"factory/aws",
 	"factory/lab",
 	"factory/propolis",
+        "factory/oxide",
 	"github/common",
 	"github/database",
 	"github/dbtool",
@@ -47,6 +48,7 @@ jmclib = { git = "https://github.com/jclulow/rust-jmclib", features = ["sqlite"]
 libc = "0.2.113"
 new_mime_guess = "4"
 octorust = { git = "https://github.com/oxidecomputer/third-party-api-clients", branch = "jclulow" }
+oxide = { git = "https://github.com/oxidecomputer/oxide.rs.git", version = "0.3.0" }
 pem = "2"
 percent-encoding = "2.1"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
