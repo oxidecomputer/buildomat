@@ -75,7 +75,6 @@ async fn destroy_instance(
     id: &str,
     force_stop: bool,
 ) -> Result<()> {
-
     /*
      * Before terminating an instance, attempt to initiate a forced shutdown.
      * There is regrettably no force flag for termination (!) and if we don't do
@@ -372,20 +371,6 @@ async fn aws_worker_one(
                          */
                         warn!(log, "instance {} stopped, destroying!", i.id);
                         true
-                    } else if !w.online && i.age_secs() > 5 * 60 {
-                        /*
-                         * We have seen a recent spate of AWS instances that
-                         * hang in early boot.  They get destroyed eventually,
-                         * but we should terminate them more promptly than that
-                         * to avoid being billed for AWS bullshit.
-                         */
-                        error!(
-                            log,
-                            "instance {} hung; destroying after {} seconds",
-                            i.id,
-                            i.age_secs(),
-                        );
-                        true
                     } else {
                         /*
                          * Otherwise, this is a regular active worker that does
@@ -478,6 +463,21 @@ async fn aws_worker_one(
                         "deleting worker {} for terminated instance {}",
                         w.id,
                         instance_id
+                    );
+                    true
+                } else if !w.online && i.age_secs() > 8 * 60 {
+                    /*
+                     * We have seen a recent spate of AWS instances that
+                     * hang in early boot.  They get destroyed eventually,
+                     * but we should terminate them more promptly than that
+                     * to avoid being billed for AWS bullshit.
+                     */
+                    error!(
+                        log,
+                        "worker {} instance {} hung; destroying after {} secs",
+                        w.id,
+                        i.id,
+                        i.age_secs(),
                     );
                     true
                 } else {
