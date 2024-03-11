@@ -62,6 +62,15 @@ pub struct WorkerPath {
     worker: String,
 }
 
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct WorkerEvent {
+    seq: usize,
+    stream: String,
+    time: DateTime<Utc>,
+    time_remote: Option<DateTime<Utc>>,
+    payload: String,
+}
+
 impl WorkerPath {
     fn worker(&self) -> DSResult<db::WorkerId> {
         db::WorkerId::from_str(&self.worker).or_500()
@@ -524,6 +533,7 @@ struct Worker {
     pub lastping: Option<DateTime<Utc>>,
     pub jobs: Vec<WorkerJob>,
     pub hold: Option<WorkerHold>,
+    pub diagnostics: bool,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -587,6 +597,7 @@ pub(crate) async fn workers_list_old(
                 recycle: w.recycle,
                 hold: w.hold().map(|h| h.into()),
                 lastping: w.lastping.map(|x| x.into()),
+                diagnostics: w.diagnostics,
                 jobs,
             }
         })
@@ -686,6 +697,7 @@ pub(crate) async fn workers_list(
                     recycle: w.recycle,
                     hold: w.hold().map(|h| h.into()),
                     lastping: w.lastping.map(|x| x.into()),
+                    diagnostics: w.diagnostics,
                     jobs,
                 }
             })
@@ -781,6 +793,89 @@ pub(crate) async fn worker_hold_release(
     info!(log, "ADMIN: released hold on worker {wid}"; "was_held" => was_held);
 
     Ok(HttpResponseUpdatedNoContent())
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct WorkerEventsQuery {
+    minseq: Option<usize>,
+}
+
+#[endpoint {
+    method = GET,
+    path = "/0/admin/worker/{worker}/events",
+}]
+pub(crate) async fn worker_events_get(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<WorkerPath>,
+    query: TypedQuery<WorkerEventsQuery>,
+) -> DSResult<HttpResponseOk<Vec<WorkerEvent>>> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let q = query.into_inner();
+
+    c.require_admin(log, &rqctx.request, "worker.read").await?;
+
+    let w = c.db.worker(path.into_inner().worker()?).or_500()?;
+
+    let wevs = c
+        .load_worker_events(log, &w, q.minseq.unwrap_or(0), 1000)
+        .await
+        .or_500()?;
+
+    Ok(HttpResponseOk(
+        wevs.iter()
+            .map(|wev| WorkerEvent {
+                seq: wev.seq as usize,
+                stream: wev.stream.to_string(),
+                time: wev.time.into(),
+                time_remote: wev.time_remote.map(|t| t.into()),
+                payload: wev.payload.to_string(),
+            })
+            .collect(),
+    ))
+}
+
+#[endpoint {
+    method = GET,
+    path = "/0/admin/worker/{worker}",
+}]
+pub(crate) async fn worker(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<WorkerPath>,
+) -> DSResult<HttpResponseOk<Worker>> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    c.require_admin(log, &rqctx.request, "worker.read").await?;
+
+    let w = c.db.worker(path.into_inner().worker()?).or_500()?;
+    let jobs =
+        c.db.worker_jobs(w.id)
+            .unwrap_or_else(|_| vec![])
+            .iter()
+            .map(|j| WorkerJob {
+                id: j.id.to_string(),
+                name: j.name.to_string(),
+                owner: j.owner.to_string(),
+                state: super::user::format_job_state(j),
+                tags: c.db.job_tags(j.id).unwrap_or_default(),
+            })
+            .collect::<Vec<_>>();
+
+    Ok(HttpResponseOk(Worker {
+        id: w.id.to_string(),
+        factory: w.factory().to_string(),
+        factory_private: w.factory_private.clone(),
+        target: w.target().to_string(),
+        bootstrap: w.token.is_some(),
+        deleted: w.deleted,
+        recycle: w.recycle,
+        hold: w.hold().map(|h| h.into()),
+        lastping: w.lastping.map(|x| x.into()),
+        diagnostics: w.diagnostics,
+        jobs,
+    }))
 }
 
 #[derive(Deserialize, JsonSchema)]

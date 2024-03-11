@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use anyhow::{bail, Result};
 use buildomat_client::types::*;
-use buildomat_types::metadata;
 use chrono::prelude::*;
 use rusoto_core::{HttpClient, Region};
 use rusoto_credential::StaticProvider;
@@ -312,6 +311,20 @@ async fn aws_worker_one(
                             continue;
                         }
                     } else {
+                        let t = if let Some(t) = c.config.target.get(&w.target)
+                        {
+                            t
+                        } else {
+                            error!(
+                                log,
+                                "instance {} worker {} unknown target: {:?}",
+                                i.id,
+                                w.id,
+                                w.target,
+                            );
+                            continue;
+                        };
+
                         /*
                          * This can occur if we crash after creating the
                          * instance but before associating it.
@@ -326,20 +339,8 @@ async fn aws_worker_one(
                             .factory_worker_associate()
                             .worker(&w.id)
                             .body_map(|body| {
-                                body.private(&i.id).metadata(Some(
-                                    metadata::FactoryMetadata::V1(
-                                        metadata::FactoryMetadataV1 {
-                                            addresses: Default::default(),
-                                            root_password_hash: config
-                                                .aws
-                                                .root_password_hash
-                                                .clone(),
-                                            dump_to_rpool: config
-                                                .aws
-                                                .dump_to_rpool,
-                                        },
-                                    ),
-                                ))
+                                body.private(&i.id)
+                                    .metadata(Some(c.metadata(t)))
                             })
                             .send()
                             .await?;
@@ -593,18 +594,7 @@ async fn aws_worker_one(
             .factory_worker_associate()
             .worker(&w.id)
             .body_map(|body| {
-                body.private(&instance_id).metadata(Some(
-                    metadata::FactoryMetadata::V1(
-                        metadata::FactoryMetadataV1 {
-                            addresses: Default::default(),
-                            root_password_hash: config
-                                .aws
-                                .root_password_hash
-                                .clone(),
-                            dump_to_rpool: config.aws.dump_to_rpool,
-                        },
-                    ),
-                ))
+                body.private(&instance_id).metadata(Some(c.metadata(t)))
             })
             .send()
             .await?;

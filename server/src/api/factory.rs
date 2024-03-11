@@ -75,6 +75,7 @@ pub(crate) struct FactoryWorker {
     bootstrap: String,
     online: bool,
     hold: bool,
+    target: String,
 }
 
 impl From<&db::Worker> for FactoryWorker {
@@ -92,6 +93,7 @@ impl From<&db::Worker> for FactoryWorker {
             bootstrap: w.bootstrap.to_string(),
             online: w.token.is_some(),
             hold: w.is_held(),
+            target: w.target().to_string(),
         }
     }
 }

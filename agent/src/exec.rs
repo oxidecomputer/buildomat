@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use std::collections::HashMap;
@@ -230,6 +230,22 @@ pub fn thread_done(
             .unwrap_or_else(|_| panic!("join {name} thread"));
         return true;
     }
+}
+
+pub fn run_diagnostic(cmd: Command) -> Result<Receiver<Activity>> {
+    let (tx, rx) = channel::<Activity>(100);
+
+    run_common(
+        cmd,
+        ActivityBuilder {
+            error_stream: "diagnostic".to_string(),
+            exit_stream: "diagnostic".to_string(),
+            bgproc: None,
+        },
+        tx,
+    )?;
+
+    Ok(rx)
 }
 
 pub fn run(cmd: Command) -> Result<Receiver<Activity>> {

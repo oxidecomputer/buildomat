@@ -438,6 +438,7 @@ impl From<(db::Worker, db::Factory)> for ArchivedWorkerInfo {
             wait_for_flush: _,
             hold_time: _,
             hold_reason: _,
+            diagnostics: _,
         } = input.0;
         let factory = ArchivedFactoryInfo::from(input.1);
 

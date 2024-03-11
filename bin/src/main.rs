@@ -1423,7 +1423,7 @@ async fn do_user(mut l: Level<Stuff>) -> Result<()> {
 
 async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("id", WIDTH_ID, true);
-    l.add_column("flags", 5, true);
+    l.add_column("flags", 6, true);
     l.add_column("creation", WIDTH_ISODATE, true);
     l.add_column("age", 8, true);
     l.add_column("info", 20, false);
@@ -1482,6 +1482,7 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
             .flag('R', w.recycle)
             .flag('D', w.deleted)
             .flag('H', w.hold.is_some())
+            .flag('d', w.diagnostics)
             .build();
         r.add_str("info", w.factory_private.as_deref().unwrap_or("-"));
         r.add_str("target", &w.target);
@@ -1593,11 +1594,85 @@ async fn do_worker_release(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_worker_tail(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("WORKER"));
+
+    l.optflag("j", "", "format output records as line-separated JSON");
+
+    let a = args!(l);
+
+    if a.args().len() != 1 {
+        bad_args!(l, "specify a job");
+    }
+
+    poll_worker(&l, &a.args()[0], a.opts().opt_present("j")).await
+}
+
+async fn poll_worker(l: &Level<Stuff>, id: &str, json: bool) -> Result<()> {
+    if !json {
+        println!("polling for worker output...");
+    }
+
+    let mut nextseq = 0;
+    loop {
+        let w = match l.context().admin().worker().worker(id).send().await {
+            Ok(t) => t,
+            Err(_) => {
+                sleep_ms(500).await;
+                continue;
+            }
+        };
+
+        if let Ok(events) = l
+            .context()
+            .admin()
+            .worker_events_get()
+            .worker(id)
+            .minseq(nextseq)
+            .send()
+            .await
+        {
+            if events.is_empty() {
+                if w.deleted {
+                    /*
+                     * EOF.
+                     */
+                    break;
+                }
+            } else {
+                for e in events.iter() {
+                    if json {
+                        println!("{}", serde_json::to_string(&e)?);
+                    } else if e.stream == "stdout" || e.stream == "stderr" {
+                        println!("{}", e.payload);
+                    } else if e.stream == "control" {
+                        println!("|=| {}", e.payload);
+                    } else if e.stream == "diagnostic" {
+                        println!("|D| {}", e.payload);
+                    } else if e.stream == "worker" {
+                        println!("|W| {}", e.payload);
+                    } else {
+                        println!("{:?}", e);
+                    }
+                    nextseq = e.seq + 1;
+                }
+            }
+        }
+
+        if !w.deleted {
+            sleep_ms(250).await;
+        }
+    }
+
+    Ok(())
+}
+
 async fn do_worker(mut l: Level<Stuff>) -> Result<()> {
     l.cmda("list", "ls", "list workers", cmd!(do_worker_list))?;
     l.cmd("recycle", "recycle a worker", cmd!(do_worker_recycle))?;
     l.cmd("hold", "mark a worker as held", cmd!(do_worker_hold))?;
     l.cmd("release", "release a held worker", cmd!(do_worker_release))?;
+    l.cmd("tail", "listen for events from a worker", cmd!(do_worker_tail))?;
 
     sel!(l).run().await
 }

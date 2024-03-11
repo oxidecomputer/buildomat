@@ -12,6 +12,8 @@ pub struct FactoryMetadataV1 {
     pub root_password_hash: Option<String>,
     #[serde(default)]
     pub dump_to_rpool: Option<u32>,
+    #[serde(default)]
+    pub post_job_diagnostic_script: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, Eq, PartialEq)]
@@ -51,6 +53,12 @@ impl FactoryMetadata {
     pub fn dump_to_rpool(&self) -> Option<u32> {
         match self {
             FactoryMetadata::V1(md) => md.dump_to_rpool,
+        }
+    }
+
+    pub fn post_job_diagnostic_script(&self) -> Option<&str> {
+        match self {
+            FactoryMetadata::V1(md) => md.post_job_diagnostic_script.as_deref(),
         }
     }
 }

@@ -40,6 +40,7 @@ mod workers;
 
 use db::{
     AuthUser, Job, JobEvent, JobFileId, JobId, JobOutput, JobOutputAndFile,
+    Worker, WorkerEvent,
 };
 
 pub(crate) trait MakeInternalError<T> {
@@ -791,6 +792,16 @@ impl Central {
             Ok(self.db.job_events(job.id, minseq, limit)?)
         }
     }
+
+    async fn load_worker_events(
+        &self,
+        _log: &Logger,
+        worker: &Worker,
+        minseq: usize,
+        limit: u64,
+    ) -> Result<Vec<WorkerEvent>> {
+        Ok(self.db.worker_events(worker.id, minseq, limit)?)
+    }
 }
 
 #[allow(dead_code)]
@@ -905,12 +916,14 @@ async fn main() -> Result<()> {
     ad.register(api::admin::user_create).api_check()?;
     ad.register(api::admin::user_privilege_grant).api_check()?;
     ad.register(api::admin::user_privilege_revoke).api_check()?;
+    ad.register(api::admin::worker).api_check()?;
     ad.register(api::admin::workers_list).api_check()?;
     ad.register(api::admin::workers_list_old).api_check()?;
     ad.register(api::admin::workers_recycle).api_check()?;
     ad.register(api::admin::worker_recycle).api_check()?;
     ad.register(api::admin::worker_hold_mark).api_check()?;
     ad.register(api::admin::worker_hold_release).api_check()?;
+    ad.register(api::admin::worker_events_get).api_check()?;
     ad.register(api::admin::admin_job_get).api_check()?;
     ad.register(api::admin::admin_job_archive_request).api_check()?;
     ad.register(api::admin::admin_jobs_get).api_check()?;
@@ -945,6 +958,9 @@ async fn main() -> Result<()> {
     ad.register(api::worker::worker_bootstrap).api_check()?;
     ad.register(api::worker::worker_ping).api_check()?;
     ad.register(api::worker::worker_fail).api_check()?;
+    ad.register(api::worker::worker_diagnostics_enable).api_check()?;
+    ad.register(api::worker::worker_diagnostics_complete).api_check()?;
+    ad.register(api::worker::worker_append).api_check()?;
     ad.register(api::worker::worker_job_append).api_check()?;
     ad.register(api::worker::worker_job_append_one).api_check()?;
     ad.register(api::worker::worker_job_complete).api_check()?;

@@ -80,6 +80,13 @@ pub struct CreateJobEvent {
     pub payload: String,
 }
 
+pub struct CreateWorkerEvent {
+    pub stream: String,
+    pub time: DateTime<Utc>,
+    pub time_remote: Option<DateTime<Utc>>,
+    pub payload: String,
+}
+
 impl Database {
     pub fn new<P: AsRef<Path>>(
         log: Logger,
@@ -338,7 +345,12 @@ impl Database {
             Ok(h.exec_update(
                 Query::update()
                     .table(WorkerDef::Table)
-                    .values([(WorkerDef::Deleted, true.into())])
+                    .value(WorkerDef::Deleted, true)
+                    /*
+                     * If the diagnostic information has not arrived by now, it
+                     * never will:
+                     */
+                    .value(WorkerDef::Diagnostics, false)
                     .and_where(Expr::col(WorkerDef::Id).eq(id))
                     .to_owned(),
             )? > 0)
@@ -404,6 +416,8 @@ impl Database {
             if !w.is_held() {
                 return Ok(false);
             }
+
+            self.i_worker_control_event_insert(h, w.id, "hold released")?;
 
             let c = h.exec_update(
                 Query::update()
@@ -472,6 +486,15 @@ impl Database {
             self.i_worker_mark_on_hold(h, w.id, &reason)?;
 
             /*
+             * Record the hold action in the per-worker event stream:
+             */
+            self.i_worker_control_event_insert(
+                h,
+                w.id,
+                &format!("marked held: {reason}"),
+            )?;
+
+            /*
              * The worker must not be re-used for a new job, so mark it recycled
              * now.  The hold flag will prevent this from taking effect until
              * after the operator releases the hold.
@@ -480,6 +503,105 @@ impl Database {
             assert!(recycled);
 
             Ok(failed_jobs)
+        })
+    }
+
+    pub fn worker_diagnostics_enable(&self, id: WorkerId) -> DBResult<()> {
+        self.sql.tx_immediate(|h| {
+            let w = self.i_worker(h, id)?;
+            if w.deleted {
+                /*
+                 * This worker has already been marked for deletion.
+                 */
+                conflict!("worker {id} already deleted");
+            }
+
+            if w.diagnostics {
+                /*
+                 * It's possible that this is a retried request, so just ignore
+                 * it.
+                 */
+                return Ok(());
+            }
+
+            self.i_worker_control_event_insert(
+                h,
+                w.id,
+                "post-job diagnostics enabled",
+            )?;
+
+            h.exec_update(
+                Query::update()
+                    .table(WorkerDef::Table)
+                    .value(WorkerDef::Diagnostics, true)
+                    .and_where(Expr::col(WorkerDef::Id).eq(id))
+                    .to_owned(),
+            )?;
+
+            Ok(())
+        })
+    }
+
+    pub fn worker_diagnostics_complete(
+        &self,
+        id: WorkerId,
+        hold: bool,
+    ) -> DBResult<()> {
+        self.sql.tx_immediate(|h| {
+            let w = self.i_worker(h, id)?;
+            if w.deleted {
+                /*
+                 * The "deleted" flag for workers is analogous to the "complete"
+                 * flag for jobs; once set, the worker is immutable.
+                 */
+                conflict!("worker {id} already deleted");
+            }
+
+            if !w.diagnostics {
+                /*
+                 * It's possible that this is a retried request, so just ignore
+                 * it.
+                 */
+                return Ok(());
+            }
+
+            let reason = "post-job diagnostics reported a fault";
+            if hold && !w.is_held() {
+                /*
+                 * Mark the worker as on hold so that an operator can inspect
+                 * it.
+                 */
+                self.i_worker_mark_on_hold(h, w.id, reason)?;
+
+                /*
+                 * Record the hold action in the per-worker event stream:
+                 */
+                self.i_worker_control_event_insert(
+                    h,
+                    w.id,
+                    &format!("marked held: {reason}"),
+                )?;
+            } else if hold {
+                /*
+                 * Holds do not nest.  If the worker was already held by the
+                 * time post-job diagnostics ran, just note the reported fault
+                 * in the per-worker event stream.
+                 */
+                self.i_worker_control_event_insert(h, w.id, reason)?;
+            }
+
+            /*
+             * Clear the diagnostics flag to allow the worker to be recycled.
+             */
+            h.exec_update(
+                Query::update()
+                    .table(WorkerDef::Table)
+                    .value(WorkerDef::Diagnostics, false)
+                    .and_where(Expr::col(WorkerDef::Id).eq(id))
+                    .to_owned(),
+            )?;
+
+            Ok(())
         })
     }
 
@@ -804,6 +926,7 @@ impl Database {
             wait_for_flush,
             hold_time,
             hold_reason,
+            diagnostics: false,
         };
 
         self.sql.tx(|h| {
@@ -824,6 +947,97 @@ impl Database {
             }
 
             Ok(w)
+        })
+    }
+
+    pub fn worker_events(
+        &self,
+        worker: WorkerId,
+        minseq: usize,
+        limit: u64,
+    ) -> DBResult<Vec<WorkerEvent>> {
+        self.sql.tx(|h| {
+            h.get_rows(
+                Query::select()
+                    .from(WorkerEventDef::Table)
+                    .columns(WorkerEvent::columns())
+                    .order_by(WorkerEventDef::Seq, Order::Asc)
+                    .and_where(Expr::col(WorkerEventDef::Worker).eq(worker))
+                    .and_where(
+                        Expr::col(WorkerEventDef::Seq).gte(minseq as i64),
+                    )
+                    .limit(limit)
+                    .to_owned(),
+            )
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn i_worker_event_insert(
+        &self,
+        h: &mut Handle,
+        worker: WorkerId,
+        stream: &str,
+        time: DateTime<Utc>,
+        time_remote: Option<DateTime<Utc>>,
+        payload: &str,
+    ) -> DBResult<()> {
+        let max: Option<u32> = h.get_row(
+            Query::select()
+                .from(WorkerEventDef::Table)
+                .and_where(Expr::col(WorkerEventDef::Worker).eq(worker))
+                .expr(Expr::col(WorkerEventDef::Seq).max())
+                .to_owned(),
+        )?;
+
+        let ic = h.exec_insert(
+            WorkerEvent {
+                worker,
+                seq: max.unwrap_or(0) + 1,
+                stream: stream.to_string(),
+                time: IsoDate(time),
+                time_remote: time_remote.map(IsoDate),
+                payload: payload.to_string(),
+            }
+            .insert(),
+        )?;
+        assert_eq!(ic, 1);
+
+        Ok(())
+    }
+
+    fn i_worker_control_event_insert(
+        &self,
+        h: &mut Handle,
+        id: WorkerId,
+        msg: &str,
+    ) -> DBResult<()> {
+        self.i_worker_event_insert(h, id, "control", Utc::now(), None, msg)
+    }
+
+    pub fn worker_append_events(
+        &self,
+        worker: WorkerId,
+        events: impl Iterator<Item = CreateWorkerEvent>,
+    ) -> DBResult<()> {
+        self.sql.tx_immediate(|h| {
+            let w: Worker = h.get_row(Worker::find(worker))?;
+            if w.deleted {
+                conflict!("worker already deleted, cannot append");
+            }
+
+            for e in events {
+                self.i_worker_event_insert(
+                    h,
+                    w.id,
+                    &e.stream,
+                    e.time,
+                    e.time_remote,
+                    &e.payload,
+                )?;
+            }
+
+            Ok(())
         })
     }
 

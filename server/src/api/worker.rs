@@ -206,7 +206,7 @@ pub(crate) async fn worker_ping(
         }
     };
 
-    let poweroff = if w.is_held() {
+    let poweroff = if w.is_held() || w.diagnostics {
         /*
          * If the worker is on hold, we don't want to power it off as this would
          * destroy at least some of the evidence we are trying to preserve for
@@ -815,4 +815,88 @@ pub(crate) async fn worker_bootstrap(
     } else {
         unauth_response()
     }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct WorkerAppend {
+    stream: String,
+    time: DateTime<Utc>,
+    payload: String,
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/worker/append",
+}]
+pub(crate) async fn worker_append(
+    rqctx: RequestContext<Arc<Central>>,
+    append: TypedBody<Vec<WorkerAppend>>,
+) -> DSResult<HttpResponseUpdatedNoContent> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let w = c.require_worker(log, &rqctx.request).await?;
+
+    let a = append.into_inner();
+
+    info!(log, "worker {} append {} self events", w.id, a.len());
+
+    c.db.worker_append_events(
+        w.id,
+        a.into_iter().map(|a| db::CreateWorkerEvent {
+            stream: a.stream,
+            time: Utc::now(),
+            time_remote: Some(a.time),
+            payload: a.payload,
+        }),
+    )
+    .or_500()?;
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct WorkerCompleteDiagnostics {
+    hold: bool,
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/worker/diagnostics/complete",
+}]
+pub(crate) async fn worker_diagnostics_complete(
+    rqctx: RequestContext<Arc<Central>>,
+    body: TypedBody<WorkerCompleteDiagnostics>,
+) -> DSResult<HttpResponseUpdatedNoContent> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let w = c.require_worker(log, &rqctx.request).await?;
+
+    let b = body.into_inner();
+
+    c.db.worker_diagnostics_complete(w.id, b.hold).or_500()?;
+
+    info!(log, "worker {} post-job diagnostics complete", w.id);
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/worker/diagnostics/enable",
+}]
+pub(crate) async fn worker_diagnostics_enable(
+    rqctx: RequestContext<Arc<Central>>,
+) -> DSResult<HttpResponseUpdatedNoContent> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let w = c.require_worker(log, &rqctx.request).await?;
+
+    c.db.worker_diagnostics_enable(w.id).or_500()?;
+
+    info!(log, "worker {} post-job diagnostics enabled", w.id);
+
+    Ok(HttpResponseUpdatedNoContent())
 }

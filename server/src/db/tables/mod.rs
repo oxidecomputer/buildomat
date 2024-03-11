@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use rusqlite::Row;
@@ -42,6 +42,7 @@ mod task;
 mod user;
 mod user_privilege;
 mod worker;
+mod worker_event;
 
 pub use factory::*;
 pub use job::*;
@@ -60,6 +61,7 @@ pub use task::*;
 pub use user::*;
 pub use user_privilege::*;
 pub use worker::*;
+pub use worker_event::*;
 
 #[derive(Debug)]
 pub struct AuthUser {

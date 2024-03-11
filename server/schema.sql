@@ -312,3 +312,19 @@ ALTER TABLE worker ADD COLUMN
 -- v 52
 ALTER TABLE factory ADD COLUMN
     hold_workers    INTEGER NOT NULL    DEFAULT 0;
+
+-- v 53
+CREATE TABLE worker_event (
+    worker          TEXT    NOT NULL,
+    seq             INTEGER NOT NULL,
+    stream          TEXT    NOT NULL,
+    time            TEXT    NOT NULL,
+    time_remote     TEXT,
+    payload         TEXT    NOT NULL,
+
+    PRIMARY KEY (worker, seq)
+);
+
+-- v 54
+ALTER TABLE worker ADD COLUMN
+    diagnostics     INTEGER NOT NULL    DEFAULT 0;

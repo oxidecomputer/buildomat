@@ -75,6 +75,7 @@ impl ConfigFile {
                 .expect("new client"),
             job: None,
             tx: None,
+            worker_tx: None,
         }
     }
 }
@@ -95,16 +96,16 @@ impl OutputRecord {
     }
 }
 
-enum AppendEntry {
+enum AppendJobEntry {
     JobEvent(OutputRecord),
     TaskEvent(u32, OutputRecord),
     FlushBarrier(oneshot::Sender<()>),
 }
 
-async fn append_worker(
+async fn append_job_worker(
     client: buildomat_client::Client,
     job: String,
-    mut rx: mpsc::Receiver<AppendEntry>,
+    mut rx: mpsc::Receiver<AppendJobEntry>,
 ) {
     let mut barrier: Option<oneshot::Sender<()>> = None;
 
@@ -139,19 +140,19 @@ async fn append_worker(
             };
 
             events.push(match ae {
-                AppendEntry::JobEvent(rec) => WorkerAppendJobOrTask {
+                AppendJobEntry::JobEvent(rec) => WorkerAppendJobOrTask {
                     task: None,
                     stream: rec.stream,
                     payload: rec.msg,
                     time: rec.time,
                 },
-                AppendEntry::TaskEvent(task, rec) => WorkerAppendJobOrTask {
+                AppendJobEntry::TaskEvent(task, rec) => WorkerAppendJobOrTask {
                     task: Some(task),
                     stream: rec.stream,
                     payload: rec.msg,
                     time: rec.time,
                 },
-                AppendEntry::FlushBarrier(fb) => {
+                AppendJobEntry::FlushBarrier(fb) => {
                     /*
                      * If we get a flush request, push out the current batch so
                      * we can acknowledge it in the correct order.
@@ -177,7 +178,87 @@ async fn append_worker(
             {
                 Ok(_) => break,
                 Err(e) => {
-                    println!("ERROR: append: {:?}", e);
+                    println!("ERROR: append job: {:?}", e);
+                    sleep_ms(1000).await;
+                }
+            }
+        }
+    }
+}
+
+enum AppendWorkerEntry {
+    WorkerEvent(OutputRecord),
+    FlushBarrier(oneshot::Sender<()>),
+}
+
+async fn append_worker_worker(
+    client: buildomat_client::Client,
+    mut rx: mpsc::Receiver<AppendWorkerEntry>,
+) {
+    let mut barrier: Option<oneshot::Sender<()>> = None;
+
+    loop {
+        if let Some(barrier) = barrier.take() {
+            barrier.send(()).unwrap();
+        }
+
+        /*
+         * Build a batch of events to send to the server.
+         */
+        let mut events: Vec<WorkerAppend> = Default::default();
+        while events.len() < 100 {
+            let ae = if events.is_empty() {
+                /*
+                 * Block and wait for the first event in the batch.
+                 */
+                if let Some(ae) = rx.recv().await {
+                    ae
+                } else {
+                    return;
+                }
+            } else {
+                /*
+                 * Grab more events if they are available, without blocking.
+                 */
+                if let Ok(ae) = rx.try_recv() {
+                    ae
+                } else {
+                    break;
+                }
+            };
+
+            events.push(match ae {
+                AppendWorkerEntry::WorkerEvent(rec) => WorkerAppend {
+                    stream: rec.stream,
+                    payload: rec.msg,
+                    time: rec.time,
+                },
+                AppendWorkerEntry::FlushBarrier(fb) => {
+                    /*
+                     * If we get a flush request, push out the current batch so
+                     * we can acknowledge it in the correct order.
+                     */
+                    assert!(barrier.is_none());
+                    barrier = Some(fb);
+                    break;
+                }
+            });
+        }
+
+        if events.is_empty() {
+            continue;
+        }
+
+        loop {
+            match client
+                .worker_append()
+                .body(events.clone())
+                .send()
+                .await
+            {
+                Ok(_) => break,
+                Err(e) => {
+                    println!("ERROR: append worker: {:?}", e);
                     sleep_ms(1000).await;
                 }
             }
@@ -189,7 +270,8 @@ async fn append_worker(
 pub(crate) struct ClientWrap {
     client: buildomat_client::Client,
     job: Option<Arc<WorkerPingJob>>,
-    tx: Option<mpsc::Sender<AppendEntry>>,
+    tx: Option<mpsc::Sender<AppendJobEntry>>,
+    worker_tx: Option<mpsc::Sender<AppendWorkerEntry>>,
 }
 
 impl ClientWrap {
@@ -205,14 +287,45 @@ impl ClientWrap {
         let (tx, rx) = mpsc::channel(256);
         self.tx = Some(tx);
 
-        tokio::task::spawn(append_worker(self.client.clone(), job_id, rx));
+        tokio::task::spawn(append_job_worker(self.client.clone(), job_id, rx));
+
+        let (tx, rx) = mpsc::channel(256);
+        self.worker_tx = Some(tx);
+
+        tokio::task::spawn(append_worker_worker(self.client.clone(), rx));
+    }
+
+    async fn append_worker_msg(&self, msg: &str) {
+        self.append_worker(OutputRecord::new("diagnostic", msg)).await
+    }
+
+    async fn append_worker(&self, rec: OutputRecord) {
+        self.worker_tx
+            .as_ref()
+            .unwrap()
+            .send(AppendWorkerEntry::WorkerEvent(rec))
+            .await
+            .unwrap();
+    }
+
+    async fn flush_worker_barrier(&self) {
+        let (tx, rx) = oneshot::channel::<()>();
+
+        self.worker_tx
+            .as_ref()
+            .unwrap()
+            .send(AppendWorkerEntry::FlushBarrier(tx))
+            .await
+            .unwrap();
+
+        rx.await.unwrap();
     }
 
     async fn append(&self, rec: OutputRecord) {
         self.tx
             .as_ref()
             .unwrap()
-            .send(AppendEntry::JobEvent(rec))
+            .send(AppendJobEntry::JobEvent(rec))
             .await
             .unwrap();
     }
@@ -225,7 +338,7 @@ impl ClientWrap {
         self.tx
             .as_ref()
             .unwrap()
-            .send(AppendEntry::TaskEvent(task.id, rec))
+            .send(AppendJobEntry::TaskEvent(task.id, rec))
             .await
             .unwrap();
     }
@@ -234,13 +347,13 @@ impl ClientWrap {
         self.append_task(task, OutputRecord::new("task", msg)).await;
     }
 
-    async fn flush_barrier(&self) {
+    async fn flush_job_barrier(&self) {
         let (tx, rx) = oneshot::channel::<()>();
 
         self.tx
             .as_ref()
             .unwrap()
-            .send(AppendEntry::FlushBarrier(tx))
+            .send(AppendJobEntry::FlushBarrier(tx))
             .await
             .unwrap();
 
@@ -252,7 +365,7 @@ impl ClientWrap {
          * Make sure any previously enqueued event log events have gone out to
          * the server before we complete the task.
          */
-        self.flush_barrier().await;
+        self.flush_job_barrier().await;
 
         loop {
             match self
@@ -278,7 +391,7 @@ impl ClientWrap {
          * Make sure any previously enqueued event log events have gone out to
          * the server before we complete the job.
          */
-        self.flush_barrier().await;
+        self.flush_job_barrier().await;
 
         loop {
             match self
@@ -292,6 +405,42 @@ impl ClientWrap {
                 Ok(_) => return,
                 Err(e) => {
                     println!("ERROR: complete: {:?}", e);
+                    sleep_ms(1000).await;
+                }
+            }
+        }
+    }
+
+    async fn diagnostics_enable(&self) {
+        loop {
+            match self.client.worker_diagnostics_enable().send().await {
+                Ok(_) => return,
+                Err(e) => {
+                    println!("ERROR: diagnostics enable: {:?}", e);
+                    sleep_ms(1000).await;
+                }
+            }
+        }
+    }
+
+    async fn diagnostics_complete(&self, hold: bool) {
+        /*
+         * Make sure any previously enqueued event log events have gone out to
+         * the server before we complete diagnostics.
+         */
+        self.flush_worker_barrier().await;
+
+        loop {
+            match self
+                .client
+                .worker_diagnostics_complete()
+                .body_map(|body| body.hold(hold))
+                .send()
+                .await
+            {
+                Ok(_) => return,
+                Err(e) => {
+                    println!("ERROR: diagnostics complete: {:?}", e);
                     sleep_ms(1000).await;
                 }
             }
@@ -722,6 +871,8 @@ enum Stage {
     NextTask,
     Child(mpsc::Receiver<exec::Activity>, WorkerPingTask, Option<bool>),
     Upload(mpsc::Receiver<upload::Activity>),
+    StartDiagnostics,
+    Diagnostics(mpsc::Receiver<exec::Activity>, Option<bool>),
     Complete,
     Broken,
 }
@@ -924,6 +1075,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
     let mut metadata: Option<metadata::FactoryMetadata> = None;
     let mut set_root_password = false;
     let mut dump_device_configured = false;
+    let mut diagnostics_enabled = false;
 
     /*
      * Check for a file containing a description of the job we are running.  If
@@ -994,6 +1146,22 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                         continue;
                     }
 
+                    if let Some(md) = &p.factory_metadata {
+                        if md.post_job_diagnostic_script().is_some()
+                            && !diagnostics_enabled
+                        {
+                            /*
+                             * If the factory has given us a post-job diagnostic
+                             * script to run, we need to report that the server
+                             * should wait for it before recycling us.
+                             */
+                            cw.diagnostics_enable().await;
+                            diagnostics_enabled = true;
+                        }
+
+                        metadata = Some(md.clone());
+                    }
+
                     /*
                      * If we have not yet been assigned a task, check for one:
                      */
@@ -1042,10 +1210,6 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                     }
 
                     do_ping = false;
-
-                    if let Some(md) = p.factory_metadata {
-                        metadata = Some(md);
-                    }
                 }
             }
             continue;
@@ -1292,7 +1456,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                         cw.append_msg("channel disconnected").await;
                         cw.job_complete(true).await;
 
-                        stage = Stage::Complete;
+                        stage = Stage::StartDiagnostics;
                     }
                 }
             }
@@ -1326,7 +1490,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                     None => {
                         cw.append_msg("download channel disconnected").await;
                         cw.job_complete(true).await;
-                        stage = Stage::Complete;
+                        stage = Stage::StartDiagnostics;
                     }
                 }
             }
@@ -1360,7 +1524,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                         let failed = upload_errors
                             || exit_details.iter().any(|ex| ex.failed());
                         cw.job_complete(failed).await;
-                        stage = Stage::Complete;
+                        stage = Stage::StartDiagnostics;
                     }
                     Some(upload::Activity::Error(s)) => {
                         cw.append_msg(&format!("upload error: {}", s)).await;
@@ -1372,6 +1536,134 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                     None => {
                         cw.append_msg("upload channel disconnected").await;
                         cw.job_complete(true).await;
+                        stage = Stage::StartDiagnostics;
+                    }
+                }
+            }
+            Stage::StartDiagnostics => {
+                if !diagnostics_enabled {
+                    /*
+                     * If we did not tell the server we were going to do
+                     * post-job diagnostics, then we'll be recycled immediately
+                     * after job completion and there is no point in racing to
+                     * try and upload data.
+                     */
+                    stage = Stage::Complete;
+                    continue;
+                }
+
+                let script = if let Some(script) = metadata
+                    .as_ref()
+                    .and_then(|md| md.post_job_diagnostic_script())
+                {
+                    /*
+                     * The factory gave us a post-diagnostic script to run
+                     * and the server will wait for us to run it.
+                     */
+                    script
+                } else {
+                    stage = Stage::Complete;
+                    continue;
+                };
+
+                cw.append_worker_msg("starting post-job diagnostics").await;
+
+                /*
+                 * Write the submitted script to a file.
+                 */
+                let s = write_script(script)?;
+
+                let mut cmd = Command::new("/bin/bash");
+                cmd.arg(&s);
+
+                /*
+                 * The diagnostic task should have a pristine and reproducible
+                 * environment that does not leak in artefacts of the
+                 * agent.
+                 */
+                cmd.env_clear();
+
+                cmd.env("HOME", "/root");
+                cmd.env("USER", "root");
+                cmd.env("LOGNAME", "root");
+                cmd.env("TZ", "UTC");
+                cmd.env(
+                    "PATH",
+                    "/usr/bin:/bin:/usr/sbin:/sbin:\
+                        /opt/ooce/bin:/opt/ooce/sbin",
+                );
+                cmd.env("LANG", "en_US.UTF-8");
+                cmd.env("LC_ALL", "en_US.UTF-8");
+
+                /*
+                 * Run the diagnostic script as root:
+                 */
+                cmd.current_dir("/");
+                cmd.uid(0);
+                cmd.gid(0);
+
+                match exec::run_diagnostic(cmd) {
+                    Ok(c) => {
+                        stage = Stage::Diagnostics(c, None);
+                    }
+                    Err(e) => {
+                        /*
+                         * Try to post the error we would have reported
+                         * to the server, but don't try too hard.
+                         */
+                        cw.client
+                            .worker_append()
+                            .body(vec![WorkerAppend {
+                                stream: "agent".into(),
+                                time: Utc::now(),
+                                payload: format!("ERROR: exec: {:?}", e),
+                            }])
+                            .send()
+                            .await
+                            .ok();
+
+                        cw.diagnostics_complete(false).await;
+                        stage = Stage::Complete;
+                    }
+                }
+            }
+            Stage::Diagnostics(ch, failed) => {
+                let a = tokio::select! {
+                    _ = pingfreq.tick() => {
+                        do_ping = true;
+                        continue;
+                    }
+                    a = ch.recv() => a,
+                };
+
+                match a {
+                    Some(exec::Activity::Output(o)) => {
+                        cw.append_worker(o.to_record()).await;
+                    }
+                    Some(exec::Activity::Exit(ex)) => {
+                        cw.append_worker(ex.to_record()).await;
+
+                        /*
+                         * Preserve the exit status for when we record task
+                         * completion, and so that we can determine whether to
+                         * mark the worker as held.
+                         */
+                        *failed = Some(ex.failed());
+                        exit_details.push(ex);
+                    }
+                    Some(exec::Activity::Complete) => {
+                        /*
+                         * Record completion of diagnostics so that the server
+                         * can proceed to recycle this instance.
+                         */
+                        cw.diagnostics_complete(failed.unwrap()).await;
+
+                        stage = Stage::Complete;
+                    }
+                    None => {
+                        cw.append_worker_msg("channel disconnected").await;
+                        cw.diagnostics_complete(false).await;
+
                         stage = Stage::Complete;
                     }
                 }

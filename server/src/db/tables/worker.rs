@@ -20,6 +20,7 @@ pub struct Worker {
     pub factory_metadata: Option<JsonValue>,
     pub hold_time: Option<IsoDate>,
     pub hold_reason: Option<String>,
+    pub diagnostics: bool,
 }
 
 impl FromRow for Worker {
@@ -38,6 +39,7 @@ impl FromRow for Worker {
             WorkerDef::FactoryMetadata,
             WorkerDef::HoldTime,
             WorkerDef::HoldReason,
+            WorkerDef::Diagnostics,
         ]
         .into_iter()
         .map(|col| {
@@ -64,6 +66,7 @@ impl FromRow for Worker {
             factory_metadata: row.get(10)?,
             hold_time: row.get(11)?,
             hold_reason: row.get(12)?,
+            diagnostics: row.get(13)?,
         })
     }
 }
@@ -95,6 +98,7 @@ impl Worker {
                 self.factory_metadata.clone().into(),
                 self.hold_time.into(),
                 self.hold_reason.clone().into(),
+                self.diagnostics.into(),
             ])
             .to_owned()
     }

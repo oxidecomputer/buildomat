@@ -1,11 +1,12 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use buildomat_common::*;
+use buildomat_types::metadata;
 use getopts::Options;
 use slog::Logger;
 
@@ -18,6 +19,20 @@ struct Central {
     config: config::ConfigFile,
     client: buildomat_client::Client,
     targets: Vec<String>,
+}
+
+impl Central {
+    fn metadata(
+        &self,
+        t: &config::ConfigFileAwsTarget,
+    ) -> metadata::FactoryMetadata {
+        metadata::FactoryMetadata::V1(metadata::FactoryMetadataV1 {
+            addresses: Default::default(),
+            root_password_hash: self.config.aws.root_password_hash.clone(),
+            dump_to_rpool: self.config.aws.dump_to_rpool,
+            post_job_diagnostic_script: t.post_job_diagnostic_script.clone(),
+        })
+    }
 }
 
 #[tokio::main]

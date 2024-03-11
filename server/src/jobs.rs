@@ -291,6 +291,16 @@ async fn recycle_on_complete_one(log: &Logger, c: &Central) -> Result<()> {
 
         let jobs = c.db.worker_jobs(w.id)?;
         if !jobs.is_empty() && jobs.iter().all(|j| j.complete) {
+            if w.diagnostics {
+                /*
+                 * The worker previously reported that it will perform some
+                 * post-job diagnostics.  We need to wait for the worker to
+                 * finish performing and reporting on those diagnostics prior to
+                 * tearing it down.
+                 */
+                continue;
+            }
+
             info!(log, "worker {} assigned jobs are complete, recycle", w.id,);
             c.db.worker_recycle(w.id)?;
         }

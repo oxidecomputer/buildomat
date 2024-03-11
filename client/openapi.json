@@ -431,6 +431,86 @@
         }
       }
     },
+    "/0/admin/worker/{worker}": {
+      "get": {
+        "operationId": "worker",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Worker"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/0/admin/worker/{worker}/events": {
+      "get": {
+        "operationId": "worker_events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "minseq",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_WorkerEvent",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WorkerEvent"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/0/admin/worker/{worker}/hold": {
       "post": {
         "operationId": "worker_hold_mark",
@@ -1560,6 +1640,36 @@
         }
       }
     },
+    "/0/worker/append": {
+      "post": {
+        "operationId": "worker_append",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Array_of_WorkerAppend",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/WorkerAppend"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/0/worker/bootstrap": {
       "post": {
         "operationId": "worker_bootstrap",
@@ -1583,6 +1693,48 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/0/worker/diagnostics/complete": {
+      "post": {
+        "operationId": "worker_diagnostics_complete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerCompleteDiagnostics"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/0/worker/diagnostics/enable": {
+      "post": {
+        "operationId": "worker_diagnostics_enable",
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -2501,6 +2653,18 @@
                   "$ref": "#/components/schemas/FactoryAddresses"
                 }
               },
+              "dump_to_rpool": {
+                "nullable": true,
+                "default": null,
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "post_job_diagnostic_script": {
+                "nullable": true,
+                "default": null,
+                "type": "string"
+              },
               "root_password_hash": {
                 "nullable": true,
                 "type": "string"
@@ -2564,6 +2728,9 @@
           },
           "recycle": {
             "type": "boolean"
+          },
+          "target": {
+            "type": "string"
           }
         },
         "required": [
@@ -2571,7 +2738,8 @@
           "hold",
           "id",
           "online",
-          "recycle"
+          "recycle",
+          "target"
         ]
       },
       "FactoryWorkerAppend": {
@@ -3299,6 +3467,9 @@
           "deleted": {
             "type": "boolean"
           },
+          "diagnostics": {
+            "type": "boolean"
+          },
           "factory": {
             "type": "string"
           },
@@ -3338,6 +3509,7 @@
         "required": [
           "bootstrap",
           "deleted",
+          "diagnostics",
           "factory",
           "id",
           "jobs",
@@ -3386,6 +3558,26 @@
         },
         "required": [
           "complete"
+        ]
+      },
+      "WorkerAppend": {
+        "type": "object",
+        "properties": {
+          "payload": {
+            "type": "string"
+          },
+          "stream": {
+            "type": "string"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "payload",
+          "stream",
+          "time"
         ]
       },
       "WorkerAppendJob": {
@@ -3460,6 +3652,17 @@
           "id"
         ]
       },
+      "WorkerCompleteDiagnostics": {
+        "type": "object",
+        "properties": {
+          "hold": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "hold"
+        ]
+      },
       "WorkerCompleteJob": {
         "type": "object",
         "properties": {
@@ -3480,6 +3683,37 @@
         },
         "required": [
           "failed"
+        ]
+      },
+      "WorkerEvent": {
+        "type": "object",
+        "properties": {
+          "payload": {
+            "type": "string"
+          },
+          "seq": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "stream": {
+            "type": "string"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_remote": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "payload",
+          "seq",
+          "stream",
+          "time"
         ]
       },
       "WorkerHold": {
