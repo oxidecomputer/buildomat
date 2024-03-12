@@ -10,9 +10,8 @@ pub struct FactoryMetadataV1 {
     #[serde(default)]
     pub addresses: Vec<FactoryAddresses>,
     pub root_password_hash: Option<String>,
-    #[serde(default)]
+    pub root_authorized_keys: Option<String>,
     pub dump_to_rpool: Option<u32>,
-    #[serde(default)]
     pub post_job_diagnostic_script: Option<String>,
 }
 
@@ -37,6 +36,12 @@ impl FactoryMetadata {
     pub fn root_password_hash(&self) -> Option<&str> {
         match self {
             FactoryMetadata::V1(md) => md.root_password_hash.as_deref(),
+        }
+    }
+
+    pub fn root_authorized_keys(&self) -> Option<&str> {
+        match self {
+            FactoryMetadata::V1(md) => md.root_authorized_keys.as_deref(),
         }
     }
 

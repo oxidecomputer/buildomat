@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 use std::env;
 use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind::NotFound, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -250,12 +250,7 @@ async fn append_worker_worker(
         }
 
         loop {
-            match client
-                .worker_append()
-                .body(events.clone())
-                .send()
-                .await
-            {
+            match client.worker_append().body(events.clone()).send().await {
                 Ok(_) => break,
                 Err(e) => {
                     println!("ERROR: append worker: {:?}", e);
@@ -699,6 +694,20 @@ fn set_root_password_hash(hash: &str) -> Result<()> {
     Ok(())
 }
 
+fn set_root_authorized_keys(keys: &str) -> Result<()> {
+    /*
+     * Install the provided root "authorized_keys" file.  Note that the
+     * permissions are important, in order for sshd to actually use the file.
+     */
+    let dir = PathBuf::from("/root/.ssh");
+    if !dir.exists() {
+        std::fs::DirBuilder::new().mode(0o700).create(&dir)?;
+    }
+    let file = dir.join("authorized_keys");
+    write_text(&file, keys)?;
+    Ok(())
+}
+
 #[cfg(target_os = "illumos")]
 fn set_nodename(name: &str) -> Result<()> {
     write_text("/etc/nodename", &format!("{name}\n"))?;
@@ -1074,6 +1083,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
 
     let mut metadata: Option<metadata::FactoryMetadata> = None;
     let mut set_root_password = false;
+    let mut set_root_keys = false;
     let mut dump_device_configured = false;
     let mut diagnostics_enabled = false;
 
@@ -1115,6 +1125,16 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                      * don't interrupt the other operation of the agent.
                      */
                     set_root_password = true;
+                }
+            }
+
+            if !set_root_keys {
+                if let Some(rak) = md.root_authorized_keys() {
+                    if let Err(e) = set_root_authorized_keys(rak) {
+                        println!("ERROR: setting root SSH keys: {e}");
+                    }
+
+                    set_root_keys = true;
                 }
             }
 

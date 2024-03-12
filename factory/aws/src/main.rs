@@ -29,6 +29,7 @@ impl Central {
         metadata::FactoryMetadata::V1(metadata::FactoryMetadataV1 {
             addresses: Default::default(),
             root_password_hash: self.config.aws.root_password_hash.clone(),
+            root_authorized_keys: self.config.aws.root_authorized_keys.clone(),
             dump_to_rpool: self.config.aws.dump_to_rpool,
             post_job_diagnostic_script: t.post_job_diagnostic_script.clone(),
         })
