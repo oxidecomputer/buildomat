@@ -34,6 +34,7 @@ pub(crate) struct ConfigFileAwsTarget {
     pub root_size_gb: i64,
     pub ami: String,
     pub post_job_diagnostic_script: Option<String>,
+    pub pre_job_diagnostic_script: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]

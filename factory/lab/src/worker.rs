@@ -288,6 +288,7 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
                                         root_authorized_keys: None,
                                         dump_to_rpool: None,
                                         post_job_diagnostic_script: None,
+                                        pre_job_diagnostic_script: None,
                                     },
                                 ),
                             ))

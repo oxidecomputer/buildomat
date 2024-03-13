@@ -1748,6 +1748,16 @@
     "/0/worker/fail": {
       "post": {
         "operationId": "worker_fail",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerFail"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "204": {
             "description": "resource updated"
@@ -2660,6 +2670,10 @@
                 "minimum": 0
               },
               "post_job_diagnostic_script": {
+                "nullable": true,
+                "type": "string"
+              },
+              "pre_job_diagnostic_script": {
                 "nullable": true,
                 "type": "string"
               },
@@ -3725,6 +3739,15 @@
           "stream",
           "time"
         ]
+      },
+      "WorkerFail": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "nullable": true,
+            "type": "string"
+          }
+        }
       },
       "WorkerHold": {
         "type": "object",

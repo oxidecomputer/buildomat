@@ -12,6 +12,7 @@ pub struct FactoryMetadataV1 {
     pub root_password_hash: Option<String>,
     pub root_authorized_keys: Option<String>,
     pub dump_to_rpool: Option<u32>,
+    pub pre_job_diagnostic_script: Option<String>,
     pub post_job_diagnostic_script: Option<String>,
 }
 
@@ -58,6 +59,12 @@ impl FactoryMetadata {
     pub fn dump_to_rpool(&self) -> Option<u32> {
         match self {
             FactoryMetadata::V1(md) => md.dump_to_rpool,
+        }
+    }
+
+    pub fn pre_job_diagnostic_script(&self) -> Option<&str> {
+        match self {
+            FactoryMetadata::V1(md) => md.pre_job_diagnostic_script.as_deref(),
         }
     }
 

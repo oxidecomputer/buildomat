@@ -222,27 +222,35 @@ pub(crate) async fn worker_ping(
     Ok(HttpResponseOk(res))
 }
 
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub(crate) struct WorkerFail {
+    reason: Option<String>,
+}
+
 #[endpoint {
     method = POST,
     path = "/0/worker/fail",
 }]
 pub(crate) async fn worker_fail(
     rqctx: RequestContext<Arc<Central>>,
+    body: TypedBody<WorkerFail>,
 ) -> DSResult<HttpResponseUpdatedNoContent> {
     let c = rqctx.context();
     let log = &rqctx.log;
 
     let w = c.require_worker(log, &rqctx.request).await?;
+    let b = body.into_inner();
 
-    warn!(log, "worker failed!"; "id" => w.id.to_string());
+    let reason = b.reason.as_deref().unwrap_or("agent reported failure");
+    warn!(log, "worker failed!"; "id" => w.id.to_string(),
+        "reason" => reason);
 
     /*
      * Record in the database that the worker has failed.  This routine will
      * take care of reporting failure in any assigned jobs, marking the worker
      * as held, etc.
      */
-    let failed_jobs =
-        c.db.worker_mark_failed(w.id, "agent reported failure").or_500()?;
+    let failed_jobs = c.db.worker_mark_failed(w.id, reason).or_500()?;
     if !failed_jobs.is_empty() {
         let jobs = failed_jobs
             .into_iter()

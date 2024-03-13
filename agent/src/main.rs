@@ -68,15 +68,20 @@ struct ConfigFile {
 
 impl ConfigFile {
     fn make_client(&self) -> ClientWrap {
-        ClientWrap {
-            client: buildomat_client::ClientBuilder::new(&self.baseurl)
-                .bearer_token(&self.token)
-                .build()
-                .expect("new client"),
-            job: None,
-            tx: None,
-            worker_tx: None,
-        }
+        let client = buildomat_client::ClientBuilder::new(&self.baseurl)
+            .bearer_token(&self.token)
+            .build()
+            .expect("new client");
+
+        /*
+         * Start the task responsible for uploading per-worker events to the
+         * server.  We may have events for this stream prior to the assignment
+         * of a job.
+         */
+        let (worker_tx, rx) = mpsc::channel(256);
+        tokio::task::spawn(append_worker_worker(client.clone(), rx));
+
+        ClientWrap { client, job: None, tx: None, worker_tx }
     }
 }
 
@@ -266,7 +271,7 @@ pub(crate) struct ClientWrap {
     client: buildomat_client::Client,
     job: Option<Arc<WorkerPingJob>>,
     tx: Option<mpsc::Sender<AppendJobEntry>>,
-    worker_tx: Option<mpsc::Sender<AppendWorkerEntry>>,
+    worker_tx: mpsc::Sender<AppendWorkerEntry>,
 }
 
 impl ClientWrap {
@@ -283,35 +288,21 @@ impl ClientWrap {
         self.tx = Some(tx);
 
         tokio::task::spawn(append_job_worker(self.client.clone(), job_id, rx));
-
-        let (tx, rx) = mpsc::channel(256);
-        self.worker_tx = Some(tx);
-
-        tokio::task::spawn(append_worker_worker(self.client.clone(), rx));
     }
 
-    async fn append_worker_msg(&self, msg: &str) {
-        self.append_worker(OutputRecord::new("diagnostic", msg)).await
+    async fn append_worker_msg(&self, name: &str, msg: &str) {
+        self.append_worker(OutputRecord::new(&format!("diag.{name}"), msg))
+            .await
     }
 
     async fn append_worker(&self, rec: OutputRecord) {
-        self.worker_tx
-            .as_ref()
-            .unwrap()
-            .send(AppendWorkerEntry::WorkerEvent(rec))
-            .await
-            .unwrap();
+        self.worker_tx.send(AppendWorkerEntry::WorkerEvent(rec)).await.unwrap();
     }
 
     async fn flush_worker_barrier(&self) {
         let (tx, rx) = oneshot::channel::<()>();
 
-        self.worker_tx
-            .as_ref()
-            .unwrap()
-            .send(AppendWorkerEntry::FlushBarrier(tx))
-            .await
-            .unwrap();
+        self.worker_tx.send(AppendWorkerEntry::FlushBarrier(tx)).await.unwrap();
 
         rx.await.unwrap();
     }
@@ -442,9 +433,15 @@ impl ClientWrap {
         }
     }
 
-    async fn report_failure(&self) {
+    async fn report_failure(&self, reason: Option<&str>) {
         loop {
-            match self.client.worker_fail().send().await {
+            match self
+                .client
+                .worker_fail()
+                .body_map(|body| body.reason(reason.map(str::to_string)))
+                .send()
+                .await
+            {
                 Ok(_) => return,
                 Err(e) => {
                     println!("ERROR: reporting failure: {:?}", e);
@@ -591,6 +588,83 @@ impl ClientWrap {
             }
         }
     }
+
+    /**
+     * Start a pre- or post-job diagnostic script.  Returns a channel with
+     * script output and termination status so that it can be forwarded to the
+     * server.
+     */
+    async fn start_diag_script(
+        &self,
+        name: &str,
+        script: &str,
+    ) -> Option<mpsc::Receiver<exec::Activity>> {
+        self.append_worker_msg(
+            name,
+            &format!("starting {name}-job diagnostics"),
+        )
+        .await;
+
+        /*
+         * Write the submitted script to a file.
+         */
+        let s = match write_script(script) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("ERROR: writing {name}-job diagnostic script: {e}");
+                return None;
+            }
+        };
+
+        let mut cmd = Command::new("/bin/bash");
+        cmd.arg(&s);
+
+        /*
+         * The diagnostic task should have a pristine and reproducible
+         * environment that does not leak in artefacts of the agent.
+         */
+        cmd.env_clear();
+
+        cmd.env("HOME", "/root");
+        cmd.env("USER", "root");
+        cmd.env("LOGNAME", "root");
+        cmd.env("TZ", "UTC");
+        cmd.env(
+            "PATH",
+            "/usr/bin:/bin:/usr/sbin:/sbin:/opt/ooce/bin:/opt/ooce/sbin",
+        );
+        cmd.env("LANG", "en_US.UTF-8");
+        cmd.env("LC_ALL", "en_US.UTF-8");
+
+        /*
+         * Run the diagnostic script as root:
+         */
+        cmd.current_dir("/");
+        cmd.uid(0);
+        cmd.gid(0);
+
+        match exec::run_diagnostic(cmd, name) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                /*
+                 * Try to post the error we would have reported to the server,
+                 * but don't try too hard.
+                 */
+                self.client
+                    .worker_append()
+                    .body(vec![WorkerAppend {
+                        stream: "agent".into(),
+                        time: Utc::now(),
+                        payload: format!("ERROR: diag.{name} exec: {:?}", e),
+                    }])
+                    .send()
+                    .await
+                    .ok();
+
+                None
+            }
+        }
+    }
 }
 
 fn load<P, T>(p: P) -> Result<T>
@@ -669,8 +743,8 @@ fn make_dirs_for<P: AsRef<Path>>(p: P) -> Result<()> {
     Ok(())
 }
 
-fn write_script(script: &str) -> Result<String> {
-    let targ = format!("/tmp/{}.sh", genkey(16));
+fn write_script(script: &str) -> Result<PathBuf> {
+    let targ = format!("/tmp/{}.sh", genkey(16)).into();
     let mut f = OpenOptions::new().create_new(true).write(true).open(&targ)?;
     let mut data = script.to_string();
     if !data.ends_with('\n') {
@@ -880,8 +954,10 @@ enum Stage {
     NextTask,
     Child(mpsc::Receiver<exec::Activity>, WorkerPingTask, Option<bool>),
     Upload(mpsc::Receiver<upload::Activity>),
-    StartDiagnostics,
-    Diagnostics(mpsc::Receiver<exec::Activity>, Option<bool>),
+    StartPreDiagnostics(String),
+    PreDiagnostics(mpsc::Receiver<exec::Activity>, Option<bool>),
+    StartPostDiagnostics,
+    PostDiagnostics(mpsc::Receiver<exec::Activity>, Option<bool>),
     Complete,
     Broken,
 }
@@ -1085,7 +1161,8 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
     let mut set_root_password = false;
     let mut set_root_keys = false;
     let mut dump_device_configured = false;
-    let mut diagnostics_enabled = false;
+    let mut post_diag_script: Option<String> = None;
+    let mut pre_diag_done = false;
 
     /*
      * Check for a file containing a description of the job we are running.  If
@@ -1101,7 +1178,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
         /*
          * Report this condition to the server:
          */
-        cw.report_failure().await;
+        cw.report_failure(None).await;
 
         /*
          * We need to park and do nothing other than continue to ping the server
@@ -1167,16 +1244,28 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                     }
 
                     if let Some(md) = &p.factory_metadata {
-                        if md.post_job_diagnostic_script().is_some()
-                            && !diagnostics_enabled
-                        {
-                            /*
-                             * If the factory has given us a post-job diagnostic
-                             * script to run, we need to report that the server
-                             * should wait for it before recycling us.
-                             */
-                            cw.diagnostics_enable().await;
-                            diagnostics_enabled = true;
+                        /*
+                         * If the factory has given us a post-job diagnostic
+                         * script to run, we need to report that the server
+                         * should wait for it before recycling us.
+                         */
+                        if let Some(script) = md.post_job_diagnostic_script() {
+                            if post_diag_script.is_none() {
+                                cw.diagnostics_enable().await;
+                                post_diag_script = Some(script.into());
+                            }
+                        }
+
+                        /*
+                         * If there is a pre-diagnostic script we need to invoke
+                         * it prior to starting the job.
+                         */
+                        if let Some(script) = md.pre_job_diagnostic_script() {
+                            if !pre_diag_done && matches!(stage, Stage::Ready) {
+                                stage =
+                                    Stage::StartPreDiagnostics(script.into());
+                                pre_diag_done = true;
+                            }
                         }
 
                         metadata = Some(md.clone());
@@ -1185,10 +1274,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                     /*
                      * If we have not yet been assigned a task, check for one:
                      */
-                    if !matches!(stage, Stage::Broken) && cw.job_id().is_none()
-                    {
-                        assert!(matches!(stage, Stage::Ready));
-
+                    if matches!(stage, Stage::Ready) && cw.job_id().is_none() {
                         if let Some(j) = &p.job {
                             /*
                              * Adopt the job, which may contain several tasks to
@@ -1308,6 +1394,65 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                 do_ping = true;
                 sleep_ms(1000).await;
                 continue;
+            }
+            Stage::StartPreDiagnostics(script) => {
+                if let Some(c) =
+                    cw.start_diag_script("pre", script.as_str()).await
+                {
+                    stage = Stage::PreDiagnostics(c, None);
+                } else {
+                    stage = Stage::Ready;
+                }
+            }
+            Stage::PreDiagnostics(ch, failed) => {
+                let a = tokio::select! {
+                    _ = pingfreq.tick() => {
+                        do_ping = true;
+                        continue;
+                    }
+                    a = ch.recv() => a,
+                };
+
+                match a {
+                    Some(exec::Activity::Output(o)) => {
+                        cw.append_worker(o.to_record()).await;
+                    }
+                    Some(exec::Activity::Exit(ex)) => {
+                        cw.append_worker(ex.to_record()).await;
+
+                        /*
+                         * Preserve the exit status for when we record task
+                         * completion, and so that we can determine whether to
+                         * mark the worker as failed.
+                         */
+                        *failed = Some(ex.failed());
+                        exit_details.push(ex);
+                    }
+                    Some(exec::Activity::Complete) if failed.unwrap() => {
+                        /*
+                         * If the pre-job diagnostic script fails, mark the
+                         * worker as broken prior to accepting a job from
+                         * the server.
+                         */
+                        println!("ERROR: pre-diagnostics failed; aborting");
+                        cw.report_failure(Some(
+                            "pre-job diagnostics reported a fault",
+                        ))
+                        .await;
+                        stage = Stage::Broken;
+                    }
+                    Some(exec::Activity::Complete) => {
+                        println!("pre-job diagnostics complete");
+                        stage = Stage::Ready;
+                    }
+                    None => {
+                        cw.append_worker_msg("pre", "channel disconnected")
+                            .await;
+                        println!("ERROR: pre-diagnostics failed; aborting");
+                        cw.report_failure(None).await;
+                        stage = Stage::Broken;
+                    }
+                }
             }
             Stage::NextTask => {
                 /*
@@ -1476,7 +1621,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                         cw.append_msg("channel disconnected").await;
                         cw.job_complete(true).await;
 
-                        stage = Stage::StartDiagnostics;
+                        stage = Stage::StartPostDiagnostics;
                     }
                 }
             }
@@ -1510,7 +1655,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                     None => {
                         cw.append_msg("download channel disconnected").await;
                         cw.job_complete(true).await;
-                        stage = Stage::StartDiagnostics;
+                        stage = Stage::StartPostDiagnostics;
                     }
                 }
             }
@@ -1544,7 +1689,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                         let failed = upload_errors
                             || exit_details.iter().any(|ex| ex.failed());
                         cw.job_complete(failed).await;
-                        stage = Stage::StartDiagnostics;
+                        stage = Stage::StartPostDiagnostics;
                     }
                     Some(upload::Activity::Error(s)) => {
                         cw.append_msg(&format!("upload error: {}", s)).await;
@@ -1556,98 +1701,29 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                     None => {
                         cw.append_msg("upload channel disconnected").await;
                         cw.job_complete(true).await;
-                        stage = Stage::StartDiagnostics;
+                        stage = Stage::StartPostDiagnostics;
                     }
                 }
             }
-            Stage::StartDiagnostics => {
-                if !diagnostics_enabled {
-                    /*
-                     * If we did not tell the server we were going to do
-                     * post-job diagnostics, then we'll be recycled immediately
-                     * after job completion and there is no point in racing to
-                     * try and upload data.
-                     */
-                    stage = Stage::Complete;
-                    continue;
-                }
-
-                let script = if let Some(script) = metadata
-                    .as_ref()
-                    .and_then(|md| md.post_job_diagnostic_script())
-                {
+            Stage::StartPostDiagnostics => {
+                if let Some(script) = post_diag_script.as_deref() {
                     /*
                      * The factory gave us a post-diagnostic script to run
                      * and the server will wait for us to run it.
                      */
-                    script
-                } else {
-                    stage = Stage::Complete;
-                    continue;
-                };
-
-                cw.append_worker_msg("starting post-job diagnostics").await;
-
-                /*
-                 * Write the submitted script to a file.
-                 */
-                let s = write_script(script)?;
-
-                let mut cmd = Command::new("/bin/bash");
-                cmd.arg(&s);
-
-                /*
-                 * The diagnostic task should have a pristine and reproducible
-                 * environment that does not leak in artefacts of the
-                 * agent.
-                 */
-                cmd.env_clear();
-
-                cmd.env("HOME", "/root");
-                cmd.env("USER", "root");
-                cmd.env("LOGNAME", "root");
-                cmd.env("TZ", "UTC");
-                cmd.env(
-                    "PATH",
-                    "/usr/bin:/bin:/usr/sbin:/sbin:\
-                        /opt/ooce/bin:/opt/ooce/sbin",
-                );
-                cmd.env("LANG", "en_US.UTF-8");
-                cmd.env("LC_ALL", "en_US.UTF-8");
-
-                /*
-                 * Run the diagnostic script as root:
-                 */
-                cmd.current_dir("/");
-                cmd.uid(0);
-                cmd.gid(0);
-
-                match exec::run_diagnostic(cmd) {
-                    Ok(c) => {
-                        stage = Stage::Diagnostics(c, None);
-                    }
-                    Err(e) => {
-                        /*
-                         * Try to post the error we would have reported
-                         * to the server, but don't try too hard.
-                         */
-                        cw.client
-                            .worker_append()
-                            .body(vec![WorkerAppend {
-                                stream: "agent".into(),
-                                time: Utc::now(),
-                                payload: format!("ERROR: exec: {:?}", e),
-                            }])
-                            .send()
-                            .await
-                            .ok();
-
+                    if let Some(c) = cw.start_diag_script("post", script).await
+                    {
+                        stage = Stage::PostDiagnostics(c, None);
+                    } else {
                         cw.diagnostics_complete(false).await;
                         stage = Stage::Complete;
                     }
+                } else {
+                    stage = Stage::Complete;
+                    continue;
                 }
             }
-            Stage::Diagnostics(ch, failed) => {
+            Stage::PostDiagnostics(ch, failed) => {
                 let a = tokio::select! {
                     _ = pingfreq.tick() => {
                         do_ping = true;
@@ -1681,7 +1757,8 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                         stage = Stage::Complete;
                     }
                     None => {
-                        cw.append_worker_msg("channel disconnected").await;
+                        cw.append_worker_msg("post", "channel disconnected")
+                            .await;
                         cw.diagnostics_complete(false).await;
 
                         stage = Stage::Complete;

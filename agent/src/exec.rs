@@ -232,14 +232,14 @@ pub fn thread_done(
     }
 }
 
-pub fn run_diagnostic(cmd: Command) -> Result<Receiver<Activity>> {
+pub fn run_diagnostic(cmd: Command, name: &str) -> Result<Receiver<Activity>> {
     let (tx, rx) = channel::<Activity>(100);
 
     run_common(
         cmd,
         ActivityBuilder {
-            error_stream: "diagnostic".to_string(),
-            exit_stream: "diagnostic".to_string(),
+            error_stream: format!("diag.{name}"),
+            exit_stream: format!("diag.{name}"),
             bgproc: None,
         },
         tx,

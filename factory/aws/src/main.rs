@@ -32,6 +32,7 @@ impl Central {
             root_authorized_keys: self.config.aws.root_authorized_keys.clone(),
             dump_to_rpool: self.config.aws.dump_to_rpool,
             post_job_diagnostic_script: t.post_job_diagnostic_script.clone(),
+            pre_job_diagnostic_script: t.pre_job_diagnostic_script.clone(),
         })
     }
 }

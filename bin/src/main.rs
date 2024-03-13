@@ -1649,7 +1649,7 @@ async fn poll_worker(l: &Level<Stuff>, id: &str, json: bool) -> Result<()> {
                         println!("{}", e.payload);
                     } else if e.stream == "control" {
                         println!("|=| {}", e.payload);
-                    } else if e.stream == "diagnostic" {
+                    } else if e.stream.starts_with("diag.") {
                         println!("|D| {}", e.payload);
                     } else if e.stream == "worker" {
                         println!("|W| {}", e.payload);
