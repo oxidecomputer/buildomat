@@ -21,6 +21,7 @@ pub struct Worker {
     pub hold_time: Option<IsoDate>,
     pub hold_reason: Option<String>,
     pub diagnostics: bool,
+    pub factory_ip: Option<String>,
 }
 
 impl FromRow for Worker {
@@ -40,6 +41,7 @@ impl FromRow for Worker {
             WorkerDef::HoldTime,
             WorkerDef::HoldReason,
             WorkerDef::Diagnostics,
+            WorkerDef::FactoryIp,
         ]
         .into_iter()
         .map(|col| {
@@ -67,6 +69,7 @@ impl FromRow for Worker {
             hold_time: row.get(11)?,
             hold_reason: row.get(12)?,
             diagnostics: row.get(13)?,
+            factory_ip: row.get(14)?,
         })
     }
 }
@@ -99,6 +102,7 @@ impl Worker {
                 self.hold_time.into(),
                 self.hold_reason.clone().into(),
                 self.diagnostics.into(),
+                self.factory_ip.clone().into(),
             ])
             .to_owned()
     }

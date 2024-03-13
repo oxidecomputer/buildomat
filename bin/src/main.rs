@@ -1427,6 +1427,7 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("creation", WIDTH_ISODATE, true);
     l.add_column("age", 8, true);
     l.add_column("info", 20, false);
+    l.add_column("ip", 15, false);
     l.add_column("target", WIDTH_ID, false);
     l.add_column("hold_time", WIDTH_ISODATE, false);
     l.add_column("hold_reason", 32, false);
@@ -1485,6 +1486,7 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
             .flag('d', w.diagnostics)
             .build();
         r.add_str("info", w.factory_private.as_deref().unwrap_or("-"));
+        r.add_str("ip", w.factory_ip.as_deref().unwrap_or("-"));
         r.add_str("target", &w.target);
 
         if let Some(hold) = &w.hold {

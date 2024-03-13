@@ -273,6 +273,7 @@ pub(crate) async fn factory_worker_flush(
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct FactoryWorkerAssociate {
     private: String,
+    ip: Option<String>,
     metadata: Option<metadata::FactoryMetadata>,
 }
 
@@ -296,8 +297,12 @@ pub(crate) async fn factory_worker_associate(
     let w = c.db.worker(p.worker()?).or_500()?;
     f.owns(log, &w)?;
 
-    if let Err(e) = c.db.worker_associate(w.id, &b.private, b.metadata.as_ref())
-    {
+    if let Err(e) = c.db.worker_associate(
+        w.id,
+        &b.private,
+        b.metadata.as_ref(),
+        b.ip.as_deref(),
+    ) {
         error!(
             log,
             "factory {} worker {} associate failure: {:?}: {:?}",

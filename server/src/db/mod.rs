@@ -760,6 +760,7 @@ impl Database {
         wid: WorkerId,
         factory_private: &str,
         factory_metadata: Option<&metadata::FactoryMetadata>,
+        factory_ip: Option<&str>,
     ) -> DBResult<()> {
         /*
          * First, convert the provided metadata object to a serde JSON value.
@@ -807,6 +808,30 @@ impl Database {
                         .to_owned(),
                 )?;
                 assert_eq!(count, 1);
+            }
+
+            /*
+             * The IP address of the worker is only present here for diagnostic
+             * purposes, so allow it to change if needed without raising an
+             * error:
+             */
+            if let Some(factory_ip) = factory_ip {
+                let update_ip = if let Some(current) = w.factory_ip.as_deref() {
+                    current != factory_ip
+                } else {
+                    true
+                };
+
+                if update_ip {
+                    let count = h.exec_update(
+                        Query::update()
+                            .table(WorkerDef::Table)
+                            .and_where(Expr::col(WorkerDef::Id).eq(w.id))
+                            .value(WorkerDef::FactoryIp, factory_ip)
+                            .to_owned(),
+                    )?;
+                    assert_eq!(count, 1);
+                }
             }
 
             if let Some(current) = w.factory_metadata.as_ref() {
@@ -916,6 +941,7 @@ impl Database {
             id: WorkerId::generate(),
             bootstrap: genkey(64),
             factory_private: None,
+            factory_ip: None,
             factory_metadata: None,
             token: None,
             deleted: false,

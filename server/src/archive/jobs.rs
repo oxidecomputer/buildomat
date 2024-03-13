@@ -417,6 +417,7 @@ pub struct ArchivedWorkerInfo {
     target: String,
     factory: ArchivedFactoryInfo,
     factory_private: Option<String>,
+    factory_ip: Option<String>,
     factory_metadata: Option<serde_json::Value>,
 }
 
@@ -426,6 +427,7 @@ impl From<(db::Worker, db::Factory)> for ArchivedWorkerInfo {
         let db::Worker {
             id,
             factory_private,
+            factory_ip,
             factory_metadata,
 
             target: _,
@@ -447,6 +449,7 @@ impl From<(db::Worker, db::Factory)> for ArchivedWorkerInfo {
             target,
             factory,
             factory_private,
+            factory_ip,
             factory_metadata: factory_metadata.map(|v| v.0),
         }
     }

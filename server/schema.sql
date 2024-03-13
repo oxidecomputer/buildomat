@@ -328,3 +328,7 @@ CREATE TABLE worker_event (
 -- v 54
 ALTER TABLE worker ADD COLUMN
     diagnostics     INTEGER NOT NULL    DEFAULT 0;
+
+-- v 55
+ALTER TABLE worker ADD COLUMN
+    factory_ip      TEXT;

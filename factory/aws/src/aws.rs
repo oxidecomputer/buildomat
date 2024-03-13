@@ -34,6 +34,36 @@ struct Instance {
     launch_time: Option<DateTime<Utc>>,
 }
 
+impl From<(&rusoto_ec2::Instance, &str)> for Instance {
+    fn from((i, tag): (&rusoto_ec2::Instance, &str)) -> Self {
+        let id = i.instance_id.as_ref().unwrap().to_string();
+        let state =
+            i.state.as_ref().unwrap().name.as_ref().unwrap().to_string();
+
+        let launch_time = i
+            .launch_time
+            .as_ref()
+            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.into());
+
+        let worker_id = i
+            .tags
+            .tag(&format!("{}-worker_id", tag))
+            .map(|s| Ulid::from_str(&s).ok())
+            .unwrap_or_default();
+
+        let lease_id = i
+            .tags
+            .tag(&format!("{}-lease_id", tag))
+            .map(|s| Ulid::from_str(&s).ok())
+            .unwrap_or_default();
+
+        let ip = i.private_ip_address.clone();
+
+        Instance { id, state, worker_id, lease_id, ip, launch_time }
+    }
+}
+
 impl Instance {
     fn age_secs(&self) -> u64 {
         self.launch_time
@@ -109,7 +139,7 @@ async fn create_instance(
     target: &ConfigFileAwsTarget,
     worker: &FactoryWorker,
     lease_id: &str,
-) -> Result<String> {
+) -> Result<Instance> {
     let id = worker.id.to_string();
 
     let script = include_str!("../scripts/user_data.sh")
@@ -170,17 +200,17 @@ async fn create_instance(
         })
         .await?;
 
-    let mut ids = Vec::new();
+    let mut instances = Vec::new();
     if let Some(insts) = &res.instances {
-        for i in insts.iter() {
-            ids.push(i.instance_id.as_deref().unwrap().to_string());
-        }
+        insts.iter().for_each(|i| {
+            instances.push(Instance::from((i, config.aws.tag.as_str())))
+        });
     }
 
-    if ids.len() != 1 {
-        bail!("wanted one instance, got {:?}", ids);
+    if instances.len() != 1 {
+        bail!("wanted one instance, got {:?}", instances);
     } else {
-        Ok(ids[0].to_string())
+        Ok(instances.pop().unwrap())
     }
 }
 
@@ -214,49 +244,10 @@ async fn instances(
     if let Some(resv) = &res.reservations {
         for r in resv.iter() {
             if let Some(insts) = &r.instances {
-                for i in insts.iter() {
-                    let id = i.instance_id.as_ref().unwrap().to_string();
-                    let state = i
-                        .state
-                        .as_ref()
-                        .unwrap()
-                        .name
-                        .as_ref()
-                        .unwrap()
-                        .to_string();
-
-                    let launch_time = i
-                        .launch_time
-                        .as_ref()
-                        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-                        .map(|dt| dt.into());
-
-                    let worker_id = i
-                        .tags
-                        .tag(&format!("{}-worker_id", tag))
-                        .map(|s| Ulid::from_str(&s).ok())
-                        .unwrap_or_default();
-
-                    let lease_id = i
-                        .tags
-                        .tag(&format!("{}-lease_id", tag))
-                        .map(|s| Ulid::from_str(&s).ok())
-                        .unwrap_or_default();
-
-                    let ip = i.private_ip_address.clone();
-
-                    out.insert(
-                        id.to_string(),
-                        Instance {
-                            id,
-                            state,
-                            worker_id,
-                            lease_id,
-                            ip,
-                            launch_time,
-                        },
-                    );
-                }
+                insts.iter().for_each(|i| {
+                    let i = Instance::from((i, tag));
+                    out.insert(i.id.to_string(), i);
+                });
             }
         }
     }
@@ -340,6 +331,7 @@ async fn aws_worker_one(
                             .worker(&w.id)
                             .body_map(|body| {
                                 body.private(&i.id)
+                                    .ip(i.ip.clone())
                                     .metadata(Some(c.metadata(t)))
                             })
                             .send()
@@ -582,10 +574,14 @@ async fn aws_worker_one(
             .send()
             .await?;
 
-        let instance_id =
-            create_instance(log, ec2, config, t, &w, &lease.job).await?;
+        let i = create_instance(log, ec2, config, t, &w, &lease.job).await?;
         created += 1;
-        info!(log, "created instance: {}", instance_id);
+        info!(
+            log,
+            "created instance: {} (IP {})",
+            i.id,
+            i.ip.as_deref().unwrap_or("?"),
+        );
 
         /*
          * Record the instance ID against the worker for which it was created:
@@ -594,7 +590,7 @@ async fn aws_worker_one(
             .factory_worker_associate()
             .worker(&w.id)
             .body_map(|body| {
-                body.private(&instance_id).metadata(Some(c.metadata(t)))
+                body.private(&i.id).ip(i.ip).metadata(Some(c.metadata(t)))
             })
             .send()
             .await?;

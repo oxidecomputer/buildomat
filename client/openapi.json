@@ -2655,14 +2655,16 @@
               },
               "dump_to_rpool": {
                 "nullable": true,
-                "default": null,
                 "type": "integer",
                 "format": "uint32",
                 "minimum": 0
               },
               "post_job_diagnostic_script": {
                 "nullable": true,
-                "default": null,
+                "type": "string"
+              },
+              "root_authorized_keys": {
+                "nullable": true,
                 "type": "string"
               },
               "root_password_hash": {
@@ -2776,6 +2778,10 @@
       "FactoryWorkerAssociate": {
         "type": "object",
         "properties": {
+          "ip": {
+            "nullable": true,
+            "type": "string"
+          },
           "metadata": {
             "nullable": true,
             "allOf": [
@@ -3471,6 +3477,10 @@
             "type": "boolean"
           },
           "factory": {
+            "type": "string"
+          },
+          "factory_ip": {
+            "nullable": true,
             "type": "string"
           },
           "factory_private": {
