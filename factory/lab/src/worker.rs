@@ -280,8 +280,9 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
                         .factory_worker_associate()
                         .worker(&w.id)
                         .body_map(|body| {
-                            body.private(i.id()).metadata(Some(
-                                metadata::FactoryMetadata::V1(
+                            body.private(i.id())
+                                .ip(Some(hc.ip.clone()))
+                                .metadata(Some(metadata::FactoryMetadata::V1(
                                     metadata::FactoryMetadataV1 {
                                         addresses,
                                         root_password_hash: None,
@@ -290,8 +291,7 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
                                         post_job_diagnostic_script: None,
                                         pre_job_diagnostic_script: None,
                                     },
-                                ),
-                            ))
+                                )))
                         })
                         .send()
                         .await?;

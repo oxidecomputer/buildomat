@@ -68,7 +68,6 @@ pub(crate) struct ConfigFileExtraIps {
 
 #[derive(Deserialize, Debug, Clone)]
 pub(crate) struct ConfigFileHost {
-    #[allow(dead_code)]
     pub ip: String,
     pub gateway: Option<String>,
     pub console: String,
