@@ -20,6 +20,7 @@ use rusty_ulid::Ulid;
 
 const WIDTH_ISODATE: usize = 20;
 const WIDTH_ID: usize = 26;
+const WIDTH_AGE: usize = 6;
 
 mod config;
 
@@ -807,7 +808,7 @@ async fn do_job_outputs(mut l: Level<Stuff>) -> Result<()> {
 
 async fn do_job_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("id", WIDTH_ID, true);
-    l.add_column("age", 8, true);
+    l.add_column("age", WIDTH_AGE, true);
     l.add_column("s", 1, true);
     l.add_column("name", 32, true);
     l.add_column("state", 15, false);
@@ -1205,7 +1206,7 @@ async fn do_job_store_list(mut l: Level<Stuff>) -> Result<()> {
 
     l.add_column("name", 16, true);
     l.add_column("flags", 5, true);
-    l.add_column("age", 6, true);
+    l.add_column("age", WIDTH_AGE, true);
     l.add_column("value", 50, true);
     l.add_column("source", 10, false);
     l.add_column("updated", WIDTH_ISODATE, false);
@@ -1356,7 +1357,7 @@ async fn do_user_revoke(mut l: Level<Stuff>) -> Result<()> {
 async fn do_user_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("id", WIDTH_ID, true);
     l.add_column("name", 30, true);
-    l.add_column("age", 8, true);
+    l.add_column("age", WIDTH_AGE, true);
     l.add_column("creation", WIDTH_ISODATE, false);
 
     let a = no_args!(l);
@@ -1425,7 +1426,7 @@ async fn do_worker_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("id", WIDTH_ID, true);
     l.add_column("flags", 6, true);
     l.add_column("creation", WIDTH_ISODATE, true);
-    l.add_column("age", 8, true);
+    l.add_column("age", WIDTH_AGE, true);
     l.add_column("info", 20, false);
     l.add_column("ip", 15, false);
     l.add_column("target", WIDTH_ID, false);
@@ -2376,7 +2377,7 @@ async fn do_admin_job_archive(mut l: Level<Stuff>) -> Result<()> {
 
 async fn do_admin_job_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("id", WIDTH_ID, true);
-    l.add_column("age", 8, true);
+    l.add_column("age", WIDTH_AGE, true);
     l.add_column("s", 1, true);
     l.add_column("name", 32, true);
     l.add_column("state", 15, false);
