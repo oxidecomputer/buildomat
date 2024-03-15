@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Result};
-use slog::{info, warn, Logger};
+use slog::{error, info, warn, Logger};
 use smf::ScfError;
 
 #[derive(Clone)]
@@ -95,9 +95,11 @@ fn monitor_thread(mi: Arc<Inner>) {
     let mut scf = None;
 
     /*
-     * Schedule next polling operation:
+     * Schedule next polling operation.  We start out at a high rate of polling,
+     * as we're blocking waiting to hit multi-user.  Once we get that far we can
+     * slow down as we're just looking for unexpected failures at that point.
      */
-    let interval = Duration::from_millis(250);
+    let mut interval = Duration::from_millis(250);
     let mut next = Instant::now().checked_add(interval).unwrap();
 
     loop {
@@ -182,6 +184,13 @@ fn monitor_thread(mi: Arc<Inner>) {
                         }) {
                             info!(log, "reached multi-user milestone!");
                             mi.state.lock().unwrap().multiuser = true;
+
+                            /*
+                             * Now that we've hit our ready state, polling is
+                             * just to look for unexpected errors and can be
+                             * more relaxed:
+                             */
+                            interval = Duration::from_secs(10);
                         }
                     }
                 }
@@ -200,6 +209,22 @@ fn monitor_thread(mi: Arc<Inner>) {
                 let mut i = mi.state.lock().unwrap();
 
                 i.problems = problems;
+            }
+            Err(e) if e.to_string().contains("cannot use unset argument") => {
+                /*
+                 * XXX We have seen occasional apparently spurious problems of
+                 * "cannot use unset argument" reported, which then causes an
+                 * otherwise healthy VM to be destroyed in error.
+                 *
+                 * We'll explicitly ignore that failure here for now, but log
+                 * something noisy about it.
+                 */
+                error!(log, "spurious libscf error? {e}");
+
+                /*
+                 * Close the handle so that we can re-open it on the next poll:
+                 */
+                scf = None;
             }
             Err(e) => {
                 let mut i = mi.state.lock().unwrap();
