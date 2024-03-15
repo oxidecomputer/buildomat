@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use std::{collections::BTreeSet, str::FromStr, sync::Arc, time::Duration};
@@ -28,6 +28,7 @@ async fn factory_task_one(log: &Logger, c: &Arc<Central>) -> Result<()> {
         }
 
         let id = i.id();
+        let t = c.config.for_instance_in_slot(i.slot, &id)?;
         let w = c
             .client
             .factory_worker_get()
@@ -63,7 +64,10 @@ async fn factory_task_one(log: &Logger, c: &Arc<Central>) -> Result<()> {
                     c.client
                         .factory_worker_associate()
                         .worker(&w.id)
-                        .body_map(|b| b.private(id.to_string()))
+                        .body_map(|b| {
+                            b.private(id.to_string())
+                                .ip(Some(t.ip().to_string()))
+                        })
                         .send()
                         .await?;
                 }
@@ -260,13 +264,17 @@ async fn factory_task_one(log: &Logger, c: &Arc<Central>) -> Result<()> {
     )?;
     info!(log, "created instance: {instance_id} [slot {slot}]");
 
+    let t = c.config.for_instance_in_slot(*slot, &instance_id)?;
+
     /*
      * Record the instance ID against the worker for which it was created:
      */
     c.client
         .factory_worker_associate()
         .worker(&w.id)
-        .body_map(|b| b.private(instance_id.to_string()))
+        .body_map(|b| {
+            b.private(instance_id.to_string()).ip(Some(t.ip().to_string()))
+        })
         .send()
         .await?;
 
