@@ -684,10 +684,61 @@ async fn instance_worker_one(
             }
 
             /*
-             * Remove the now-vestigial zone path:
+             * Remove the now-vestigial zone path.  The brand actually creates
+             * child datasets, so look it up and remove it.
              */
-            let zp = PathBuf::from(t.zonepath());
-            std::fs::remove_dir_all(zp).ok();
+            let mp = Command::new(ZFS)
+                .env_clear()
+                .arg("get")
+                .args(["-Ho", "value,name"])
+                .arg("mountpoint")
+                .arg(t.zonepath())
+                .output()?;
+            if !mp.status.success() {
+                let e = String::from_utf8_lossy(&mp.stderr);
+                if !e.contains("No such file or directory") {
+                    bail!("zfs get mountpoint failed: {}", mp.info());
+                }
+            } else {
+                let mp = String::from_utf8(mp.stdout)?;
+                let lines = mp.lines().collect::<Vec<_>>();
+                if lines.len() != 1 {
+                    bail!("unusual zfs get mountpoint output: {lines:?}");
+                }
+
+                let terms = lines[0].split('\t').collect::<Vec<_>>();
+                if terms.len() != 2 {
+                    bail!("unusual zfs get mountpoint output line: {terms:?}");
+                }
+
+                if terms[0] == t.zonepath() {
+                    /*
+                     * The dataset still exists, and we need to destroy it.
+                     */
+                    info!(log, "destroying zone {zn} dataset {:?}", terms[1]);
+                    let out = Command::new(ZFS)
+                        .env_clear()
+                        .arg("destroy")
+                        .arg(terms[1])
+                        .output()?;
+                    if !out.status.success() {
+                        bail!("zfs destroy failed: {}", out.info());
+                    }
+                } else {
+                    /*
+                     * We really expect a dataset to be here, but we can drive
+                     * on, in case we crashed earlier.
+                     */
+                    warn!(log, "unexpected dataset situation: {terms:?}");
+                }
+            }
+
+            /*
+             * Make sure we actually cleaned up the zonepath:
+             */
+            if PathBuf::from(t.zonepath()).exists() {
+                bail!("unexpected detritus remains: {:?}", t.zonepath());
+            }
 
             c.db.instance_new_state(&id, InstanceState::Destroyed)?;
             Ok(DoNext::Immediate)
