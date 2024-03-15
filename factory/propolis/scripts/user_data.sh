@@ -24,6 +24,16 @@ q+="&id=$(os_release ID)"
 q+="&id_like=$(os_release ID_LIKE)"
 q+="&version_id=$(os_release VERSION_ID)"
 
+if [[ $(uname -s) == SunOS ]]; then
+	#
+	# The Internet at the office does not have consistently fantastic
+	# peering, so make sure we're putting our best foot forward with TCP:
+	#
+	ipadm set-prop -p send_buf=512000 tcp || true
+	ipadm set-prop -p recv_buf=512000 tcp || true
+	ipadm set-prop -p congestion_control=cubic tcp || true
+fi
+
 while :; do
 	rm -f /var/tmp/agent
 	rm -f /var/tmp/agent.gz
