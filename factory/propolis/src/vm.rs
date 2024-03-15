@@ -336,6 +336,8 @@ async fn instance_worker_one(
 
                         exit_on_halt: 50,
                         exit_on_reboot: 51,
+
+                        use_reservoir: true,
                     },
                     block_dev: [
                         (

@@ -20,6 +20,8 @@ pub struct Main {
 
     pub exit_on_halt: u8,
     pub exit_on_reboot: u8,
+
+    pub use_reservoir: bool,
 }
 
 #[derive(Debug, Serialize)]
