@@ -596,7 +596,7 @@ async fn status_impl(
         out += "<ul>\n";
 
         for w in workers.iter() {
-            if w.deleted {
+            if w.deleted || w.hold.is_some() {
                 continue;
             }
 
