@@ -24,6 +24,7 @@ struct FormatScript {
     key: Option<String>,
     marker: Option<String>,
     bootstrap: Option<String>,
+    debug: bool,
 }
 
 impl FormatScript {
@@ -37,6 +38,7 @@ impl FormatScript {
             key: None,
             marker: None,
             bootstrap: None,
+            debug: false,
         }
     }
 
@@ -53,11 +55,23 @@ impl FormatScript {
         self
     }
 
+    fn debug(&mut self, debug: bool) -> &mut Self {
+        self.debug = debug;
+        self
+    }
+
     fn format(&self, s: &str) -> String {
+        let bootargs = self
+            .host_config
+            .debug_boot_args
+            .as_deref()
+            .unwrap_or(if self.debug { "-kd" } else { "" });
+
         let mut s = s
             .replace("%BASEURL%", &self.host_config.lab_baseurl)
             .replace("%HOST%", &self.host_config.nodename)
             .replace("%CONSOLE%", &self.host_config.console)
+            .replace("%BOOTARGS%", &bootargs)
             .replace("%COREURL%", &self.coreurl);
 
         if let Some(key) = self.key.as_deref() {
@@ -321,6 +335,7 @@ async fn postboot_script(
          */
         FormatScript::new(&c.config, hc)
             .instance(i.as_ref())
+            .debug(hc.debug_os_dir.is_some())
             .format(&std::fs::read_to_string(path).or_500()?)
     } else if hc.debug_os_dir.is_some() {
         /*
@@ -360,6 +375,7 @@ async fn ipxe_script(
     let script = FormatScript::new(&c.config, hc)
         .instance(i.as_ref())
         .marker(if booting { MARKER_BOOT } else { MARKER_HOLD })
+        .debug(hc.debug_os_dir.is_some())
         .format(if hc.debug_os_dir.is_some() {
             include_str!("../scripts/debug.ipxe")
         } else if booting {

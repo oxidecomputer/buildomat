@@ -78,5 +78,6 @@ pub(crate) struct ConfigFileHost {
     pub lom_password: String,
     pub debug_os_dir: Option<String>,
     pub debug_os_postboot_sh: Option<String>,
+    pub debug_boot_args: Option<String>,
     pub extra_ips: Option<ConfigFileExtraIps>,
 }

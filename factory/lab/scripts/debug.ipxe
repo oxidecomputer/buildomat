@@ -10,7 +10,7 @@ kernel \
     ${osroot}/platform/i86pc/kernel/amd64/unix \
     -B console=${console} \
     -B ${console}-mode="115200,8,n,1,-" \
-    -kd \
+    %BOOTARGS% \
     || goto fail
 
 module \
