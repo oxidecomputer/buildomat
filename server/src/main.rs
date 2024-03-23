@@ -96,6 +96,15 @@ impl<T> MakeInternalError<T>
     }
 }
 
+impl<T> MakeInternalError<T> for serde_json::Result<T> {
+    fn or_500(self) -> SResult<T, HttpError> {
+        self.map_err(|e| {
+            let msg = format!("serde JSON error: {:?}", e);
+            HttpError::for_internal_error(msg)
+        })
+    }
+}
+
 pub(crate) trait ApiResultEx {
     fn api_check(&self) -> Result<()>;
     fn note(&self, n: &str) -> Result<()>;
@@ -939,6 +948,7 @@ async fn main() -> Result<()> {
     ad.register(api::admin::target_redirect).api_check()?;
     ad.register(api::admin::target_rename).api_check()?;
     ad.register(api::user::job_events_get).api_check()?;
+    ad.register(api::user::job_watch).api_check()?;
     ad.register(api::user::job_outputs_get).api_check()?;
     ad.register(api::user::job_output_download).api_check()?;
     ad.register(api::user::job_output_signed_url).api_check()?;

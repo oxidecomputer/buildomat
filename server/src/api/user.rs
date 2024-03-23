@@ -2,6 +2,13 @@
  * Copyright 2024 Oxide Computer Company
  */
 
+use std::time::Duration;
+
+use bytes::Bytes;
+use hyper::header::CACHE_CONTROL;
+use slog::o;
+use tokio_stream::wrappers::ReceiverStream;
+
 use super::prelude::*;
 
 use super::worker::UploadedChunk;
@@ -14,6 +21,19 @@ pub(crate) struct JobEvent {
     time: DateTime<Utc>,
     time_remote: Option<DateTime<Utc>>,
     payload: String,
+}
+
+impl From<db::JobEvent> for JobEvent {
+    fn from(jev: db::JobEvent) -> Self {
+        JobEvent {
+            seq: jev.seq as usize,
+            task: jev.task,
+            stream: jev.stream.to_string(),
+            time: jev.time.into(),
+            time_remote: jev.time_remote.map(|t| t.into()),
+            payload: jev.payload.to_string(),
+        }
+    }
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -90,18 +110,177 @@ pub(crate) async fn job_events_get(
         .await
         .or_500()?;
 
-    Ok(HttpResponseOk(
-        jevs.iter()
-            .map(|jev| JobEvent {
-                seq: jev.seq as usize,
-                task: jev.task,
-                stream: jev.stream.to_string(),
-                time: jev.time.into(),
-                time_remote: jev.time_remote.map(|t| t.into()),
-                payload: jev.payload.to_string(),
-            })
-            .collect(),
-    ))
+    Ok(HttpResponseOk(jevs.into_iter().map(JobEvent::from).collect()))
+}
+
+#[endpoint {
+    method = GET,
+    path = "/0/jobs/{job}/watch",
+}]
+pub(crate) async fn job_watch(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<JobPath>,
+) -> DSResult<Response<Body>> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let p = path.into_inner();
+
+    let owner = c.require_user(log, &rqctx.request).await?;
+    let j = c.load_job_for_user(log, &owner, p.job()?).await?;
+
+    if let Some(mut rx) = c.db.job_subscribe(&j) {
+        let (btx, brx) = tokio::sync::mpsc::channel::<
+            std::result::Result<Bytes, std::io::Error>,
+        >(1);
+
+        let body = Body::wrap_stream(ReceiverStream::new(brx));
+
+        /*
+         * Record the last sequence number we have seen, starting with the first
+         * number we get from the watch:
+         */
+        let mut seq = rx.borrow().seq;
+        let mut complete = false;
+
+        let log0 = log.new(o!("stream" => true));
+        let c0 = Arc::clone(c);
+        tokio::task::spawn(async move {
+            let c = c0;
+            let log = log0;
+            let ping_interval = 5;
+            let mut next_ping = tokio::time::Instant::now()
+                .checked_add(Duration::from_secs(ping_interval))
+                .unwrap();
+
+            loop {
+                /*
+                 * Attempt to load a small quantity of records from the
+                 * database.
+                 */
+                let events = tokio::task::block_in_place(|| {
+                    c.db.job_events(j.id, (seq as usize) + 1, 100)
+                })
+                .or_500()?;
+
+                let output = if events.is_empty() {
+                    enum Act {
+                        Ping,
+                        Watch(bool),
+                    }
+
+                    /*
+                     * If there are no events, then either we need to sleep and
+                     * wait for more or we've reached the end of the job.
+                     */
+                    let act = tokio::select! {
+                        _ = tokio::time::sleep_until(next_ping) => Act::Ping,
+                        res = rx.changed() => Act::Watch(res.is_err()),
+                    };
+
+                    match act {
+                        Act::Ping => ": nothing happens...\n".to_string(),
+                        Act::Watch(eof) => {
+                            let jn = rx.borrow_and_update();
+
+                            if seq < jn.seq {
+                                /*
+                                 * Go back to the database to get more records.
+                                 */
+                                continue;
+                            }
+
+                            if jn.complete {
+                                if !complete {
+                                    complete = true;
+                                    "event: complete\n\n".to_string()
+                                } else {
+                                    info!(log, "end of job watch stream");
+                                    return Ok(());
+                                }
+                            } else if eof {
+                                bail!("unexpected end of subscription");
+                            } else {
+                                continue;
+                            }
+                        }
+                    }
+                } else {
+                    /*
+                     * We need to pass these events to the client.
+                     */
+                    let mut out = String::new();
+                    for ev in events {
+                        if ev.seq > seq {
+                            seq = ev.seq;
+                        }
+
+                        out += "event: job\ndata: ";
+                        out += &serde_json::to_string(&JobEvent::from(ev)).or_500()?;
+                        out += "\n\n";
+                    }
+                    out
+                };
+
+                match btx
+                    .send_timeout(Ok(output.into()), Duration::from_secs(15))
+                    .await
+                {
+                    Ok(_) => {
+                        next_ping = tokio::time::Instant::now()
+                            .checked_add(Duration::from_secs(ping_interval))
+                            .unwrap();
+                    }
+                    Err(e) => {
+                        /*
+                         * If the send to the channel times out, it must have
+                         * been full for 15 seconds or more.  This implies that
+                         * our messages and heartbeats are not getting through
+                         * to the remote peer.
+                         */
+                        error!(log, "tx send: {e}");
+                        return Ok(());
+                    }
+                }
+            }
+        });
+
+        Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header("X-Accel-Buffering", "no")
+            .header(CONTENT_TYPE, "text/event-stream")
+            .header(CACHE_CONTROL, "no-cache, no-store, must-revalidate")
+            .body(body)?)
+    } else {
+        /*
+         * Just produce a static response that says to stop polling, or to try
+         * again.
+         */
+        Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header("X-Accel-Buffering", "no")
+            .header(CONTENT_TYPE, "text/event-stream")
+            .header(CACHE_CONTROL, "no-cache, no-store, must-revalidate")
+            .body("event: check\n\n".into())?)
+    }
+
+    //let jevs = c
+    //    .load_job_events(log, &j, q.minseq.unwrap_or(0), 1000)
+    //    .await
+    //    .or_500()?;
+
+    // Ok(HttpResponseOk(
+    //     jevs.iter()
+    //         .map(|jev| JobEvent {
+    //             seq: jev.seq as usize,
+    //             task: jev.task,
+    //             stream: jev.stream.to_string(),
+    //             time: jev.time.into(),
+    //             time_remote: jev.time_remote.map(|t| t.into()),
+    //             payload: jev.payload.to_string(),
+    //         })
+    //         .collect(),
+    // ))
 }
 
 #[endpoint {

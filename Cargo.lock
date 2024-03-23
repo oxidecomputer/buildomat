@@ -857,6 +857,7 @@ dependencies = [
  "buildomat-common",
  "buildomat-database",
  "buildomat-types",
+ "bytes",
  "chrono",
  "dropshot",
  "futures",
@@ -873,6 +874,7 @@ dependencies = [
  "tlvc",
  "tlvc-text",
  "tokio",
+ "tokio-stream",
  "usdt",
 ]
 

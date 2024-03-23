@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
 use buildomat_client::prelude::*;
@@ -367,6 +367,207 @@ async fn do_job_tail(mut l: Level<Stuff>) -> Result<()> {
     }
 
     poll_job(&l, &a.args()[0], a.opts().opt_present("j")).await
+}
+
+#[derive(Debug)]
+#[allow(dead_code)]
+enum ServerEventLine {
+    Event(String),
+    Data(String),
+    Id(String),
+    Retry(String),
+}
+
+#[derive(Debug)]
+struct ServerEventRecord(Vec<ServerEventLine>);
+
+impl ServerEventRecord {
+    fn data(&self) -> String {
+        self.0
+            .iter()
+            .filter_map(|ev| match ev {
+                ServerEventLine::Data(da) => Some(da.to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn event(&self) -> String {
+        self.0
+            .iter()
+            .filter_map(|ev| match ev {
+                ServerEventLine::Event(ev) => Some(ev.to_string()),
+                _ => None,
+            })
+            .next()
+            .unwrap_or_else(|| String::new())
+    }
+}
+
+fn process_line(l: &str) -> Option<ServerEventLine> {
+    if l.starts_with(':') {
+        /*
+         * Treat this as a comment.
+         */
+        return None;
+    }
+
+    let (name, value) = if let Some((name, value)) = l.split_once(": ") {
+        (name, value)
+    } else {
+        (l, "")
+    };
+
+    Some(match name {
+        "event" => ServerEventLine::Event(value.to_string()),
+        "data" => ServerEventLine::Data(value.to_string()),
+        "id" => ServerEventLine::Id(value.to_string()),
+        "retry" => ServerEventLine::Retry(value.to_string()),
+        _ => return None,
+    })
+}
+
+async fn start_watch(
+    s: &Stuff,
+    job: String,
+) -> tokio::sync::mpsc::Receiver<ServerEventRecord> {
+    let c = s.user().clone();
+    let (tx, rx) = tokio::sync::mpsc::channel(128);
+
+    tokio::task::spawn(async move {
+        'outer: loop {
+            let mut stream = match c.job_watch().job(&job).send().await {
+                Ok(res) => res.into_inner_stream(),
+                Err(e) => {
+                    /*
+                     * XXX
+                     */
+                    eprintln!("ERROR: {e}");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            };
+
+            let mut line = Vec::new();
+            let mut fields = Vec::new();
+            loop {
+                let buf = match stream.try_next().await {
+                    Ok(Some(buf)) => buf,
+                    Ok(None) => {
+                        /*
+                         * We have reached the end of the stream.
+                         */
+                        if !fields.is_empty() {
+                            if tx
+                                .send(ServerEventRecord(std::mem::take(
+                                    &mut fields,
+                                )))
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
+                        }
+                        continue 'outer;
+                    }
+                    Err(e) => {
+                        /*
+                         * XXX
+                         */
+                        eprintln!("ERROR: {e}");
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue 'outer;
+                    }
+                };
+
+                for b in buf {
+                    if b == b'\n' {
+                        if line.is_empty() {
+                            /*
+                             * This is the end of a record.
+                             */
+                            if fields.is_empty() {
+                                continue;
+                            }
+
+                            if tx
+                                .send(ServerEventRecord(std::mem::take(
+                                    &mut fields,
+                                )))
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
+                            continue;
+                        }
+
+                        /*
+                         * Process line.
+                         */
+                        let Ok(ls) = std::str::from_utf8(&line) else {
+                            /*
+                             * XXX Invalid UTF-8; terminate.
+                             */
+                            return;
+                        };
+
+                        if let Some(f) = process_line(ls) {
+                            fields.push(f);
+                        }
+                        line.clear();
+                        continue;
+                    } else {
+                        line.push(b);
+                    }
+                }
+            }
+        }
+    });
+
+    rx
+}
+
+async fn do_job_stream(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("JOB"));
+
+    let a = args!(l);
+
+    if a.args().len() != 1 {
+        bad_args!(l, "specify a job");
+    }
+
+    let mut wat = start_watch(l.context(), a.args()[0].to_string()).await;
+
+    loop {
+        let Some(rec) = wat.recv().await else {
+            break;
+        };
+
+        match rec.event().as_str() {
+            "check" => {
+                /*
+                 * XXX
+                 */
+                bail!("CHECK");
+            }
+            "job" => {
+                let je: buildomat_client::types::JobEvent =
+                    serde_json::from_str(&rec.data())?;
+                println!("{je:?}");
+            }
+            "complete" => {
+                println!("COMPLETE");
+                break;
+            }
+            _ => {
+                println!("WEIRD: {rec:?}");
+            }
+        }
+    }
+
+    Ok(())
 }
 
 async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
@@ -1269,6 +1470,7 @@ async fn do_job(mut l: Level<Stuff>) -> Result<()> {
     l.cmd("run", "run a job", cmd!(do_job_run))?;
     l.cmd("cancel", "cancel a job", cmd!(do_job_cancel))?;
     l.cmd("tail", "listen for events from a job", cmd!(do_job_tail))?;
+    l.hcmd("stream", "stream notifications from a job", cmd!(do_job_stream))?;
     l.cmd("join", "wait for completion of jobs", cmd!(do_job_join))?;
     l.cmd("store", "manage the job store", cmd!(do_job_store))?;
     l.cmd("outputs", "list job outputs", cmd!(do_job_outputs))?;

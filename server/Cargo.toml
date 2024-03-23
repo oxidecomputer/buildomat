@@ -15,6 +15,7 @@ aws-credential-types = "0.55.3"
 aws-sdk-s3 = "0.28.0"
 aws-smithy-http = "0.55.3"
 aws-types = "0.55.3"
+bytes = { workspace = true }
 chrono = { workspace = true }
 dropshot = { workspace = true }
 futures = { workspace = true }
@@ -31,4 +32,5 @@ tempfile = { workspace = true }
 tlvc = { workspace = true }
 tlvc-text = { workspace = true }
 tokio = { workspace = true }
+tokio-stream = { workspace = true }
 usdt = { workspace = true }
