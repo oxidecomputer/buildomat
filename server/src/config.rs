@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use std::path::Path;
@@ -11,6 +11,7 @@ use serde::Deserialize;
 use slog::{error, info, o, warn, Logger};
 
 #[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct ConfigFile {
     pub admin: ConfigFileAdmin,
     #[allow(dead_code)]
@@ -21,12 +22,14 @@ pub struct ConfigFile {
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct ConfigFileGeneral {
     #[allow(dead_code)]
     pub baseurl: String,
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct ConfigFileJob {
     pub max_runtime: u64,
     #[serde(default = "default_max_size_per_file_mb")]
@@ -53,12 +56,14 @@ fn default_max_size_per_file_mb() -> u64 {
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct ConfigFileSqlite {
     #[serde(default)]
     pub cache_kb: Option<u32>,
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct ConfigFileAdmin {
     pub token: String,
     /**
@@ -68,6 +73,7 @@ pub struct ConfigFileAdmin {
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct ConfigFileStorage {
     pub access_key_id: String,
     pub secret_access_key: String,
