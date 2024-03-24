@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use std::io::ErrorKind;
@@ -34,7 +34,7 @@ async fn archive_files_one(
          * total size to include in the put request, and confirm that the size
          * in the database matches the local file size.
          */
-        let p = c.file_path(jf.job, jf.id)?;
+        let p = c.file_path(jf.job, jf.id, false)?;
 
         let f = tokio::fs::File::open(&p).await?;
         let file_size = f.metadata().await?.len();
@@ -216,8 +216,10 @@ pub(crate) async fn archive_files(log: Logger, c: Arc<Central>) -> Result<()> {
     info!(log, "start file archive task");
 
     loop {
-        if let Err(e) = archive_files_one(&log, &c, &c.s3).await {
-            error!(log, "file archive task error: {:?}", e);
+        if c.config.file.auto_archive() {
+            if let Err(e) = archive_files_one(&log, &c, &c.s3).await {
+                error!(log, "file archive task error: {:?}", e);
+            }
         }
 
         if let Err(e) = clean_files_one(&log, &c).await {

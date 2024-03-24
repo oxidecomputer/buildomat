@@ -484,10 +484,17 @@ impl Central {
         Ok(p)
     }
 
-    fn file_path(&self, job: JobId, file: JobFileId) -> Result<PathBuf> {
+    fn file_path(
+        &self,
+        job: JobId,
+        file: JobFileId,
+        create_parent: bool,
+    ) -> Result<PathBuf> {
         let mut p = self.file_dir()?;
         p.push(job.to_string());
-        std::fs::create_dir_all(&p)?;
+        if create_parent {
+            std::fs::create_dir_all(&p)?;
+        }
         p.push(file.to_string());
         Ok(p)
     }
@@ -551,7 +558,7 @@ impl Central {
          * the file system.
          */
         let fid = db::JobFileId::generate();
-        let fp = self.file_path(job, fid)?;
+        let fp = self.file_path(job, fid, true)?;
         let mut fout = std::fs::OpenOptions::new()
             .create_new(true)
             .write(true)
@@ -634,7 +641,7 @@ impl Central {
         job: JobId,
         file: JobFileId,
     ) -> Result<FileResponse> {
-        let op = self.file_path(job, file)?;
+        let op = self.file_path(job, file, false)?;
 
         Ok(if op.is_file() {
             /*

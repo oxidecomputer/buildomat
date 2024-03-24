@@ -19,6 +19,8 @@ pub struct ConfigFile {
     pub storage: ConfigFileStorage,
     pub sqlite: ConfigFileSqlite,
     pub job: ConfigFileJob,
+    #[serde(default)]
+    pub file: ConfigFileFile,
 }
 
 #[derive(Deserialize, Debug)]
@@ -53,6 +55,18 @@ fn default_max_size_per_file_mb() -> u64 {
      * By default, allow 1GB files to be uploaded:
      */
     1024
+}
+
+#[derive(Deserialize, Debug, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigFileFile {
+    pub auto_archive: Option<bool>,
+}
+
+impl ConfigFileFile {
+    pub fn auto_archive(&self) -> bool {
+        self.auto_archive.unwrap_or(true)
+    }
 }
 
 #[derive(Deserialize, Debug)]
