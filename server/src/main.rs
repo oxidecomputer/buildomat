@@ -22,7 +22,6 @@ use dropshot::{
 use futures::TryStreamExt;
 use getopts::Options;
 use hyper::{header::AUTHORIZATION, Body, Response, StatusCode};
-use hyper_staticfile::FileBytesStream;
 use rusty_ulid::Ulid;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -112,12 +111,6 @@ impl ApiResultEx for std::result::Result<(), String> {
         self.as_ref().map_err(|e| anyhow!("{}: {}", n, e))?;
         Ok(())
     }
-}
-
-struct FileResponse {
-    pub info: String,
-    pub body: Body,
-    pub size: u64,
 }
 
 struct FilePresignedUrl {
@@ -636,44 +629,46 @@ impl Central {
         Ok(FilePresignedUrl { info, url: obj.uri().to_string() })
     }
 
+    /**
+     * Generate a response for a file request.  Handles a range GET if requested
+     * by the client.
+     */
     async fn file_response(
         &self,
+        log: &Logger,
+        info: String,
         job: JobId,
         file: JobFileId,
-    ) -> Result<FileResponse> {
-        let op = self.file_path(job, file, false)?;
+        range: Option<buildomat_download::PotentialRange>,
+        head: bool,
+    ) -> api::DSResult<Response<Body>> {
+        let op = self.file_path(job, file, false).or_500()?;
 
-        Ok(if op.is_file() {
+        if op.is_file() {
             /*
              * The file exists locally.
              */
-            let info = format!("local file system at {:?}", op);
-            let f = tokio::fs::File::open(op).await?;
-            let md = f.metadata().await?;
-            assert!(md.is_file());
-            let fbs = FileBytesStream::new(f);
+            let f = std::fs::File::open(op).or_500()?;
 
-            FileResponse { info, body: fbs.into_body(), size: md.len() }
+            buildomat_download::stream_from_file(&log, info, f, range, head)
+                .await
+                .or_500()
         } else {
             /*
              * Otherwise, try to get it from the object store.
              */
-            let key = self.file_object_key(job, file);
-            let info = format!("object store at {}", key);
-            let obj = self
-                .s3
-                .get_object()
-                .bucket(&self.config.storage.bucket)
-                .key(key)
-                .send()
-                .await?;
-
-            FileResponse {
+            buildomat_download::stream_from_s3(
+                &log,
                 info,
-                size: obj.content_length.try_into().unwrap(),
-                body: Body::wrap_stream(obj.body),
-            }
-        })
+                &self.s3,
+                &self.config.storage.bucket,
+                self.file_object_key(job, file),
+                range,
+                head,
+            )
+            .await
+            .or_500()
+        }
     }
 
     fn complete_job(
@@ -836,6 +831,7 @@ async fn file_agent_common(
     log: &Logger,
     q: &FileAgentQuery,
     gzip: bool,
+    head_only: bool,
 ) -> SResult<Response<Body>, HttpError> {
     let pfx = if gzip { "compressed " } else { "" };
     info!(log, "{pfx}agent request; query = {:?}", q);
@@ -862,10 +858,15 @@ async fn file_agent_common(
 
     info!(log, "using agent file {filename:?}");
 
-    let f = tokio::fs::File::open(filename).await.or_500()?;
-    let fbs = FileBytesStream::new(f);
-
-    Ok(Response::builder().body(fbs.into_body())?)
+    buildomat_download::stream_from_file(
+        &log,
+        format!("agent file: {filename:?}"),
+        std::fs::File::open(&filename).or_500()?,
+        None,
+        head_only,
+    )
+    .await
+    .or_500()
 }
 
 #[endpoint {
@@ -879,7 +880,21 @@ async fn file_agent(
 ) -> SResult<Response<Body>, HttpError> {
     let log = &rqctx.log;
 
-    file_agent_common(log, &query.into_inner(), false).await
+    file_agent_common(log, &query.into_inner(), false, false).await
+}
+
+#[endpoint {
+    method = HEAD,
+    path = "/file/agent",
+    unpublished = true,
+}]
+async fn head_file_agent(
+    rqctx: RequestContext<Arc<Central>>,
+    query: TypedQuery<FileAgentQuery>,
+) -> SResult<Response<Body>, HttpError> {
+    let log = &rqctx.log;
+
+    file_agent_common(log, &query.into_inner(), false, true).await
 }
 
 #[endpoint {
@@ -893,7 +908,21 @@ async fn file_agent_gz(
 ) -> SResult<Response<Body>, HttpError> {
     let log = &rqctx.log;
 
-    file_agent_common(log, &query.into_inner(), true).await
+    file_agent_common(log, &query.into_inner(), true, false).await
+}
+
+#[endpoint {
+    method = HEAD,
+    path = "/file/agent.gz",
+    unpublished = true,
+}]
+async fn head_file_agent_gz(
+    rqctx: RequestContext<Arc<Central>>,
+    query: TypedQuery<FileAgentQuery>,
+) -> SResult<Response<Body>, HttpError> {
+    let log = &rqctx.log;
+
+    file_agent_common(log, &query.into_inner(), true, true).await
 }
 
 #[tokio::main]
@@ -948,6 +977,7 @@ async fn main() -> Result<()> {
     ad.register(api::user::job_events_get).api_check()?;
     ad.register(api::user::job_outputs_get).api_check()?;
     ad.register(api::user::job_output_download).api_check()?;
+    ad.register(api::user::job_output_head).api_check()?;
     ad.register(api::user::job_output_signed_url).api_check()?;
     ad.register(api::user::job_output_publish).api_check()?;
     ad.register(api::user::job_get).api_check()?;
@@ -991,8 +1021,11 @@ async fn main() -> Result<()> {
     ad.register(api::factory::factory_lease).api_check()?;
     ad.register(api::factory::factory_lease_renew).api_check()?;
     ad.register(api::public::public_file_download).api_check()?;
+    ad.register(api::public::public_file_head).api_check()?;
     ad.register(file_agent).api_check()?;
+    ad.register(head_file_agent).api_check()?;
     ad.register(file_agent_gz).api_check()?;
+    ad.register(head_file_agent_gz).api_check()?;
 
     if let Some(s) = p.opt_str("S") {
         let mut f =

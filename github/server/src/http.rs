@@ -5,6 +5,7 @@
 use anyhow::{anyhow, bail, Result};
 use buildomat_client::prelude::*;
 use buildomat_common::*;
+use buildomat_download::RequestContextEx;
 use buildomat_github_database::types::*;
 use chrono::prelude::*;
 use dropshot::{
@@ -45,21 +46,31 @@ fn interr<T>(log: &slog::Logger, msg: &str) -> SResult<T, dropshot::HttpError> {
 /**
  * Return a 404 error HTML page for a browser user.
  */
-fn html_404() -> SResult<hyper::Response<hyper::Body>, HttpError> {
+fn html_404(
+    head_only: bool,
+) -> SResult<hyper::Response<hyper::Body>, HttpError> {
     let body = include_bytes!("../../../www/notfound.html").as_slice();
 
-    Ok(hyper::Response::builder()
+    let res = hyper::Response::builder()
         .status(hyper::StatusCode::NOT_FOUND)
         .header(hyper::header::CONTENT_TYPE, "text/html; charset=utf-8")
-        .header(hyper::header::CONTENT_LENGTH, body.len())
-        .body(body.into())?)
+        .header(hyper::header::CONTENT_LENGTH, body.len());
+
+    Ok(if head_only {
+        res.body(hyper::Body::empty())?
+    } else {
+        res.body(body.into())?
+    })
 }
 
 /**
  * Return a generic 500 error HTML page for a browser user, including the
  * request ID of the failed request in case they want to report the failure.
  */
-fn html_500(req_id: &str) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+fn html_500(
+    req_id: &str,
+    head_only: bool,
+) -> SResult<hyper::Response<hyper::Body>, HttpError> {
     let body = include_str!("../../../www/error.html")
         .replace(
             "<!-- %EXTRA% -->",
@@ -70,11 +81,16 @@ fn html_500(req_id: &str) -> SResult<hyper::Response<hyper::Body>, HttpError> {
         )
         .into_bytes();
 
-    Ok(hyper::Response::builder()
+    let res = hyper::Response::builder()
         .status(hyper::StatusCode::NOT_FOUND)
         .header(hyper::header::CONTENT_TYPE, "text/html; charset=utf-8")
-        .header(hyper::header::CONTENT_LENGTH, body.len())
-        .body(body.into())?)
+        .header(hyper::header::CONTENT_LENGTH, body.len());
+
+    Ok(if head_only {
+        res.body(hyper::Body::empty())?
+    } else {
+        res.body(body.into())?
+    })
 }
 
 trait ToHttpError<T> {
@@ -191,10 +207,10 @@ async fn artefact(
 
     let load = match path.load(&rc) {
         Ok(Some(load)) => load,
-        Ok(None) => return html_404(),
+        Ok(None) => return html_404(false),
         Err(e) => {
             error!(rc.log, "artefact: load: {e}");
-            return html_500(&rc.request_id);
+            return html_500(&rc.request_id, false);
         }
     };
 
@@ -225,10 +241,10 @@ async fn artefact(
              */
             Ok(res)
         }
-        Ok(None) => html_404(),
+        Ok(None) => html_404(false),
         Err(e) => {
             error!(rc.log, "artefact: variety: {e}");
-            html_500(&rc.request_id)
+            html_500(&rc.request_id, false)
         }
     }
 }
@@ -276,10 +292,10 @@ async fn details(
 
     let load = match path.load(&rc) {
         Ok(Some(load)) => load,
-        Ok(None) => return html_404(),
+        Ok(None) => return html_404(false),
         Err(e) => {
             error!(rc.log, "details: load: {e}");
-            return html_500(&rc.request_id);
+            return html_500(&rc.request_id, false);
         }
     };
 
@@ -298,7 +314,7 @@ async fn details(
                 Ok(s) => s,
                 Err(e) => {
                     error!(rc.log, "details: control: {e}");
-                    return html_500(&rc.request_id);
+                    return html_500(&rc.request_id, false);
                 }
             }
         }
@@ -317,7 +333,7 @@ async fn details(
                 Ok(s) => s,
                 Err(e) => {
                     error!(rc.log, "details: basic: {e}");
-                    return html_500(&rc.request_id);
+                    return html_500(&rc.request_id, false);
                 }
             }
         }
@@ -439,7 +455,7 @@ async fn status(
         Ok(res) => Ok(res),
         Err(e) => {
             error!(rc.log, "status page: {e:?}");
-            html_500(&rc.request_id)
+            html_500(&rc.request_id, false)
         }
     }
 }
@@ -761,6 +777,17 @@ struct PublishedFilePath {
 }
 
 #[endpoint {
+    method = HEAD,
+    path = "/public/file/{owner}/{repo}/{series}/{version}/{name}",
+}]
+async fn published_file_head(
+    rc: RequestContext<Arc<App>>,
+    path: dropshot::Path<PublishedFilePath>,
+) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+    published_file_common(rc, path, true).await
+}
+
+#[endpoint {
     method = GET,
     path = "/public/file/{owner}/{repo}/{series}/{version}/{name}",
 }]
@@ -768,71 +795,80 @@ async fn published_file(
     rc: RequestContext<Arc<App>>,
     path: dropshot::Path<PublishedFilePath>,
 ) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+    published_file_common(rc, path, false).await
+}
+
+async fn published_file_common(
+    rc: RequestContext<Arc<App>>,
+    path: dropshot::Path<PublishedFilePath>,
+    head_only: bool,
+) -> SResult<hyper::Response<hyper::Body>, HttpError> {
     let app = rc.context();
     let path = path.into_inner();
+    let pr = rc.range();
 
     /*
      * Determine the buildomat username for this GitHub owner/repository:
      */
     let bmu = match app.db.lookup_repository(&path.owner, &path.repo) {
         Ok(Some(repo)) => app.buildomat_username(&repo),
-        Ok(None) => return html_404(),
+        Ok(None) => return html_404(head_only),
         Err(e) => {
             error!(rc.log, "published file: lookup: {e:?}");
-            return html_500(&rc.request_id);
+            return html_500(&rc.request_id, head_only);
         }
     };
 
-    let b = app.buildomat_admin();
+    /*
+     * XXX There is not currently a good way to perform a range request using
+     * the progenitor client.  We'll borrow the underlying reqwest client and
+     * use it directly to make this request.
+     */
+    let Ok((client, baseurl)) = app.buildomat_raw() else {
+        return html_500(&rc.request_id, head_only);
+    };
 
-    let backend = match b
-        .public_file_download()
-        .username(&bmu)
-        .series(&path.series)
-        .version(&path.version)
-        .name(&path.name)
-        .send()
-        .await
+    let url = format!(
+        "{baseurl}/0/public/file/{bmu}/{}/{}/{}",
+        path.series, path.version, path.name,
+    );
+
+    let res = match buildomat_download::stream_from_url(
+        &rc.log,
+        format!(
+            "published file: owner {}/{} series {} version {} name {}",
+            path.owner, path.repo, path.series, path.version, path.name,
+        ),
+        &client,
+        url,
+        pr,
+        head_only,
+        guess_mime_type(&path.name),
+    )
+    .await
     {
-        Ok(r) => {
+        Ok(Some(res)) => {
             /*
              * Pass the response on from the buildomat API as-is.  It is likely
              * a large streamed response, from either a local file or an object
              * store.
              */
-            r
+            res
         }
-        Err(e) => match e {
-            buildomat_client::Error::ErrorResponse(ref e) => {
-                match e.status() {
-                    StatusCode::NOT_FOUND => {
-                        /*
-                         * The backend believes this published file does not
-                         * exist at all.
-                         */
-                        return html_404();
-                    }
-                    e => {
-                        error!(rc.log, "published file: buildomat: {e:?}");
-                        return html_500(&rc.request_id);
-                    }
-                }
-            }
-            other => {
-                error!(rc.log, "published file: buildomat: {other:?}");
-                return html_500(&rc.request_id);
-            }
-        },
+        Ok(None) => {
+            /*
+             * The backend believes this published file does not
+             * exist at all.
+             */
+            return html_404(head_only);
+        }
+        Err(e) => {
+            error!(rc.log, "published file: buildomat: {e:?}");
+            return html_500(&rc.request_id, head_only);
+        }
     };
 
-    let ct = guess_mime_type(&path.name);
-    let cl = backend.content_length().unwrap();
-
-    Ok(hyper::Response::builder()
-        .status(hyper::StatusCode::OK)
-        .header(hyper::header::CONTENT_TYPE, ct)
-        .header(hyper::header::CONTENT_LENGTH, cl)
-        .body(hyper::Body::wrap_stream(backend.into_inner_stream()))?)
+    Ok(res)
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -860,10 +896,10 @@ async fn branch_to_commit(
      */
     let repo = match app.db.lookup_repository(&path.owner, &path.repo) {
         Ok(Some(repo)) => repo,
-        Ok(None) => return html_404(),
+        Ok(None) => return html_404(false),
         Err(e) => {
             error!(log, "branch to commit: {e:?}");
-            return html_500(&rc.request_id);
+            return html_500(&rc.request_id, false);
         }
     };
 
@@ -880,7 +916,7 @@ async fn branch_to_commit(
              * GitHub App installation that we can use for credentials.  Treat
              * this as if we could not locate the repository.
              */
-            return html_404();
+            return html_404(false);
         }
     };
 
@@ -906,7 +942,7 @@ async fn branch_to_commit(
                 repo.name,
                 path.branch,
             );
-            return html_500(&rc.request_id);
+            return html_500(&rc.request_id, false);
         }
     };
 
@@ -999,6 +1035,7 @@ pub(crate) async fn server(
     api.register(artefact).unwrap();
     api.register(status).unwrap();
     api.register(published_file).unwrap();
+    api.register(published_file_head).unwrap();
     api.register(branch_to_commit).unwrap();
     api.register(static_file).unwrap();
 

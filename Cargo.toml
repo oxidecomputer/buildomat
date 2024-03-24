@@ -6,6 +6,7 @@ members = [
 	"client",
 	"common",
 	"database",
+	"download",
 	"factory/aws",
 	"factory/lab",
 	"factory/propolis",
@@ -40,8 +41,8 @@ hiercmd = { git = "https://github.com/jclulow/hiercmd" }
 hmac-sha256 = "1"
 html-escape = "0.2"
 http = "0.2"
+http-range = "0.1"
 hyper = "0.14"
-hyper-staticfile = { version = "0.8.0", git = "https://github.com/jclulow/hyper-staticfile", branch = "jclulow" }
 ipnet = "2.8"
 jmclib = { git = "https://github.com/jclulow/rust-jmclib", features = ["sqlite"] }
 libc = "0.2.113"
@@ -77,6 +78,7 @@ tlvc = { git = "https://github.com/oxidecomputer/tlvc", version = "0.3.1" }
 tlvc-text = { git = "https://github.com/oxidecomputer/tlvc", version = "0.3.0" }
 tokio = { version = "1", features = [ "full" ] }
 tokio-util = { version = "0.6.9", features = [ "io" ] }
+tokio-stream = "0.1"
 toml = "0.5"
 usdt = "0.3"
 zone = { version = "0.3", features = [ "async" ], default-features = false }

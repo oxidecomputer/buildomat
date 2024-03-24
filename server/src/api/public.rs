@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use super::prelude::*;
@@ -20,11 +20,41 @@ pub(crate) async fn public_file_download(
     rqctx: RequestContext<Arc<Central>>,
     path: TypedPath<PublicFilePath>,
 ) -> DSResult<Response<Body>> {
-    let c = rqctx.context();
-    let log = &rqctx.log;
+    public_file_common(
+        &rqctx.log,
+        &path.into_inner(),
+        rqctx.context(),
+        rqctx.range(),
+        false,
+    )
+    .await
+}
 
-    let p = path.into_inner();
+#[endpoint {
+    method = HEAD,
+    path = "/0/public/file/{username}/{series}/{version}/{name}",
+}]
+pub(crate) async fn public_file_head(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<PublicFilePath>,
+) -> DSResult<Response<Body>> {
+    public_file_common(
+        &rqctx.log,
+        &path.into_inner(),
+        rqctx.context(),
+        rqctx.range(),
+        true,
+    )
+    .await
+}
 
+pub(crate) async fn public_file_common(
+    log: &Logger,
+    p: &PublicFilePath,
+    c: &Central,
+    pr: Option<PotentialRange>,
+    head_only: bool,
+) -> DSResult<Response<Body>> {
     /*
      * Load the user from the database.
      */
@@ -51,20 +81,9 @@ pub(crate) async fn public_file_download(
         ));
     };
 
-    let mut res = Response::builder();
-    res = res.header(CONTENT_TYPE, "application/octet-stream");
-
-    let fr = c.file_response(pf.job, pf.file).await.or_500()?;
-    info!(
-        log,
-        "published file: user {} series {} version {} name {} is in the {}",
-        u,
-        pf.series,
-        pf.version,
-        pf.name,
-        fr.info,
+    let info = format!(
+        "published file: user {} series {} version {} name {}",
+        u, pf.series, pf.version, pf.name
     );
-
-    res = res.header(CONTENT_LENGTH, fr.size);
-    Ok(res.body(fr.body)?)
+    c.file_response(log, info, pf.job, pf.file, pr, head_only).await
 }

@@ -7,6 +7,7 @@ license = "MPL-2.0"
 [dependencies]
 buildomat-common = { path = "../common" }
 buildomat-database = { path = "../database" }
+buildomat-download = { path = "../download" }
 buildomat-types = { path = "../types" }
 
 anyhow = { workspace = true }
@@ -15,12 +16,13 @@ aws-credential-types = "0.55.3"
 aws-sdk-s3 = "0.28.0"
 aws-smithy-http = "0.55.3"
 aws-types = "0.55.3"
+bytes = { workspace = true }
 chrono = { workspace = true }
 dropshot = { workspace = true }
 futures = { workspace = true }
 getopts = { workspace = true }
+http-range = { workspace = true }
 hyper = { workspace = true }
-hyper-staticfile = { workspace = true }
 rusty_ulid = { workspace = true }
 schemars = { workspace = true }
 sea-query = { workspace = true }
@@ -31,4 +33,5 @@ tempfile = { workspace = true }
 tlvc = { workspace = true }
 tlvc-text = { workspace = true }
 tokio = { workspace = true }
+tokio-stream = { workspace = true }
 usdt = { workspace = true }

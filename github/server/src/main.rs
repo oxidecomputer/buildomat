@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use slog::{debug, error, info, o, trace, warn, Logger};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 use variety::control::{ControlPrivate, CONTROL_RUN_NAME};
 
 mod config;
@@ -509,6 +510,17 @@ impl App {
             .bearer_token(&self.config.buildomat.token)
             .build()
             .unwrap()
+    }
+
+    fn buildomat_raw(&self) -> Result<(reqwest::Client, String)> {
+        Ok((
+            reqwest::ClientBuilder::new()
+                .timeout(Duration::from_secs(3600))
+                .tcp_keepalive(Duration::from_secs(60))
+                .connect_timeout(Duration::from_secs(15))
+                .build()?,
+            self.config.buildomat.url.to_string(),
+        ))
     }
 }
 

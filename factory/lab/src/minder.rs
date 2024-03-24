@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 
+use buildomat_download::RequestContextEx;
 use dropshot::{HttpError, Path as TypedPath, Query as TypedQuery};
 use hyper::StatusCode;
 use schemars::JsonSchema;
@@ -197,6 +198,7 @@ async fn os_file(
 ) -> HResult<hyper::Response<hyper::Body>> {
     let c = ctx.context();
     let path = path.into_inner();
+    let pr = ctx.range();
 
     info!(ctx.log, "[{}] os file request for {:?}", path.host, path.file);
 
@@ -234,21 +236,18 @@ async fn os_file(
         fp.push(component);
     }
 
-    let f = tokio::fs::File::open(&fp)
-        .await
+    let f = std::fs::File::open(&fp)
         .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
-    let size = f
-        .metadata()
-        .await
-        .map_err(|e| HttpError::for_internal_error(e.to_string()))?
-        .len();
 
-    let fbs = hyper_staticfile::FileBytesStream::new(f);
-
-    Ok(hyper::Response::builder()
-        .header(hyper::header::CONTENT_LENGTH, size.to_string())
-        .header(hyper::header::CONTENT_TYPE, "application/octet-stream")
-        .body(fbs.into_body())?)
+    buildomat_download::stream_from_file(
+        &ctx.log,
+        format!("os file for {}: {:?}", path.host, path.file),
+        f,
+        pr,
+        false,
+    )
+    .await
+    .map_err(|e| HttpError::for_internal_error(e.to_string()))
 }
 
 #[dropshot::endpoint {

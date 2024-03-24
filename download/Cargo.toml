@@ -1,0 +1,21 @@
+[package]
+name = "buildomat-download"
+version = "0.0.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lib]
+doctest = false
+
+[dependencies]
+anyhow = { workspace = true }
+aws-sdk-s3 = "0.28.0"
+bytes = { workspace = true }
+dropshot = { workspace = true }
+futures = { workspace = true }
+http-range = { workspace = true }
+hyper = { workspace = true }
+reqwest = { workspace = true }
+slog = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }

@@ -277,30 +277,28 @@ pub(crate) async fn worker_job_input_download(
     let w = c.require_worker(log, &rqctx.request).await?;
 
     let p = path.into_inner();
+    let pr = rqctx.range();
     let j = c.db.job(p.job()?).or_500()?;
     w.owns(log, &j)?;
 
     let i = c.db.job_input(p.job()?, p.input()?).or_500()?;
 
-    let mut res = Response::builder();
-    res = res.header(CONTENT_TYPE, "application/octet-stream");
-
-    let fr = c
-        .file_response(i.other_job.unwrap_or(i.job), i.id.unwrap())
-        .await
-        .or_500()?;
-    info!(
-        log,
-        "worker {} job {} input {} name {:?} is in the {}",
+    let info = format!(
+        "worker {} job {} input {} name {:?}",
         w.id,
         j.id,
         i.id.as_ref().unwrap(),
-        i.name,
-        fr.info
+        i.name
     );
-
-    res = res.header(CONTENT_LENGTH, fr.size);
-    Ok(res.body(fr.body)?)
+    c.file_response(
+        log,
+        info,
+        i.other_job.unwrap_or(i.job),
+        i.id.unwrap(),
+        pr,
+        false,
+    )
+    .await
 }
 
 #[derive(Deserialize, JsonSchema)]

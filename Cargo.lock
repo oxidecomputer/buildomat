@@ -673,6 +673,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "buildomat-download"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "aws-sdk-s3",
+ "bytes",
+ "dropshot",
+ "futures",
+ "http-range",
+ "hyper",
+ "reqwest",
+ "slog",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
 name = "buildomat-factory-aws"
 version = "0.0.0"
 dependencies = [
@@ -703,12 +720,12 @@ dependencies = [
  "buildomat-client",
  "buildomat-common",
  "buildomat-database",
+ "buildomat-download",
  "buildomat-types",
  "chrono",
  "dropshot",
  "getopts",
  "hyper",
- "hyper-staticfile",
  "libc",
  "rand",
  "schemars",
@@ -820,6 +837,7 @@ dependencies = [
  "buildomat-bunyan",
  "buildomat-client",
  "buildomat-common",
+ "buildomat-download",
  "buildomat-github-common",
  "buildomat-github-database",
  "chrono",
@@ -856,13 +874,15 @@ dependencies = [
  "aws-types",
  "buildomat-common",
  "buildomat-database",
+ "buildomat-download",
  "buildomat-types",
+ "bytes",
  "chrono",
  "dropshot",
  "futures",
  "getopts",
+ "http-range",
  "hyper",
- "hyper-staticfile",
  "rusty_ulid",
  "schemars",
  "sea-query",
@@ -873,6 +893,7 @@ dependencies = [
  "tlvc",
  "tlvc-text",
  "tokio",
+ "tokio-stream",
  "usdt",
 ]
 
@@ -1690,24 +1711,6 @@ dependencies = [
  "rustls-native-certs",
  "tokio",
  "tokio-rustls 0.23.4",
-]
-
-[[package]]
-name = "hyper-staticfile"
-version = "0.8.0"
-source = "git+https://github.com/jclulow/hyper-staticfile?branch=jclulow#6ecab6a38cd8f308b9cf9acc122e2d9dcb996e13"
-dependencies = [
- "futures-util",
- "http",
- "http-range",
- "httpdate",
- "hyper",
- "mime_guess",
- "percent-encoding",
- "rand",
- "tokio",
- "url",
- "winapi",
 ]
 
 [[package]]

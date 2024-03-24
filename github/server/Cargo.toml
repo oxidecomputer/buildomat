@@ -8,6 +8,7 @@ license = "MPL-2.0"
 buildomat-bunyan = { path = "../../bunyan" }
 buildomat-client = { path = "../../client" }
 buildomat-common = { path = "../../common" }
+buildomat-download = { path = "../../download" }
 buildomat-github-common = { path = "../common" }
 buildomat-github-database = { path = "../database" }
 

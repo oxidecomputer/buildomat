@@ -145,23 +145,39 @@ pub(crate) async fn job_output_download(
     let log = &rqctx.log;
 
     let p = path.into_inner();
+    let pr = rqctx.range();
 
     let owner = c.require_user(log, &rqctx.request).await?;
     let t = c.load_job_for_user(log, &owner, p.job()?).await?;
 
     let o = c.load_job_output(log, &t, p.output()?).await.or_500()?;
 
-    let mut res = Response::builder();
-    res = res.header(CONTENT_TYPE, "application/octet-stream");
+    let info = format!("job {} output {} path {:?}", t.id, o.id, o.path);
+    c.file_response(log, info, t.id, o.id, pr, false).await
+}
 
-    let fr = c.file_response(t.id, o.id).await.or_500()?;
-    info!(
-        log,
-        "job {} output {} path {:?} is in the {}", t.id, o.id, o.path, fr.info
-    );
+#[endpoint {
+    method = HEAD,
+    path = "/0/jobs/{job}/outputs/{output}",
+    unpublished = true,
+}]
+pub(crate) async fn job_output_head(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<JobsOutputsPath>,
+) -> DSResult<Response<Body>> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
 
-    res = res.header(CONTENT_LENGTH, fr.size);
-    Ok(res.body(fr.body)?)
+    let p = path.into_inner();
+    let pr = rqctx.range();
+
+    let owner = c.require_user(log, &rqctx.request).await?;
+    let t = c.load_job_for_user(log, &owner, p.job()?).await?;
+
+    let o = c.load_job_output(log, &t, p.output()?).await.or_500()?;
+
+    let info = format!("job {} output {} path {:?}", t.id, o.id, o.path);
+    c.file_response(log, info, t.id, o.id, pr, true).await
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
