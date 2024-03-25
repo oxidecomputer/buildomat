@@ -26,10 +26,24 @@ q+="&version_id=$(os_release VERSION_ID)"
 
 while :; do
 	rm -f /var/tmp/agent
-	if ! curl -sSf -o /var/tmp/agent '%URL%/file/agent'"$q"; then
+	rm -f /var/tmp/agent.gz
+
+	#
+	# First, try the gzip-compressed agent URL:
+	#
+	if curl -sSf -o /var/tmp/agent.gz '%URL%/file/agent.gz'"$q"; then
+		if ! gunzip < /var/tmp/agent.gz > /var/tmp/agent; then
+			sleep 1
+			continue
+		fi
+	#
+	# If that doesn't work, fall back to the old uncompressed URL:
+	#
+	elif ! curl -sSf -o /var/tmp/agent '%URL%/file/agent'"$q"; then
 		sleep 1
 		continue
 	fi
+
 	chmod +rx /var/tmp/agent
 	if ! /var/tmp/agent install -N '%NODENAME%' '%URL%' '%STRAP%'; then
 		sleep 1
