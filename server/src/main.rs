@@ -14,12 +14,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
+use aws_sdk_s3::primitives::ByteStream;
 use buildomat_common::*;
+use buildomat_download::unruin_content_length;
 use dropshot::{
     endpoint, ApiDescription, ConfigDropshot, HttpError, HttpServerStarter,
     Query as TypedQuery, RequestContext, RequestInfo,
 };
-use futures::TryStreamExt;
 use getopts::Options;
 use hyper::{header::AUTHORIZATION, Body, Response, StatusCode};
 use rusty_ulid::Ulid;
@@ -352,7 +353,7 @@ impl Central {
         let akey = self.archive_object_key(job, archive_version);
         let bucket = &self.config.storage.bucket;
 
-        let body = aws_smithy_http::byte_stream::ByteStream::read_from()
+        let body = ByteStream::read_from()
             .file(body.into())
             .offset(0)
             .buffer_size(256 * 1024)
@@ -406,7 +407,7 @@ impl Central {
 
         let mut res =
             self.s3.get_object().bucket(bucket).key(&akey).send().await?;
-        let clen: u64 = res.content_length().try_into().unwrap();
+        let clen = unruin_content_length(res.content_length())?;
 
         /*
          * Download the data from S3 into a temporary file in the local file
@@ -1058,6 +1059,7 @@ async fn main() -> Result<()> {
     let awscfg = aws_config::ConfigLoader::default()
         .region(config.storage.region())
         .credentials_provider(config.storage.creds())
+        .behavior_version(aws_config::BehaviorVersion::v2023_11_09())
         .load()
         .await;
     let s3 = aws_sdk_s3::Client::new(&awscfg);

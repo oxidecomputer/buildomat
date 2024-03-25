@@ -16,7 +16,7 @@ mod kinds;
 mod stopwatch;
 
 pub use kinds::file::stream_from_file;
-pub use kinds::s3::stream_from_s3;
+pub use kinds::s3::{stream_from_s3, unruin_content_length};
 pub use kinds::url::stream_from_url;
 
 fn bad_range_response(file_size: u64) -> Response<Body> {

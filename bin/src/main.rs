@@ -84,26 +84,20 @@ impl<T, F> ErrorWrapper<T, F>
                             _ => None,
                         }
                     }
-                    buildomat_client::Error::InvalidResponsePayload(ref e) => {
-                        match e.status() {
-                            None if e.is_decode() => {
-                                /*
-                                 * If the buildomat backend service is offline,
-                                 * nginx will return a HTML-formatted page
-                                 * instead of a JSON-formatted message.  For
-                                 * right now, assume that this means the server
-                                 * is offline, rather than emitting a less
-                                 * helpful "Invalid Response Payload: error
-                                 * decoding response body: expected value at
-                                 * line 1 column 1" message.
-                                 */
-                                Some(
-                                    "invalid response: server may be offline!"
-                                        .to_string(),
-                                )
-                            }
-                            _ => None,
-                        }
+                    buildomat_client::Error::InvalidResponsePayload(_, _) => {
+                        /*
+                         * If the buildomat backend service is offline, nginx
+                         * will return a HTML-formatted page instead of a
+                         * JSON-formatted message.  For right now, assume that
+                         * this means the server is offline, rather than
+                         * emitting a less helpful "Invalid Response Payload:
+                         * error decoding response body: expected value at line
+                         * 1 column 1" message.
+                         */
+                        Some(
+                            "invalid response: server may be offline!"
+                                .to_string(),
+                        )
                     }
                     _ => None,
                 };

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Result};
+use aws_sdk_s3::primitives::ByteStream;
 use chrono::prelude::*;
 #[allow(unused_imports)]
 use slog::{debug, error, info, warn, Logger};
@@ -47,10 +48,7 @@ async fn archive_files_one(
             );
         }
 
-        let stream = aws_smithy_http::byte_stream::ByteStream::read_from()
-            .file(f)
-            .build()
-            .await?;
+        let stream = ByteStream::read_from().file(f).build().await?;
 
         let res = s3
             .put_object()

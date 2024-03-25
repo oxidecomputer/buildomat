@@ -9,7 +9,7 @@ doctest = false
 
 [dependencies]
 anyhow = { workspace = true }
-aws-sdk-s3 = "0.28.0"
+aws-sdk-s3 = { workspace = true }
 bytes = { workspace = true }
 dropshot = { workspace = true }
 futures = { workspace = true }

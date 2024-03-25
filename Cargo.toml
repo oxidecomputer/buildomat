@@ -23,11 +23,10 @@ resolver = "2"
 
 [workspace.dependencies]
 anyhow = "1"
-aws-config = "0.55.3"
-aws-credential-types = "0.55.3"
-aws-sdk-s3 = "0.28.0"
-aws-smithy-http = "0.55.3"
-aws-types = "0.55.3"
+aws-config = "1"
+aws-credential-types = "1"
+aws-sdk-s3 = "1"
+aws-types = "1"
 base64 = "0.13"
 bytes = "1.1"
 chrono = { version = "0.4", features = [ "serde" ] }
@@ -77,8 +76,8 @@ thiserror = "1"
 tlvc = { git = "https://github.com/oxidecomputer/tlvc", version = "0.3.1" }
 tlvc-text = { git = "https://github.com/oxidecomputer/tlvc", version = "0.3.0" }
 tokio = { version = "1", features = [ "full" ] }
-tokio-util = { version = "0.6.9", features = [ "io" ] }
 tokio-stream = "0.1"
+tokio-util = { version = "0.6.9", features = [ "io" ] }
 toml = "0.5"
 usdt = "0.3"
 zone = { version = "0.3", features = [ "async" ], default-features = false }

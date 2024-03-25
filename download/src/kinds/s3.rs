@@ -5,12 +5,17 @@
 use super::sublude::*;
 
 use anyhow::{anyhow, bail, Result};
-use futures::TryStreamExt;
 use hyper::{Body, Response};
-use slog::Logger;
+use slog::{o, Logger};
 use tokio::sync::mpsc;
 
 const BUF_COUNT: usize = 10;
+
+pub fn unruin_content_length(cl: Option<i64>) -> Result<u64> {
+    cl.and_then(|cl| cl.try_into().ok()).ok_or_else(|| {
+        anyhow!("invalid content-length from object store: {cl:?}")
+    })
+}
 
 /**
  * Produce a download response for a given object in the object store.
@@ -37,12 +42,7 @@ pub async fn stream_from_s3(
          * size.
          */
         let head = s3.head_object().bucket(bucket).key(&key).send().await?;
-        file_size = head.content_length().try_into().map_err(|_| {
-            anyhow!(
-                "invalid content-length from object store: {}",
-                head.content_length(),
-            )
-        })?;
+        file_size = unruin_content_length(head.content_length())?;
 
         match range.single_range(file_size) {
             Some(hr) => {
@@ -91,12 +91,7 @@ pub async fn stream_from_s3(
          * If this is not a range request, just fetch the whole file.
          */
         let obj = s3.get_object().bucket(bucket).key(&key).send().await?;
-        file_size = obj.content_length().try_into().map_err(|_| {
-            anyhow!(
-                "invalid content-length from object store: {}",
-                obj.content_length(),
-            )
-        })?;
+        file_size = unruin_content_length(obj.content_length())?;
 
         if head_only {
             return make_head_response(None, file_size, None);
