@@ -9,12 +9,14 @@ default = ['vendored-openssl']
 vendored-openssl = ['openssl/vendored']
 
 [dependencies]
+buildomat-github-client = { path = "../client" }
+buildomat-github-hooktypes = { path = "../hooktypes" }
+
 anyhow = { workspace = true }
 base64 = { workspace = true }
 chrono = { workspace = true }
 hiercmd = { workspace = true }
 hyper = { workspace = true }
-octorust = { workspace = true }
 pem = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
@@ -22,7 +24,6 @@ serde_json = { workspace = true }
 slog = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
-buildomat-github-common = { path = "../common" }
 
 #
 # I believe it is necessary to pull this in here, so that we can demand the

@@ -1,5 +1,5 @@
 [package]
-name = "buildomat-github-common"
+name = "buildomat-github-hooktypes"
 version = "0.0.0"
 edition = "2021"
 license = "MPL-2.0"

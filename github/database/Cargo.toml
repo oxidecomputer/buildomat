@@ -10,7 +10,7 @@ doctest = false
 [dependencies]
 buildomat-common = { path = "../../common" }
 buildomat-database = { path = "../../database" }
-buildomat-github-common = { path = "../common" }
+buildomat-github-hooktypes = { path = "../hooktypes" }
 
 anyhow = { workspace = true }
 chrono = { workspace = true }

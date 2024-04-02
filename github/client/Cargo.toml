@@ -1,0 +1,13 @@
+[package]
+name = "buildomat-github-client"
+version = "0.0.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lib]
+doctest = false
+
+[dependencies]
+anyhow = { workspace = true }
+octorust = { workspace = true }
+reqwest = { workspace = true }

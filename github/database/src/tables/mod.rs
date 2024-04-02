@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 mod sublude {
@@ -11,7 +11,7 @@ mod sublude {
     pub use buildomat_database::{
         rusqlite, sqlite_json_new_type, sqlite_sql_enum, FromRow,
     };
-    pub use buildomat_github_common::hooktypes;
+    pub use buildomat_github_hooktypes as hooktypes;
     pub use rusqlite::Row;
     pub use sea_query::{
         enum_def, ColumnRef, Expr, Iden, InsertStatement, Query, SeaRc,

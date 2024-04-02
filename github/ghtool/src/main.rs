@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use anyhow::{anyhow, Result};
@@ -9,36 +9,25 @@ mod config;
 
 #[derive(Default)]
 struct Stuff {
-    jwt: Option<octorust::auth::JWTCredentials>,
+    jwt: Option<buildomat_github_client::JWTCredentials>,
     app_id: i64,
 }
 
 impl Stuff {
-    fn make_jwt(&self) -> octorust::auth::JWTCredentials {
+    fn make_jwt(&self) -> buildomat_github_client::JWTCredentials {
         self.jwt.as_ref().unwrap().clone()
     }
 
-    fn app_client(&self) -> octorust::Client {
-        octorust::Client::custom(
-            "https://api.github.com",
-            buildomat_github_common::USER_AGENT,
-            octorust::auth::Credentials::JWT(self.make_jwt()),
-            reqwest::Client::builder().build().unwrap(),
-        )
+    fn app_client(&self) -> buildomat_github_client::Client {
+        buildomat_github_client::app_client(self.make_jwt()).unwrap()
     }
 
-    fn install_client(&self, install_id: i64) -> octorust::Client {
-        let iat = octorust::auth::InstallationTokenGenerator::new(
-            install_id as u64,
-            self.make_jwt(),
-        );
-
-        octorust::Client::custom(
-            "https://api.github.com",
-            buildomat_github_common::USER_AGENT,
-            octorust::auth::Credentials::InstallationToken(iat),
-            reqwest::Client::builder().build().unwrap(),
-        )
+    fn install_client(
+        &self,
+        install_id: i64,
+    ) -> buildomat_github_client::Client {
+        buildomat_github_client::install_client(self.make_jwt(), install_id)
+            .unwrap()
     }
 
     fn app_id(&self) -> i64 {
@@ -368,7 +357,7 @@ async fn main() -> Result<()> {
 
     s.context_mut().app_id = config.id as i64;
 
-    s.context_mut().jwt = Some(octorust::auth::JWTCredentials::new(
+    s.context_mut().jwt = Some(buildomat_github_client::JWTCredentials::new(
         config.id,
         key.contents().to_vec(),
     )?);

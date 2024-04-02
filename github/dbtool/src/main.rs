@@ -1,11 +1,11 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use anyhow::{anyhow, bail, Context, Result};
-use buildomat_github_common::hooktypes;
 use buildomat_github_database::types::{CheckRunVariety, CheckSuiteId};
 use buildomat_github_database::Database;
+use buildomat_github_hooktypes as hooktypes;
 use chrono::prelude::*;
 use hiercmd::prelude::*;
 use serde::Serialize;

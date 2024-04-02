@@ -790,10 +790,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "buildomat-github-common"
+name = "buildomat-github-client"
 version = "0.0.0"
 dependencies = [
- "serde",
+ "anyhow",
+ "octorust",
+ "reqwest",
 ]
 
 [[package]]
@@ -803,7 +805,7 @@ dependencies = [
  "anyhow",
  "buildomat-common",
  "buildomat-database",
- "buildomat-github-common",
+ "buildomat-github-hooktypes",
  "chrono",
  "rand",
  "rusty_ulid",
@@ -819,8 +821,8 @@ name = "buildomat-github-dbtool"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "buildomat-github-common",
  "buildomat-github-database",
+ "buildomat-github-hooktypes",
  "chrono",
  "hiercmd",
  "serde",
@@ -834,11 +836,11 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "base64 0.13.1",
- "buildomat-github-common",
+ "buildomat-github-client",
+ "buildomat-github-hooktypes",
  "chrono",
  "hiercmd",
  "hyper",
- "octorust",
  "openssl",
  "pem 2.0.1",
  "reqwest",
@@ -847,6 +849,13 @@ dependencies = [
  "slog",
  "tokio",
  "toml 0.5.11",
+]
+
+[[package]]
+name = "buildomat-github-hooktypes"
+version = "0.0.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -859,15 +868,15 @@ dependencies = [
  "buildomat-client",
  "buildomat-common",
  "buildomat-download",
- "buildomat-github-common",
+ "buildomat-github-client",
  "buildomat-github-database",
+ "buildomat-github-hooktypes",
  "chrono",
  "dropshot",
  "futures",
  "hmac-sha256",
  "html-escape",
  "hyper",
- "octorust",
  "pem 2.0.1",
  "reqwest",
  "rusty_ulid",

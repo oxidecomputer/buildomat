@@ -1,13 +1,17 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 #![allow(clippy::vec_init_then_push)]
 
 use anyhow::{anyhow, bail, Context, Result};
 use buildomat_common::*;
-use buildomat_github_common::hooktypes;
+use buildomat_github_client::types::{
+    ActionsListJobsWorkflowRunFilter, ChecksCreateRequestActions,
+    ChecksCreateSuiteRequest, JobStatus,
+};
 use buildomat_github_database::types::*;
+use buildomat_github_hooktypes as hooktypes;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use slog::{debug, error, info, o, trace, warn, Logger};
@@ -79,7 +83,7 @@ struct App {
     log: Logger,
     db: buildomat_github_database::Database,
     config: config::Config,
-    jwt: octorust::auth::JWTCredentials,
+    jwt: buildomat_github_client::JWTCredentials,
 }
 
 impl App {
@@ -91,27 +95,16 @@ impl App {
         self.make_url(&format!("details/{}/{}/{}", cs.id, cs.url_key, cr.id))
     }
 
-    fn app_client(&self) -> octorust::Client {
-        octorust::Client::custom(
-            "https://api.github.com",
-            buildomat_github_common::USER_AGENT,
-            octorust::auth::Credentials::JWT(self.jwt.clone()),
-            reqwest::Client::builder().build().unwrap(),
-        )
+    fn app_client(&self) -> buildomat_github_client::Client {
+        buildomat_github_client::app_client(self.jwt.clone()).unwrap()
     }
 
-    fn install_client(&self, install_id: i64) -> octorust::Client {
-        let iat = octorust::auth::InstallationTokenGenerator::new(
-            install_id as u64,
-            self.jwt.clone(),
-        );
-
-        octorust::Client::custom(
-            "https://api.github.com",
-            buildomat_github_common::USER_AGENT,
-            octorust::auth::Credentials::InstallationToken(iat),
-            reqwest::Client::builder().build().unwrap(),
-        )
+    fn install_client(
+        &self,
+        install_id: i64,
+    ) -> buildomat_github_client::Client {
+        buildomat_github_client::install_client(self.jwt.clone(), install_id)
+            .unwrap()
     }
 
     async fn temp_access_token(
@@ -120,7 +113,7 @@ impl App {
         repo: &Repository,
         extra_repos: Option<&Vec<i64>>,
     ) -> Result<String> {
-        use octorust::types::{
+        use buildomat_github_client::types::{
             AppPermissions, AppsCreateInstallationAccessTokenRequest, Pages,
         };
 
@@ -156,7 +149,7 @@ impl App {
 
     async fn load_file(
         &self,
-        gh: &octorust::Client,
+        gh: &buildomat_github_client::Client,
         repo: &Repository,
         sha: &str,
         path: &str,
@@ -198,7 +191,7 @@ impl App {
 
     async fn load_repo_job_files(
         &self,
-        gh: &octorust::Client,
+        gh: &buildomat_github_client::Client,
         cs: &CheckSuite,
         repo: &Repository,
     ) -> Result<LoadedFromSha<Plan>> {
@@ -790,7 +783,7 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                         .create_suite(
                             &pr.base.repo.owner.login,
                             &pr.base.repo.name,
-                            &octorust::types::ChecksCreateSuiteRequest {
+                            &ChecksCreateSuiteRequest {
                                 head_sha: pr.head.sha.to_string(),
                             },
                         )
@@ -1252,8 +1245,8 @@ async fn reconcile_check_runs(app: &Arc<App>, cs: &CheckSuite) -> Result<()> {
             &repo.name,
             cs.github_id,
             "",
-            octorust::types::JobStatus::Noop,
-            octorust::types::ActionsListJobsWorkflowRunFilter::All,
+            JobStatus::Noop,
+            ActionsListJobsWorkflowRunFilter::All,
             100,
             0,
         )
@@ -1278,8 +1271,7 @@ async fn reconcile_check_runs(app: &Arc<App>, cs: &CheckSuite) -> Result<()> {
          * According to GitHub, once a job has the Completed status, we can no
          * longer update the Conclusion.
          */
-        let completed =
-            matches!(run.status, octorust::types::JobStatus::Completed,);
+        let completed = matches!(run.status, JobStatus::Completed,);
 
         let mut cr = match run.external_id.parse() {
             Ok(id) => db.load_check_run(id)?,
@@ -1348,7 +1340,7 @@ async fn reconcile_check_runs(app: &Arc<App>, cs: &CheckSuite) -> Result<()> {
      * database records.
      */
     for id in cancel {
-        use octorust::types::{
+        use buildomat_github_client::types::{
             ChecksCreateRequestConclusion::Cancelled, ChecksUpdateRequest,
             JobStatus::Completed,
         };
@@ -1380,7 +1372,7 @@ struct FlushOut {
     summary: String,
     detail: String,
     state: FlushState,
-    actions: Vec<octorust::types::ChecksCreateRequestActions>,
+    actions: Vec<ChecksCreateRequestActions>,
 }
 
 async fn flush_check_runs(
@@ -1442,14 +1434,11 @@ async fn flush_check_runs(
                             .into(),
                         detail: "".into(),
                         state: FlushState::Failure,
-                        actions: vec![
-                            octorust::types::ChecksCreateRequestActions {
-                                description: "Allow this plan to proceed."
-                                    .into(),
-                                identifier: "auth".into(),
-                                label: "Authorise".into(),
-                            },
-                        ],
+                        actions: vec![ChecksCreateRequestActions {
+                            description: "Allow this plan to proceed.".into(),
+                            identifier: "auth".into(),
+                            label: "Authorise".into(),
+                        }],
                     }
                 } else if p.no_plans {
                     FlushOut {
@@ -1538,7 +1527,7 @@ async fn flush_check_runs(
             }
         };
 
-        use octorust::types::{
+        use buildomat_github_client::types::{
             ChecksCreateRequest,
             ChecksCreateRequestConclusion::{Failure, Success},
             ChecksCreateRequestOutput, ChecksUpdateRequest,
@@ -2196,7 +2185,7 @@ async fn main() -> Result<()> {
         pem::parse(&key).map_err(|e| anyhow!("parse privkey: {:?}", e))?;
     let config = config::load_config("etc/app.toml")?;
 
-    let jwt = octorust::auth::JWTCredentials::new(
+    let jwt = buildomat_github_client::JWTCredentials::new(
         config.id,
         key.contents().to_vec(),
     )?;
