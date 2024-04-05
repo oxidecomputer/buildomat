@@ -638,82 +638,58 @@ async fn poll_job(l: &Level<Stuff>, id: &str, json: bool) -> Result<()> {
         println!("polling for job output...");
     }
 
-    let mut nextseq = 0;
+    let ce = l.context().user().extra();
     let mut exit_status = 0;
     let mut last_state = String::new();
+
+    let mut wat = ce.watch_job(id, 0);
     loop {
-        let t = match l.context().user().job_get().job(id).send().await {
-            Ok(t) => t,
-            Err(_) => {
-                sleep_ms(500).await;
-                continue;
-            }
-        };
-
-        if t.state == "failed" {
-            exit_status = 1;
-        }
-
-        if t.state != last_state {
-            if !json {
-                println!("STATE CHANGE: {} -> {}", last_state, t.state);
-            }
-            last_state = t.state.to_string();
-        }
-
-        let terminal = t.state == "completed" || t.state == "failed";
-
-        if let Ok(events) = l
-            .context()
-            .user()
-            .job_events_get()
-            .job(id)
-            .minseq(nextseq)
-            .send()
-            .await
-        {
-            if events.is_empty() {
-                if terminal {
-                    /*
-                     * EOF.
-                     */
-                    break;
-                }
-            } else {
-                for e in events.iter() {
-                    if json {
-                        println!("{}", serde_json::to_string(&e)?);
-                    } else if e.stream == "stdout" || e.stream == "stderr" {
-                        println!("{}", e.payload);
-                    } else if e.stream == "control" {
-                        println!("|=| {}", e.payload);
-                    } else if e.stream == "worker" {
-                        println!("|W| {}", e.payload);
-                    } else if e.stream == "task" {
-                        println!("|T| {}", e.payload);
-                    } else if e.stream == "console" {
-                        println!("|C| {}", e.payload);
-                    } else if e.stream.starts_with("bg.") {
-                        let t = e.stream.split('.').collect::<Vec<_>>();
-                        if t.len() == 3 {
-                            if t[2] == "stdout" || t[2] == "stderr" {
-                                println!("[{}] {}", t[1], e.payload);
-                            } else {
-                                println!("{:?}", e);
-                            }
+        match wat.recv().await {
+            Some(Ok(buildomat_client::EventOrState::Event(e))) => {
+                if json {
+                    println!("{}", serde_json::to_string(&e)?);
+                } else if e.stream == "stdout" || e.stream == "stderr" {
+                    println!("{}", e.payload);
+                } else if e.stream == "control" {
+                    println!("|=| {}", e.payload);
+                } else if e.stream == "worker" {
+                    println!("|W| {}", e.payload);
+                } else if e.stream == "task" {
+                    println!("|T| {}", e.payload);
+                } else if e.stream == "console" {
+                    println!("|C| {}", e.payload);
+                } else if e.stream.starts_with("bg.") {
+                    let t = e.stream.split('.').collect::<Vec<_>>();
+                    if t.len() == 3 {
+                        if t[2] == "stdout" || t[2] == "stderr" {
+                            println!("[{}] {}", t[1], e.payload);
                         } else {
                             println!("{:?}", e);
                         }
                     } else {
                         println!("{:?}", e);
                     }
-                    nextseq = e.seq + 1;
+                } else {
+                    println!("{:?}", e);
                 }
             }
-        }
+            Some(Ok(buildomat_client::EventOrState::State(st))) => {
+                if st == "failed" {
+                    exit_status = 1;
+                }
 
-        if !terminal {
-            sleep_ms(250).await;
+                if st != last_state {
+                    if !json {
+                        println!("STATE CHANGE: {} -> {}", last_state, st);
+                    }
+                    last_state = st
+                }
+            }
+            Some(Ok(buildomat_client::EventOrState::Done)) => {
+                break;
+            }
+            Some(Err(e)) => bail!("job polling: {e}"),
+            None => bail!("job polling terminated unexpectedly"),
         }
     }
 

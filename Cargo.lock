@@ -657,6 +657,8 @@ dependencies = [
  "reqwest",
  "rusty_ulid",
  "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -871,6 +873,7 @@ dependencies = [
  "buildomat-github-client",
  "buildomat-github-database",
  "buildomat-github-hooktypes",
+ "buildomat-sse",
  "chrono",
  "dropshot",
  "futures",
@@ -904,6 +907,7 @@ dependencies = [
  "buildomat-common",
  "buildomat-database",
  "buildomat-download",
+ "buildomat-sse",
  "buildomat-types",
  "bytes",
  "chrono",
@@ -924,6 +928,19 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "usdt",
+]
+
+[[package]]
+name = "buildomat-sse"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "http 0.2.12",
+ "hyper",
+ "slog",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]

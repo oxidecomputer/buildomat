@@ -2,6 +2,8 @@
  * Copyright 2024 Oxide Computer Company
  */
 
+use slog::o;
+
 use super::prelude::*;
 
 use super::worker::UploadedChunk;
@@ -14,6 +16,19 @@ pub(crate) struct JobEvent {
     time: DateTime<Utc>,
     time_remote: Option<DateTime<Utc>>,
     payload: String,
+}
+
+impl From<db::JobEvent> for JobEvent {
+    fn from(jev: db::JobEvent) -> Self {
+        JobEvent {
+            seq: jev.seq as usize,
+            task: jev.task,
+            stream: jev.stream.to_string(),
+            time: jev.time.into(),
+            time_remote: jev.time_remote.map(|t| t.into()),
+            payload: jev.payload.to_string(),
+        }
+    }
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -90,18 +105,212 @@ pub(crate) async fn job_events_get(
         .await
         .or_500()?;
 
-    Ok(HttpResponseOk(
-        jevs.iter()
-            .map(|jev| JobEvent {
-                seq: jev.seq as usize,
-                task: jev.task,
-                stream: jev.stream.to_string(),
-                time: jev.time.into(),
-                time_remote: jev.time_remote.map(|t| t.into()),
-                payload: jev.payload.to_string(),
+    Ok(HttpResponseOk(jevs.into_iter().map(JobEvent::from).collect()))
+}
+
+#[endpoint {
+    method = GET,
+    path = "/0/jobs/{job}/watch",
+}]
+pub(crate) async fn job_watch(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<JobPath>,
+    query: TypedQuery<JobsEventsQuery>,
+) -> DSResult<Response<Body>> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let p = path.into_inner();
+
+    let owner = c.require_user(log, &rqctx.request).await?;
+    let j = c.load_job_for_user(log, &owner, p.job()?).await?;
+
+    let mut sse = ServerSentEvents::default();
+    let Some(mut rx) = c.db.job_subscribe(&j) else {
+        /*
+         * Tell the client that it is not currently possible to subscribe to
+         * this job.  The client should go and check the state of the job with a
+         * regular request, and then potentially try again later.
+         */
+        sse.build_event().event("check").data("-").send().await;
+
+        return sse.to_response().or_500();
+    };
+
+    /*
+     * Record the last sequence number and job state generation number we have
+     * seen, starting with the first number we get from the watch:
+     */
+    let (mut seq, mut gen) = {
+        let jn = rx.borrow();
+
+        (jn.seq, jn.gen)
+    };
+
+    /*
+     * The "minseq" query parameter be used to seek to a particular stream
+     * starting point.  Browsers will provide an initial job event stream offset
+     * this way, to resume the watch after the most recent event included in the
+     * page rendered by the server.
+     */
+    let mut resuming = false;
+    if let Some(minseq) =
+        query.into_inner().minseq.and_then(|n| n.try_into().ok())
+    {
+        seq = minseq;
+        if minseq > 1 {
+            resuming = true;
+        }
+    }
+
+    /*
+     * The "Last-Event-ID" header will be sent by a browser when reconnecting,
+     * with the "id" field of the last event it saw in the previous stream.  The
+     * event stream for this endpoint is a mixture of job events, which have a
+     * well-defined sequence number, and status change events, which do not.
+     *
+     * We include in each ID value the sequence number of the most recently sent
+     * job event, so that we can always seek to the right point in the events
+     * for the job.  This may lead to more than one event with the same sequence
+     * number, but that doesn't appear to be a problem in practice.
+     *
+     * Note that this value must take precedence over the query parameter, as a
+     * resumed stream from the browser will, each time it reconnects, include
+     * the original query string we gave to the EventSource.  It will only
+     * include the header on subsequent retries once it has seen at least one
+     * event.
+     */
+    if let Some(lei) = rqctx.request.headers().last_event_id() {
+        if let Some(num) = lei.strip_prefix("seq-") {
+            if let Ok(lei_seq) = num.parse::<u32>() {
+                if lei_seq < seq {
+                    /*
+                     * Resume the event stream from this earlier point.
+                     */
+                    seq = lei_seq;
+                    resuming = true;
+                }
+            }
+        }
+    }
+
+    info!(
+        log, "{} job {} watch",
+        if resuming { "resuming" } else { "starting" }, j.id;
+        "seq" => seq
+    );
+
+    let log0 = log.new(o!("stream" => true));
+    let c0 = Arc::clone(c);
+    let res = sse.to_response().or_500()?;
+    tokio::task::spawn(async move {
+        let c = c0;
+        let log = log0;
+        let mut check_state = true;
+        let mut previous_state = "".to_string();
+
+        loop {
+            if check_state {
+                /*
+                 * Render the job state for the client and send it on if it has
+                 * changed.
+                 */
+                let new_state = format_job_state(&c.db.job(j.id).or_500()?);
+                if new_state != previous_state {
+                    sse.build_event()
+                        .id(&format!("seq-{seq}"))
+                        .event("state")
+                        .data(&new_state)
+                        .send()
+                        .await;
+                    previous_state = new_state;
+                }
+                check_state = false;
+            }
+
+            /*
+             * Attempt to load a small quantity of records from the database.
+             */
+            let events = tokio::task::block_in_place(|| {
+                c.db.job_events(j.id, (seq as usize) + 1, 100)
             })
-            .collect(),
-    ))
+            .or_500()?;
+
+            if !events.is_empty() {
+                /*
+                 * Send the events to the client:
+                 */
+                for ev in events {
+                    if ev.seq > seq {
+                        seq = ev.seq;
+                    }
+
+                    if !sse
+                        .build_event()
+                        .id(&format!("seq-{seq}"))
+                        .event("job")
+                        .data(&serde_json::to_string(&JobEvent::from(ev))?)
+                        .send()
+                        .await
+                    {
+                        return Ok(());
+                    }
+                }
+
+                /*
+                 * After we deliver a chunk of events to the client, try to make
+                 * sure other requests can get time to run.
+                 */
+                tokio::task::yield_now().await;
+                continue;
+            }
+
+            /*
+             * If there are no events, then either we need to sleep and wait for
+             * more or we've reached the end of the job.
+             */
+            rx.changed().await?;
+            if sse.is_closed() {
+                return Ok::<(), anyhow::Error>(());
+            }
+
+            let complete = {
+                let jn = rx.borrow();
+
+                if gen != jn.gen {
+                    /*
+                     * There has been a job state change.  Go back and check the
+                     * state again.
+                     */
+                    check_state = true;
+                    gen = jn.gen;
+                    continue;
+                }
+
+                if seq < jn.seq {
+                    /*
+                     * Go back to the database to get more records.
+                     */
+                    continue;
+                }
+                jn.complete
+            };
+
+            if complete {
+                sse.build_event()
+                    .id(&format!("seq-{seq}"))
+                    .event("complete")
+                    .data("-")
+                    .send()
+                    .await;
+
+                info!(log, "end of job watch stream");
+                return Ok(());
+            }
+        }
+    });
+
+    Ok(res)
 }
 
 #[endpoint {

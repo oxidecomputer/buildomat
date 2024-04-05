@@ -2,8 +2,10 @@
  * Copyright 2024 Oxide Computer Company
  */
 
+use std::collections::HashMap;
 use std::path::Path;
-use std::{collections::HashMap, time::Duration};
+use std::sync::Mutex;
+use std::time::Duration;
 
 use anyhow::Result;
 use buildomat_common::*;
@@ -16,6 +18,7 @@ use sea_query::{
 };
 #[allow(unused_imports)]
 use slog::{debug, error, info, warn, Logger};
+use tokio::sync::watch;
 
 mod tables;
 
@@ -44,6 +47,7 @@ pub use types::*;
 pub struct Database {
     log: Logger,
     sql: Sqlite,
+    job_subscriptions: Mutex<HashMap<JobId, watch::Sender<JobNotification>>>,
 }
 
 pub struct CreateTask {
@@ -87,6 +91,14 @@ pub struct CreateWorkerEvent {
     pub payload: String,
 }
 
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct JobNotification {
+    pub id: JobId,
+    pub seq: u32,
+    pub complete: bool,
+    pub gen: u32,
+}
+
 impl Database {
     pub fn new<P: AsRef<Path>>(
         log: Logger,
@@ -100,7 +112,7 @@ impl Database {
             cache_kb,
         )?;
 
-        Ok(Database { log, sql })
+        Ok(Database { log, sql, job_subscriptions: Default::default() })
     }
 
     fn i_worker_for_bootstrap(
@@ -455,7 +467,7 @@ impl Database {
              * that condition in the job event stream and then mark that job as
              * failed.
              */
-            let mut failed_jobs: Vec<JobId> = Default::default();
+            let mut failed_jobs: Vec<Job> = Default::default();
             for job in self.i_worker_jobs(h, id)? {
                 if job.complete || job.failed || job.cancelled {
                     /*
@@ -473,7 +485,7 @@ impl Database {
 
                 self.i_job_complete(h, &job, true)?;
 
-                failed_jobs.push(job.id);
+                failed_jobs.push(job);
             }
 
             /*
@@ -502,7 +514,16 @@ impl Database {
             let recycled = self.i_worker_recycle(h, w.id)?;
             assert!(recycled);
 
-            Ok(failed_jobs)
+            for j in &failed_jobs {
+                let seq = self
+                    .i_job_event_max_seq(h, j.id)
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0);
+                self.i_job_notify(h, j, seq, true, true);
+            }
+
+            Ok(failed_jobs.into_iter().map(|j| j.id).collect())
         })
     }
 
@@ -610,7 +631,7 @@ impl Database {
         h: &mut Handle,
         id: JobId,
         msg: &str,
-    ) -> DBResult<()> {
+    ) -> DBResult<u32> {
         self.i_job_event_insert(h, id, None, "control", Utc::now(), None, msg)
     }
 
@@ -664,12 +685,13 @@ impl Database {
             "".to_string()
         };
 
-        self.i_job_control_event_insert(
+        let seq = self.i_job_control_event_insert(
             h,
             j.id,
             &format!("job assigned to worker {}{}", w.id, wait),
         )?;
 
+        self.i_job_notify(h, &j, seq, false, true);
         Ok(())
     }
 
@@ -1574,6 +1596,7 @@ impl Database {
                 assert_eq!(ic, 1);
             }
 
+            self.i_job_notify(h, &j, 0, false, true);
             Ok(j)
         })
     }
@@ -1836,6 +1859,56 @@ impl Database {
         })
     }
 
+    pub fn job_subscribe(
+        &self,
+        job: &Job,
+    ) -> Option<watch::Receiver<JobNotification>> {
+        let js = self.job_subscriptions.lock().unwrap();
+        js.get(&job.id).map(|tx| tx.subscribe())
+    }
+
+    fn i_job_notify(
+        &self,
+        _h: &mut Handle,
+        job: &Job,
+        seq: u32,
+        complete: bool,
+        state_change: bool,
+    ) {
+        let mut js = self.job_subscriptions.lock().unwrap();
+
+        if let Some(s) = js.get(&job.id) {
+            s.send_if_modified(|cur| {
+                assert_eq!(job.id, cur.id);
+
+                let gen = if state_change { cur.gen + 1 } else { cur.gen };
+
+                if cur.seq != seq || cur.complete != complete || cur.gen != gen
+                {
+                    cur.seq = seq;
+                    cur.complete = complete;
+                    cur.gen = gen;
+                    true
+                } else {
+                    false
+                }
+            });
+        } else if !complete {
+            let (tx, _) = watch::channel(JobNotification {
+                id: job.id,
+                seq,
+                complete,
+                gen: 0,
+            });
+
+            js.insert(job.id, tx);
+        }
+
+        if complete {
+            js.remove(&job.id);
+        }
+    }
+
     pub fn job_append_events(
         &self,
         job: JobId,
@@ -1847,8 +1920,9 @@ impl Database {
                 conflict!("job already complete, cannot append");
             }
 
+            let mut seq = 0;
             for e in events {
-                self.i_job_event_insert(
+                seq = self.i_job_event_insert(
                     h,
                     j.id,
                     e.task,
@@ -1859,6 +1933,7 @@ impl Database {
                 )?;
             }
 
+            self.i_job_notify(h, &j, seq, false, false);
             Ok(())
         })
     }
@@ -1878,7 +1953,7 @@ impl Database {
                 conflict!("job already complete, cannot append");
             }
 
-            self.i_job_event_insert(
+            let seq = self.i_job_event_insert(
                 h,
                 j.id,
                 task,
@@ -1888,6 +1963,7 @@ impl Database {
                 payload,
             )?;
 
+            self.i_job_notify(h, &j, seq, false, false);
             Ok(())
         })
     }
@@ -1915,7 +1991,7 @@ impl Database {
             {
                 msg += &format!(" (waiting for {})", dur.render());
             }
-            self.i_job_control_event_insert(h, j.id, &msg)?;
+            let seq = self.i_job_control_event_insert(h, j.id, &msg)?;
 
             let uc = h.exec_update(
                 Query::update()
@@ -1926,6 +2002,8 @@ impl Database {
                     .to_owned(),
             )?;
             assert_eq!(uc, 1);
+
+            self.i_job_notify(h, &j, seq, false, true);
 
             Ok(())
         })
@@ -1945,7 +2023,8 @@ impl Database {
                 return Ok(false);
             }
 
-            self.i_job_control_event_insert(h, j.id, "job cancelled")?;
+            let seq =
+                self.i_job_control_event_insert(h, j.id, "job cancelled")?;
 
             let uc = h.exec_update(
                 Query::update()
@@ -1957,6 +2036,7 @@ impl Database {
             )?;
             assert_eq!(uc, 1);
 
+            self.i_job_notify(h, &j, seq, false, true);
             Ok(true)
         })
     }
@@ -1964,7 +2044,14 @@ impl Database {
     pub fn job_complete(&self, job: JobId, failed: bool) -> DBResult<bool> {
         self.sql.tx_immediate(|h| {
             let j: Job = h.get_row(Job::find(job))?;
-            self.i_job_complete(h, &j, failed)
+
+            let res = self.i_job_complete(h, &j, failed);
+
+            let seq =
+                self.i_job_event_max_seq(h, j.id).ok().flatten().unwrap_or(0);
+            self.i_job_notify(h, &j, seq, true, true);
+
+            res
         })
     }
 
@@ -2259,6 +2346,20 @@ impl Database {
         })
     }
 
+    fn i_job_event_max_seq(
+        &self,
+        h: &mut Handle,
+        job: JobId,
+    ) -> DBResult<Option<u32>> {
+        h.get_row(
+            Query::select()
+                .from(JobEventDef::Table)
+                .and_where(Expr::col(JobEventDef::Job).eq(job))
+                .expr(Expr::col(JobEventDef::Seq).max())
+                .to_owned(),
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn i_job_event_insert(
         &self,
@@ -2269,20 +2370,15 @@ impl Database {
         time: DateTime<Utc>,
         time_remote: Option<DateTime<Utc>>,
         payload: &str,
-    ) -> DBResult<()> {
-        let max: Option<u32> = h.get_row(
-            Query::select()
-                .from(JobEventDef::Table)
-                .and_where(Expr::col(JobEventDef::Job).eq(job))
-                .expr(Expr::col(JobEventDef::Seq).max())
-                .to_owned(),
-        )?;
+    ) -> DBResult<u32> {
+        let max = self.i_job_event_max_seq(h, job)?;
+        let seq = max.unwrap_or(0) + 1;
 
         let ic = h.exec_insert(
             JobEvent {
                 job,
                 task,
-                seq: max.unwrap_or(0) + 1,
+                seq,
                 stream: stream.to_string(),
                 time: IsoDate(time),
                 time_remote: time_remote.map(IsoDate),
@@ -2292,7 +2388,7 @@ impl Database {
         )?;
         assert_eq!(ic, 1);
 
-        Ok(())
+        Ok(seq)
     }
 
     pub fn worker_job(&self, worker: WorkerId) -> DBResult<Option<Job>> {

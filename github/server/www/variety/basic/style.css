@@ -1,0 +1,67 @@
+table.table_output {
+    border: none;
+}
+
+td {
+    vertical-align: top;
+}
+
+td.num {
+    text-align: right;
+}
+
+tr.s_stdout {
+    background-color: #ffffff;
+}
+
+tr.s_stderr {
+    background-color: #ffd9da;
+}
+
+tr.s_task {
+    background-color: #add8e6;
+}
+
+tr.s_worker {
+    background-color: #fafad2;
+}
+
+tr.s_control {
+    background-color: #90ee90;
+}
+
+tr.s_console {
+    background-color: #e7d1ff;
+}
+
+tr.s_bgtask {
+    background-color: #f79d65;
+}
+
+tr.s_default {
+    background-color: #dddddd;
+}
+
+span.header {
+    white-space: pre;
+    font-family: monospace;
+    font-weight: bold;
+}
+
+span.field {
+    white-space: pre;
+    font-family: monospace;
+}
+
+span.payload {
+    white-space: pre-wrap;
+    white-space: -moz-pre-wrap !important;
+    font-family: monospace;
+}
+
+a.numlink {
+    white-space: pre;
+    font-family: monospace;
+    text-decoration: none;
+    color: #111111;
+}

@@ -17,3 +17,5 @@ progenitor = { workspace = true }
 reqwest = { workspace = true }
 rusty_ulid = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }

@@ -96,20 +96,23 @@ impl<T> MakeInternalError<T>
     }
 }
 
+impl<T> MakeInternalError<T> for serde_json::Result<T> {
+    fn or_500(self) -> SResult<T, HttpError> {
+        self.map_err(|e| {
+            let msg = format!("serde JSON error: {:?}", e);
+            HttpError::for_internal_error(msg)
+        })
+    }
+}
+
 pub(crate) trait ApiResultEx {
     fn api_check(&self) -> Result<()>;
-    fn note(&self, n: &str) -> Result<()>;
 }
 
 impl ApiResultEx for std::result::Result<(), String> {
     fn api_check(&self) -> Result<()> {
         self.as_ref()
             .map_err(|e| anyhow!("API registration failure: {}", e))?;
-        Ok(())
-    }
-
-    fn note(&self, n: &str) -> Result<()> {
-        self.as_ref().map_err(|e| anyhow!("{}: {}", n, e))?;
         Ok(())
     }
 }
@@ -651,7 +654,7 @@ impl Central {
              */
             let f = std::fs::File::open(op).or_500()?;
 
-            buildomat_download::stream_from_file(&log, info, f, range, head)
+            buildomat_download::stream_from_file(log, info, f, range, head)
                 .await
                 .or_500()
         } else {
@@ -659,7 +662,7 @@ impl Central {
              * Otherwise, try to get it from the object store.
              */
             buildomat_download::stream_from_s3(
-                &log,
+                log,
                 info,
                 &self.s3,
                 &self.config.storage.bucket,
@@ -860,7 +863,7 @@ async fn file_agent_common(
     info!(log, "using agent file {filename:?}");
 
     buildomat_download::stream_from_file(
-        &log,
+        log,
         format!("agent file: {filename:?}"),
         std::fs::File::open(&filename).or_500()?,
         None,
@@ -976,6 +979,7 @@ async fn main() -> Result<()> {
     ad.register(api::admin::target_redirect).api_check()?;
     ad.register(api::admin::target_rename).api_check()?;
     ad.register(api::user::job_events_get).api_check()?;
+    ad.register(api::user::job_watch).api_check()?;
     ad.register(api::user::job_outputs_get).api_check()?;
     ad.register(api::user::job_output_download).api_check()?;
     ad.register(api::user::job_output_head).api_check()?;
