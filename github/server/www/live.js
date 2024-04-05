@@ -71,7 +71,7 @@ live_job(ev)
 	td1.style.cssText = "vertical-align: top;";
 	var span1 = document.createElement("span");
 	span1.style.cssText = "white-space: pre; font-family: monospace;";
-	span1.innerText = "" + je.time;
+	span1.innerText = "" + new Date(je.time).toISOString();
 	td1.appendChild(span1);
 	tr.appendChild(td1);
 
@@ -81,11 +81,13 @@ live_job(ev)
 	span2.style.cssText = "white-space: pre-wrap; " +
 	    "white-space: -moz-pre-wrap !important; " +
 	    "font-family: monospace;";
-	span2.innerText = "" + live_escape(je.payload);
+	span2.innerText = "" + je.payload;
 	td2.appendChild(span2);
 	tr.appendChild(td2);
 
 	tbl.appendChild(tr);
+
+	tr.scrollIntoView(false);
 }
 
 function
@@ -93,15 +95,4 @@ live_complete(ev)
 {
 	console.log("complete received; ending stream");
 	EVT.close();
-}
-
-function
-live_escape(payload)
-{
-	return (payload
-	    .replace(/&/g, "&amp;")
-	    .replace(/</g, "&lt;")
-	    .replace(/>/g, "&gt;")
-	    .replace(/"/g, "&quot;")
-	    .replace(/'/g, "&#039;"));
 }
