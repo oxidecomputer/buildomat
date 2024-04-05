@@ -1217,6 +1217,31 @@ pub(crate) async fn artefact(
     Ok(None)
 }
 
+pub(crate) async fn live(
+    app: &Arc<App>,
+    cs: &CheckSuite,
+    cr: &CheckRun,
+) -> Result<Option<hyper::Response<hyper::Body>>> {
+    let p: BasicPrivate = cr.get_private()?;
+
+    if let Some(id) = &p.buildomat_id {
+        let bm = app.buildomat(&app.db.load_repository(cs.repo)?);
+
+        let backend = bm.job_watch().job(id).send().await?;
+
+        return Ok(Some(
+            hyper::Response::builder()
+                .status(hyper::StatusCode::OK)
+                .header("X-Accel-Buffering", "no")
+                .header(hyper::header::CONTENT_TYPE, "text/event-stream")
+                .header(hyper::header::CACHE_CONTROL, "no-store")
+                .body(hyper::Body::wrap_stream(backend.into_inner_stream()))?,
+        ));
+    }
+
+    Ok(None)
+}
+
 pub(crate) async fn details(
     app: &Arc<App>,
     cs: &CheckSuite,
@@ -1286,7 +1311,7 @@ pub(crate) async fn details(
         }
 
         out += "<h3>Output:</h3>\n";
-        out += "<table style=\"border: none;\">\n";
+        out += "<table id=\"table_output\" style=\"border: none;\">\n";
 
         let mut last = None;
 

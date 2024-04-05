@@ -273,6 +273,7 @@ impl LoadCheckSuiteAndRun for DetailsPath {
 #[derive(Deserialize, JsonSchema)]
 struct DetailsQuery {
     pub ts: Option<String>,
+    pub live: Option<bool>,
 }
 
 #[endpoint {
@@ -301,9 +302,20 @@ async fn details(
 
     let mut out = String::new();
     out += "<!doctype html>\n<html>\n";
-    out +=
-        &format!("<head><title>Check Run: {}</title></head>\n", load.cr.name);
-    out += "<body>\n";
+    out += "<head>\n";
+    out += &format!("<title>Check Run: {}</title>\n", load.cr.name);
+    if query.live.unwrap_or(false) {
+        out += "<script>\n";
+        out += &include_str!("../www/live.js")
+            .replace("%CHECKRUN%", &load.cr.id.to_string());
+        out += "</script>\n";
+    }
+    out += "</head>\n";
+    if query.live.unwrap_or(false) {
+        out += "<body onload=\"live_onload()\">\n";
+    } else {
+        out += "<body>\n";
+    }
     out += &format!("<h1>{}: {}</h1>\n", load.cr.id, load.cr.name);
 
     out += &match load.cr.variety {
@@ -347,6 +359,52 @@ async fn details(
         .header(hyper::header::CONTENT_TYPE, "text/html; charset=utf-8")
         .header(hyper::header::CONTENT_LENGTH, out.as_bytes().len())
         .body(hyper::Body::from(out))?)
+}
+
+#[endpoint {
+    method = GET,
+    path = "/details/{check_suite}/{url_key}/{check_run}/live",
+}]
+async fn details_live(
+    rc: RequestContext<Arc<App>>,
+    path: dropshot::Path<DetailsPath>,
+) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+    let app = rc.context();
+    let path = path.into_inner();
+
+    let load = match path.load(&rc) {
+        Ok(Some(load)) => load,
+        Ok(None) => return html_404(false),
+        Err(e) => {
+            error!(rc.log, "details: load: {e}");
+            return html_500(&rc.request_id, false);
+        }
+    };
+
+    let res = match load.cr.variety {
+        CheckRunVariety::Basic => {
+            variety::basic::live(app, &load.cs, &load.cr).await
+        }
+        /*
+         * No other variety exposes live details:
+         */
+        _ => Ok(None),
+    };
+
+    match res {
+        Ok(Some(res)) => {
+            /*
+             * Pass the response on from the variety-specific code as-is.  It is
+             * a live-streamed response.
+             */
+            Ok(res)
+        }
+        Ok(None) => html_404(false),
+        Err(e) => {
+            error!(rc.log, "live: basic: {e}");
+            html_500(&rc.request_id, false)
+        }
+    }
 }
 
 #[endpoint {
@@ -1032,6 +1090,7 @@ pub(crate) async fn server(
     let mut api = dropshot::ApiDescription::new();
     api.register(webhook).unwrap();
     api.register(details).unwrap();
+    api.register(details_live).unwrap();
     api.register(artefact).unwrap();
     api.register(status).unwrap();
     api.register(published_file).unwrap();

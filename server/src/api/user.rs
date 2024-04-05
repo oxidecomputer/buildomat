@@ -227,7 +227,7 @@ pub(crate) async fn job_watch(
                             if jn.complete {
                                 if !complete {
                                     complete = true;
-                                    "event: complete\n\n".to_string()
+                                    "event: complete\ndata: -\n\n".to_string()
                                 } else {
                                     info!(log, "end of job watch stream");
                                     return Ok(());
@@ -293,7 +293,7 @@ pub(crate) async fn job_watch(
             .status(StatusCode::OK)
             .header("X-Accel-Buffering", "no")
             .header(CONTENT_TYPE, "text/event-stream")
-            .header(CACHE_CONTROL, "no-cache, no-store, must-revalidate")
+            .header(CACHE_CONTROL, "no-store")
             .body(body)?)
     } else {
         /*
@@ -304,8 +304,8 @@ pub(crate) async fn job_watch(
             .status(StatusCode::OK)
             .header("X-Accel-Buffering", "no")
             .header(CONTENT_TYPE, "text/event-stream")
-            .header(CACHE_CONTROL, "no-cache, no-store, must-revalidate")
-            .body("event: check\n\n".into())?)
+            .header(CACHE_CONTROL, "no-store")
+            .body("event: check\ndata: -\n\n".into())?)
     }
 
     //let jevs = c
