@@ -119,8 +119,25 @@ impl ClientExtra {
                 let mut chan = match c.job_watch().job(&id).send().await {
                     Ok(rvbs) => events::attach(rvbs),
                     Err(e) => {
-                        tx.send(Err(e.to_string())).await.ok();
-                        return;
+                        if let Some(status) = e.status() {
+                            if status.as_u16() == 404 || status.as_u16() == 403
+                            {
+                                /*
+                                 * This job does not exist, or is not visible to
+                                 * us.
+                                 */
+                                tx.send(Err(format!("job {id} not found")))
+                                    .await
+                                    .ok();
+                                return;
+                            }
+                        }
+
+                        /*
+                         * Sleep and try again.
+                         */
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue;
                     }
                 };
 
@@ -164,6 +181,23 @@ impl ClientExtra {
                                                 return;
                                             }
                                         };
+
+                                    if je.seq > prev_seq + 1 {
+                                        /*
+                                         * If we reconnect to the event stream
+                                         * we might have missed some records.
+                                         * Fetch them now using the regular
+                                         * paginated interface:
+                                         */
+                                        prev_seq = record_catchup(
+                                            &c,
+                                            &id,
+                                            &tx,
+                                            prev_seq,
+                                            Some(je.seq),
+                                        )
+                                        .await;
+                                    }
 
                                     if je.seq <= prev_seq {
                                         continue;
@@ -237,9 +271,11 @@ impl ClientExtra {
                          */
                         tokio::time::sleep(Duration::from_secs(2)).await;
                     }
-                    Err(e) => {
-                        tx.send(Err(e.to_string())).await.ok();
-                        return;
+                    Err(_) => {
+                        /*
+                         * Sleep and then try to subscribe again.
+                         */
+                        tokio::time::sleep(Duration::from_secs(2)).await;
                     }
                 }
             }
@@ -247,41 +283,69 @@ impl ClientExtra {
             /*
              * Dump out any remaining event records.
              */
-            loop {
-                match c
-                    .job_events_get()
-                    .job(&id)
-                    .minseq(prev_seq.checked_add(1).unwrap())
-                    .send()
-                    .await
-                {
-                    Ok(events) if events.is_empty() => {
-                        tx.send(Ok(EventOrState::Done)).await.ok();
-                        return;
-                    }
-                    Ok(events) => {
-                        for ev in events.into_inner() {
-                            if ev.seq > prev_seq {
-                                prev_seq = ev.seq;
-                            }
-
-                            if tx
-                                .send(Ok(EventOrState::Event(ev)))
-                                .await
-                                .is_err()
-                            {
-                                return;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tx.send(Err(e.to_string())).await.ok();
-                        return;
-                    }
-                }
-            }
+            record_catchup(&c, &id, &tx, prev_seq, None).await;
         });
 
         rx
+    }
+}
+
+async fn record_catchup(
+    c: &Client,
+    id: &str,
+    tx: &tokio::sync::mpsc::Sender<std::result::Result<EventOrState, String>>,
+    mut prev_seq: u32,
+    stop_seq: Option<u32>,
+) -> u32 {
+    loop {
+        if tx.is_closed() {
+            return prev_seq;
+        }
+
+        match c
+            .job_events_get()
+            .job(id)
+            .minseq(prev_seq.checked_add(1).unwrap())
+            .send()
+            .await
+        {
+            Ok(events) if events.is_empty() => {
+                if stop_seq.is_some() {
+                    /*
+                     * We're still running, but have hit the end of the record
+                     * stream without hitting the event we're trying to catch up
+                     * to.  This really shouldn't happen, as the event stream
+                     * for a job is append-only.
+                     */
+                    return prev_seq;
+                }
+
+                tx.send(Ok(EventOrState::Done)).await.ok();
+                return prev_seq;
+            }
+            Ok(events) => {
+                for ev in events.into_inner() {
+                    if let Some(stop_seq) = stop_seq {
+                        if ev.seq >= stop_seq {
+                            /*
+                             * We've caught up to the point in the stream where
+                             * live events are showing up.
+                             */
+                            return prev_seq;
+                        }
+                    }
+
+                    if ev.seq > prev_seq {
+                        prev_seq = ev.seq;
+                        if tx.send(Ok(EventOrState::Event(ev))).await.is_err() {
+                            return prev_seq;
+                        }
+                    }
+                }
+            }
+            Err(_) => {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        }
     }
 }

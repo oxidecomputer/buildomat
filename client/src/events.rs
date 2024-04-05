@@ -63,9 +63,6 @@ pub fn attach(
     rv: progenitor::progenitor_client::ResponseValue<
         progenitor::progenitor_client::ByteStream,
     >,
-    //stream: Pin<
-    //    Box<dyn Stream<Item = std::result::Result<Bytes, crate::Error> + Sync + Send>>,
-    //>,
 ) -> tokio::sync::mpsc::Receiver<std::result::Result<ServerEventRecord, String>>
 {
     let (tx, rx) = tokio::sync::mpsc::channel(128);
