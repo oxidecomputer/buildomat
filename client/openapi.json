@@ -1378,6 +1378,31 @@
         }
       }
     },
+    "/0/jobs/{job}/watch": {
+      "get": {
+        "operationId": "job_watch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/0/public/file/{username}/{series}/{version}/{name}": {
       "get": {
         "operationId": "public_file_download",

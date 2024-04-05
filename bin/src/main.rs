@@ -363,6 +363,46 @@ async fn do_job_tail(mut l: Level<Stuff>) -> Result<()> {
     poll_job(&l, &a.args()[0], a.opts().opt_present("j")).await
 }
 
+async fn do_job_stream(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("JOB"));
+
+    let a = args!(l);
+
+    if a.args().len() != 1 {
+        bad_args!(l, "specify a job");
+    }
+
+    let ce = l.context().user().extra();
+
+    let mut wat = ce.watch_job(&a.args()[0]);
+    let mut origst = "".to_string();
+
+    loop {
+        match wat.recv().await {
+            Some(Ok(buildomat_client::EventOrState::Event(ev))) => {
+                println!("{ev:?}");
+            }
+            Some(Ok(buildomat_client::EventOrState::State(st))) => {
+                if st != origst {
+                    println!("JOB STATE CHANGED: {origst:?} -> {st:?}");
+                    origst = st;
+                }
+            }
+            Some(Ok(buildomat_client::EventOrState::Done)) => {
+                println!("STREAM DONE");
+                break;
+            }
+            Some(Err(e)) => bail!("STREAM ERROR: {e}"),
+            None => {
+                println!("UNEXPECTED STREAM END");
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 async fn do_job_run(mut l: Level<Stuff>) -> Result<()> {
     l.optflag("W", "no-wait", "do not wait for job to complete");
     l.optflag("E", "empty-env", "start with a completely empty environment");
@@ -1263,6 +1303,7 @@ async fn do_job(mut l: Level<Stuff>) -> Result<()> {
     l.cmd("run", "run a job", cmd!(do_job_run))?;
     l.cmd("cancel", "cancel a job", cmd!(do_job_cancel))?;
     l.cmd("tail", "listen for events from a job", cmd!(do_job_tail))?;
+    l.hcmd("stream", "stream notifications from a job", cmd!(do_job_stream))?;
     l.cmd("join", "wait for completion of jobs", cmd!(do_job_join))?;
     l.cmd("store", "manage the job store", cmd!(do_job_store))?;
     l.cmd("outputs", "list job outputs", cmd!(do_job_outputs))?;

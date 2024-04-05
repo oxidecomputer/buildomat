@@ -4,7 +4,7 @@
 
 mod prelude {
     pub(crate) use crate::{db, unauth_response, Central, MakeInternalError};
-    pub use anyhow::Result;
+    pub use anyhow::{bail, Result};
     pub use buildomat_download::{PotentialRange, RequestContextEx};
     pub use buildomat_types::metadata;
     pub use chrono::prelude::*;
