@@ -1389,6 +1389,16 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "minseq",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -1406,6 +1416,53 @@
     "/0/public/file/{username}/{series}/{version}/{name}": {
       "get": {
         "operationId": "public_file_download",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "series",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "username",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "operationId": "public_file_head",
         "parameters": [
           {
             "in": "path",

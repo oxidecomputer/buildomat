@@ -17,6 +17,7 @@ members = [
 	"github/hooktypes",
 	"github/server",
 	"server",
+	"sse",
 	"types",
 	"xtask",
 ]

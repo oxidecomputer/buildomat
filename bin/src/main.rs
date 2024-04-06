@@ -642,7 +642,7 @@ async fn poll_job(l: &Level<Stuff>, id: &str, json: bool) -> Result<()> {
     let mut exit_status = 0;
     let mut last_state = String::new();
 
-    let mut wat = ce.watch_job(id);
+    let mut wat = ce.watch_job(id, 0);
     loop {
         match wat.recv().await {
             Some(Ok(buildomat_client::EventOrState::Event(e))) => {

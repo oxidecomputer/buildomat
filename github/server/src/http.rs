@@ -7,6 +7,7 @@ use buildomat_client::prelude::*;
 use buildomat_common::*;
 use buildomat_download::RequestContextEx;
 use buildomat_github_database::types::*;
+use buildomat_sse::{HeaderMapEx, ServerSentEvents};
 use chrono::prelude::*;
 use dropshot::{
     endpoint, ConfigDropshot, HttpError, HttpResponseOk, RequestContext,
@@ -273,7 +274,6 @@ impl LoadCheckSuiteAndRun for DetailsPath {
 #[derive(Deserialize, JsonSchema)]
 struct DetailsQuery {
     pub ts: Option<String>,
-    pub live: Option<bool>,
 }
 
 #[endpoint {
@@ -304,15 +304,17 @@ async fn details(
     out += "<!doctype html>\n<html>\n";
     out += "<head>\n";
     out += &format!("<title>Check Run: {}</title>\n", load.cr.name);
-    if query.live.unwrap_or(false) {
-        out += "<script>\n";
-        out += &include_str!("../www/live.js")
-            .replace("%CHECKRUN%", &load.cr.id.to_string());
-        out += "</script>\n";
+    if matches!(load.cr.variety, CheckRunVariety::Basic) {
+        /*
+         * The <style> tag needs to appear inside the <head>:
+         */
+        out += "<style>\n";
+        out += include_str!("../www/variety/basic/style.css");
+        out += "</style>\n";
     }
     out += "</head>\n";
-    if query.live.unwrap_or(false) {
-        out += "<body onload=\"live_onload()\">\n";
+    if matches!(load.cr.variety, CheckRunVariety::Basic) {
+        out += "<body onload=\"basic_onload()\">\n";
     } else {
         out += "<body>\n";
     }
@@ -361,6 +363,11 @@ async fn details(
         .body(hyper::Body::from(out))?)
 }
 
+#[derive(Deserialize, JsonSchema)]
+struct DetailsLiveQuery {
+    pub minseq: Option<u32>,
+}
+
 #[endpoint {
     method = GET,
     path = "/details/{check_suite}/{url_key}/{check_run}/live",
@@ -368,9 +375,46 @@ async fn details(
 async fn details_live(
     rc: RequestContext<Arc<App>>,
     path: dropshot::Path<DetailsPath>,
+    query: dropshot::Query<DetailsLiveQuery>,
 ) -> SResult<hyper::Response<hyper::Body>, HttpError> {
     let app = rc.context();
     let path = path.into_inner();
+    let query = query.into_inner();
+
+    /*
+     * The "Last-Event-ID" header will be sent by a browser when reconnecting,
+     * with the "id" field of the last event it saw in the previous stream.  The
+     * event stream for this endpoint is a mixture of job events, which have a
+     * well-defined sequence number, and status change events, which do not.
+     *
+     * We include in each ID value the the sequence number of the most recently
+     * sent job event, so that we can always seek to the right point in the
+     * events for the job.  This may lead to more than one event with the same
+     * sequence number, but that doesn't appear to be a problem in practice.
+     *
+     * Note that this value must take precedence over the query parameter, as a
+     * resumed stream from the browser will, each time it reconnects, include
+     * the original query string we gave to the EventSource.  It will only
+     * include the header on subsequent retries once it has seen at least one
+     * event.
+     */
+    let mut minseq = None;
+    if let Some(lei) = rc.request.headers().last_event_id() {
+        if let Some(num) = lei.strip_prefix("seq-") {
+            if let Ok(lei_seq) = num.parse::<u32>() {
+                if let Some(lei_seq) = lei_seq.checked_add(1) {
+                    /*
+                     * Resume the event stream from this earlier point.
+                     */
+                    minseq = Some(lei_seq);
+                }
+            }
+        }
+    }
+
+    if minseq.is_none() {
+        minseq = query.minseq;
+    }
 
     let load = match path.load(&rc) {
         Ok(Some(load)) => load,
@@ -381,27 +425,30 @@ async fn details_live(
         }
     };
 
-    let res = match load.cr.variety {
+    let mut sse = ServerSentEvents::new();
+    let response = match sse.to_response() {
+        Ok(response) => response,
+        Err(e) => {
+            error!(rc.log, "details live: sse: {e}");
+            return html_500(&rc.request_id, false);
+        }
+    };
+
+    let ok = match load.cr.variety {
         CheckRunVariety::Basic => {
-            variety::basic::live(app, &load.cs, &load.cr).await
+            variety::basic::live(app, &load.cs, &load.cr, minseq, sse).await
         }
         /*
          * No other variety exposes live details:
          */
-        _ => Ok(None),
+        _ => Ok(false),
     };
 
-    match res {
-        Ok(Some(res)) => {
-            /*
-             * Pass the response on from the variety-specific code as-is.  It is
-             * a live-streamed response.
-             */
-            Ok(res)
-        }
-        Ok(None) => html_404(false),
+    match ok {
+        Ok(true) => Ok(response),
+        Ok(false) => html_404(false),
         Err(e) => {
-            error!(rc.log, "live: basic: {e}");
+            error!(rc.log, "details live: {e}");
             html_500(&rc.request_id, false)
         }
     }

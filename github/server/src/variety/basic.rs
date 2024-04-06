@@ -5,8 +5,10 @@
 use crate::{App, FlushOut, FlushState};
 use anyhow::{bail, Result};
 use buildomat_client::types::{DependSubmit, JobOutput};
+use buildomat_client::{prelude::*, EventOrState};
 use buildomat_common::*;
 use buildomat_github_database::types::*;
+use buildomat_sse::ServerSentEvents;
 use chrono::SecondsFormat;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -953,7 +955,7 @@ async fn bunyan_to_html(
         };
 
         /*
-         * The first column ia a permalink with the line number.
+         * The first column is a permalink with the line number.
          */
         let mut out = format!(
             "<tr class=\"{cssclass}\">\
@@ -1221,25 +1223,79 @@ pub(crate) async fn live(
     app: &Arc<App>,
     cs: &CheckSuite,
     cr: &CheckRun,
-) -> Result<Option<hyper::Response<hyper::Body>>> {
+    minseq: Option<u32>,
+    sse: ServerSentEvents,
+) -> Result<bool> {
     let p: BasicPrivate = cr.get_private()?;
+    let id = if let Some(id) = &p.buildomat_id {
+        id.to_string()
+    } else {
+        /*
+         * If there is no buildomat job for this run, return a not found error.
+         */
+        return Ok(false);
+    };
 
-    if let Some(id) = &p.buildomat_id {
-        let bm = app.buildomat(&app.db.load_repository(cs.repo)?);
+    let bme = app.buildomat(&app.db.load_repository(cs.repo)?).extra();
 
-        let backend = bm.job_watch().job(id).send().await?;
+    tokio::task::spawn(async move {
+        let mut rx = bme.watch_job(&id, minseq.unwrap_or(0));
+        while let Some(eos) = rx.recv().await {
+            match eos {
+                Ok(EventOrState::State(_)) => (),
+                Ok(EventOrState::Event(ev)) => {
+                    /*
+                     * XXX Choose a colour (css classname) and generate the text
+                     * values for the columns in a new row.
+                     */
+                    let class = match ev.stream.as_str() {
+                        s @ ("stdout" | "stderr" | "task" | "worker"
+                        | "control" | "console") => format!("s_{s}"),
+                        s if s.starts_with("bg.") => "s_bgtask".into(),
+                        _ => "s_default".into(),
+                    };
 
-        return Ok(Some(
-            hyper::Response::builder()
-                .status(hyper::StatusCode::OK)
-                .header("X-Accel-Buffering", "no")
-                .header(hyper::header::CONTENT_TYPE, "text/event-stream")
-                .header(hyper::header::CACHE_CONTROL, "no-store")
-                .body(hyper::Body::wrap_stream(backend.into_inner_stream()))?,
-        ));
-    }
+                    let t = vec![
+                        class,
+                        ev.seq.to_string(),
+                        ev.time.to_rfc3339_opts(SecondsFormat::Millis, true),
+                        ev.time_remote
+                            .map(|t| {
+                                t.to_rfc3339_opts(SecondsFormat::Millis, true)
+                            })
+                            .unwrap_or_else(|| "".into()),
+                        ev.payload,
+                    ];
 
-    Ok(None)
+                    if !sse
+                        .build_event()
+                        .id(&format!("seq-{}", ev.seq))
+                        .event("row")
+                        .data(&serde_json::to_string(&t)?)
+                        .send()
+                        .await
+                    {
+                        return Ok(());
+                    }
+                }
+                Ok(EventOrState::Done) => {
+                    sse.build_event().event("end").data("-").send().await;
+                    return Ok(());
+                }
+                Err(_) => return Ok(()),
+            }
+        }
+
+        Ok::<(), anyhow::Error>(())
+    });
+
+    /*
+     * XXX Do the same dance with query/last-event-id header.
+     * XXX Fetch job events and transform them a bit so that we can do less
+     * work in the javascript...
+     */
+
+    Ok(true)
 }
 
 pub(crate) async fn details(
@@ -1311,33 +1367,17 @@ pub(crate) async fn details(
         }
 
         out += "<h3>Output:</h3>\n";
-        out += "<table id=\"table_output\" style=\"border: none;\">\n";
+        out += "<table id=\"table_output\">\n";
 
         let mut last = None;
 
         out += "<tr>\n";
-        out += "<td style=\"vertical-align: top; text-align: right; \">\
-            <span style=\"white-space: pre; \
-            font-family: monospace; \
-            font-weight: bold; \
-            \">SEQ</td>\n";
-        out += "<td style=\"vertical-align: top; text-align: left; \">\
-            <span style=\"white-space: pre; \
-            font-family: monospace; \
-            font-weight: bold; \
-            \">GLOBAL TIME</td>\n";
+        out += "<td class=\"num\"><span class=\"header\">SEQ</span></td>\n";
+        out += "<td><span class=\"header\">GLOBAL TIME</span></td>\n";
         if local_time {
-            out += "<td style=\"vertical-align: top; text-align: left; \">\
-                <span style=\"white-space: pre; \
-                font-family: monospace; \
-                font-weight: bold; \
-                \">LOCAL TIME</td>\n";
+            out += "<td><span class=\"header\">LOCAL TIME</span></td>\n";
         }
-        out += "<td style=\"vertical-align: top; text-align: left; \">\
-            <span style=\"white-space: pre; \
-            font-family: monospace; \
-            font-weight: bold; \
-            \">DETAILS</td>\n";
+        out += "<td><span class=\"header\">DETAILS</span></td>\n";
         out += "</tr>\n";
 
         /*
@@ -1387,30 +1427,21 @@ pub(crate) async fn details(
             /*
              * Set row colour based on the stream to which this event belongs.
              */
-            let colour = match ev.stream.as_str() {
-                "stdout" => "#ffffff",
-                "stderr" => "#ffd9da",
-                "task" => "#add8e6",
-                "worker" => "#fafad2",
-                "control" => "#90ee90",
-                "console" => "#e7d1ff",
-                s if s.starts_with("bg.") => "#f79d65",
-                _ => "#dddddd",
+            let class = match ev.stream.as_str() {
+                s @ ("stdout" | "stderr" | "task" | "worker" | "control"
+                | "console") => format!("s_{s}"),
+                s if s.starts_with("bg.") => "s_bgtask".into(),
+                _ => "s_default".into(),
             };
-            out += &format!("<tr style=\"background-color: {};\">", colour);
+            out += &format!("<tr class=\"{class}\">\n");
 
             /*
              * The first column is a permalink with the event sequence number.
              */
             out += &format!(
-                "<td style=\"vertical-align: top; text-align: right; \">\
-                    <a id=\"S{}\">\
-                    <a href=\"#S{}\" \
-                    style=\"white-space: pre; \
-                    font-family: monospace; \
-                    text-decoration: none; \
-                    color: #111111; \
-                    \">{}</a></a>\
+                "<td class=\"num\">\
+                    <a id=\"S{}\"></a>\
+                    <a class=\"numlink\" href=\"#S{}\">{}</a>\
                 </td>",
                 ev.seq, ev.seq, ev.seq,
             );
@@ -1419,11 +1450,7 @@ pub(crate) async fn details(
              * The second column is the event timestamp.
              */
             out += &format!(
-                "<td style=\"vertical-align: top;\">\
-                    <span style=\"white-space: pre; \
-                    font-family: monospace; \
-                    \">{}</span>\
-                </td>",
+                "<td><span class=\"field\">{}</span></td>",
                 ev.time.to_rfc3339_opts(SecondsFormat::Millis, true),
             );
 
@@ -1442,13 +1469,7 @@ pub(crate) async fn details(
                      */
                     "&nbsp;".into()
                 };
-                out += &format!(
-                    "<td style=\"vertical-align: top;\">\
-                        <span style=\"white-space: pre; \
-                        font-family: monospace; \
-                        \">{t}</span>\
-                    </td>",
-                );
+                out += &format!("<td><span class=\"field\">{t}</span></td>");
             }
 
             /*
@@ -1461,12 +1482,7 @@ pub(crate) async fn details(
                 .filter(|(_, s)| *s == "stdout" || *s == "stderr")
                 .map(|(n, _)| format!("[{}] ", html_escape::encode_safe(n)));
             out += &format!(
-                "<td style=\"vertical-align: top;\">\
-                    <span style=\"white-space: pre-wrap; \
-                    white-space: -moz-pre-wrap !important; \
-                    font-family: monospace; \
-                    \">{}{}</span>\
-                </td>",
+                "<td><span class=\"payload\">{}{}</span></td>",
                 pfx.as_deref().unwrap_or(""),
                 html_escape::encode_safe(&ev.payload),
             );
@@ -1487,6 +1503,22 @@ pub(crate) async fn details(
                 log is still available through the buildomat API."
             );
         }
+
+        let complete = job.state == "completed" || job.state == "failed";
+        out += "<script>\n";
+        if complete {
+            /*
+             * Provide an empty function so that the "onload" property we put in
+             * <body> earlier does not cause an error.
+             */
+            out += "function basic_onload() {}\n";
+        } else {
+            out += &include_str!("../../www/variety/basic/live.js")
+                .replace("%LOCAL_TIME%", &local_time.to_string())
+                .replace("%CHECKRUN%", &cr.id.to_string())
+                .replace("%MINSEQ%", &minseq.to_string());
+        }
+        out += "</script>\n";
     }
 
     Ok(out)

@@ -12,6 +12,7 @@ buildomat-download = { path = "../../download" }
 buildomat-github-client = { path = "../client" }
 buildomat-github-database = { path = "../database" }
 buildomat-github-hooktypes = { path = "../hooktypes" }
+buildomat-sse = { path = "../../sse" }
 
 anyhow = { workspace = true }
 base64 = { workspace = true }
