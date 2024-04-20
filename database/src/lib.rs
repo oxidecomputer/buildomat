@@ -249,7 +249,7 @@ macro_rules! sqlite_integer_new_type {
 
 #[macro_export]
 macro_rules! sqlite_ulid_new_type {
-    ($name:ident) => {
+    ($name:ident ; $($derives:ident),* ) => {
         #[derive(
             Clone,
             Copy,
@@ -261,6 +261,7 @@ macro_rules! sqlite_ulid_new_type {
             Debug,
             serde::Serialize,
             serde::Deserialize,
+            $($derives),*
         )]
         #[serde(transparent)]
         pub struct $name(pub rusty_ulid::Ulid);
@@ -335,6 +336,10 @@ macro_rules! sqlite_ulid_new_type {
             }
         }
     };
+
+    ($name:ident) => {
+        $crate::sqlite_ulid_new_type!($name ; );
+    }
 }
 
 /*
