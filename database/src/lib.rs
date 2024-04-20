@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use std::path::Path;
@@ -183,7 +183,17 @@ macro_rules! sqlite_json_new_type {
 #[macro_export]
 macro_rules! sqlite_integer_new_type {
     ($name:ident, $mytype:ty, $intype:ident) => {
-        #[derive(Clone, Copy, Debug, PartialEq, Hash, Eq)]
+        #[derive(
+            Clone,
+            Copy,
+            Debug,
+            PartialEq,
+            Hash,
+            Eq,
+            serde::Serialize,
+            serde::Deserialize,
+        )]
+        #[serde(transparent)]
         pub struct $name(pub $mytype);
 
         impl From<$name> for sea_query::Value {
@@ -240,7 +250,19 @@ macro_rules! sqlite_integer_new_type {
 #[macro_export]
 macro_rules! sqlite_ulid_new_type {
     ($name:ident) => {
-        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+        #[derive(
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            Hash,
+            Debug,
+            serde::Serialize,
+            serde::Deserialize,
+        )]
+        #[serde(transparent)]
         pub struct $name(pub rusty_ulid::Ulid);
 
         impl From<$name> for sea_query::Value {
