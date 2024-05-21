@@ -1,12 +1,14 @@
 var EVT;
 var LOCAL_TIME = %LOCAL_TIME%;
+var LAST_TASK = null;
+var LAST_EVENT = null;
 
 function
 basic_onload()
 {
 	EVT = new EventSource("./%CHECKRUN%/live?minseq=%MINSEQ%");
 	EVT.addEventListener("check", basic_check);
-	EVT.addEventListener("job", basic_job);
+	EVT.addEventListener("row", basic_row);
 	EVT.addEventListener("complete", basic_complete);
 }
 
@@ -18,12 +20,21 @@ basic_check(ev)
 }
 
 function
-basic_job(ev)
+basic_row(ev)
 {
-	var je;
+	var evr;
+
+	/*
+	 * For debugging purposes, stash the most recent row event we have
+	 * received:
+	 */
+	LAST_EVENT = ev;
 
 	try {
-		je = JSON.parse(ev.data);
+		/*
+		 * The server is sending us an EventRow object:
+		 */
+		evr = JSON.parse(ev.data);
 	} catch (ex) {
 		console.error("parse error: " + ex);
 		return;
@@ -37,23 +48,62 @@ basic_job(ev)
 		return;
 	}
 
-	var tr = document.createElement("tr");
-	tr.className = je[0];
+	/*
+	 * If the task has changed, render a full-width blank row in the table:
+	 */
+	if (evr.task !== LAST_TASK) {
+		let count = 0;
+		for (let i = 0; i < evr.fields.length; i++) {
+			let f = evr.fields[i];
 
-	for (var i = 1; i < je.length; i++) {
-		var td = document.createElement("td");
-		if (i === 1) {
-			td.className = "num";
+			if (!f.local_time || LOCAL_TIME) {
+				count++;
+			}
 		}
 
-		var span = document.createElement("span");
-		if (i === 4) {
-			td.className = "payload";
+		let tr = document.createElement("tr");
+		let td = document.createElement("td");
+		td.colSpan = count.toString();
+		td.innerHTML = "&nbsp";
+		tr.appendChild(td);
+		tbl.appendChild(td);
+
+		LAST_TASK = evr.task;
+	}
+
+	let tr = document.createElement("tr");
+	tr.className = evr.css_class;
+
+	for (let i = 0; i < evr.fields.length; i++) {
+		let f = evr.fields[i];
+
+		if (f.local_time && !LOCAL_TIME) {
+			continue;
+		}
+
+		let td = document.createElement("td");
+
+		if (!!f.anchor) {
+			td.className = f.css_class;
+
+			let anc = document.createElement("a");
+			anc.id = f.anchor;
+
+			let lnk = document.createElement("a");
+			lnk.className = f.css_class + "link";
+			lnk.href = "#" + f.anchor;
+			lnk.innerHTML = f.value;
+
+			td.appendChild(anc);
+			td.appendChild(lnk);
 		} else {
-			td.className = "field";
+			let spn = document.createElement("span");
+			spn.className = f.css_class;
+			spn.innerHTML = f.value;
+
+			td.appendChild(spn);
 		}
-		span.innerText = t[i];
-		td.appendChild(span);
+
 		tr.appendChild(td);
 	}
 

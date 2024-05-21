@@ -44,13 +44,19 @@ fn process_line(l: &str) -> Option<ServerEventLine> {
         return None;
     }
 
-    let (name, value) = if let Some((name, value)) = l.split_once(": ") {
+    let (name, value) = if let Some((name, value)) = l.split_once(":") {
         (name, value)
     } else {
         (l, "")
     };
 
-    Some(match name {
+    /*
+     * According to the whatwg specification, we should discard a single space
+     * after the colon if there was one.
+     */
+    let value = value.strip_prefix(" ").unwrap_or(value);
+
+    Some(match name.trim() {
         "event" => ServerEventLine::Event(value.to_string()),
         "data" => ServerEventLine::Data(value.to_string()),
         "id" => ServerEventLine::Id(value.to_string()),

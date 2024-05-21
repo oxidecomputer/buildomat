@@ -4,7 +4,7 @@
 
 use crate::{App, FlushOut, FlushState};
 use anyhow::{bail, Result};
-use buildomat_client::types::{DependSubmit, JobOutput};
+use buildomat_client::types::{DependSubmit, JobEvent, JobOutput};
 use buildomat_client::{prelude::*, EventOrState};
 use buildomat_common::*;
 use buildomat_github_database::types::*;
@@ -27,6 +27,119 @@ const MAX_TAIL_LINES: usize = 20;
 const MAX_LINE_LENGTH: usize = 90;
 
 const MAX_RENDERED_LOG: u64 = 100 * 1024 * 1024;
+
+/*
+ * Classes for these streams are defined in the "www/variety/basic/style.css",
+ * which we send along with the generated HTML output.
+ */
+const CSS_STREAM_CLASSES: &[&str] =
+    &["stdout", "stderr", "task", "worker", "control", "console"];
+
+trait JobEventEx {
+    /**
+     * Choose a colour (CSS class name) for the stream to which this event
+     * belongs.
+     */
+    fn css_class(&self) -> String;
+
+    /**
+     * Turn a job event into a somewhat abstract object with pre-formatted HTML
+     * values that we can either use for server-side or client-side (live)
+     * rendering.
+     */
+    fn event_row(&self) -> EventRow;
+}
+
+impl JobEventEx for JobEvent {
+    fn css_class(&self) -> String {
+        let s = self.stream.as_str();
+
+        if CSS_STREAM_CLASSES.contains(&s) {
+            format!("s_{s}")
+        } else if s.starts_with("bg.") {
+            "s_bgtask".into()
+        } else {
+            "s_default".into()
+        }
+    }
+
+    fn event_row(&self) -> EventRow {
+        let payload = format!(
+            "{}{}",
+            /*
+             * If this is a background task, prefix the output with the
+             * user-provided name of that task:
+             */
+            self.stream
+                .strip_prefix("bg.")
+                .and_then(|s| s.split_once('.'))
+                .filter(|(_, s)| *s == "stdout" || *s == "stderr")
+                .map(|(n, _)| format!("[{}] ", html_escape::encode_safe(n)))
+                .as_deref()
+                .unwrap_or(""),
+            /*
+             * Do the HTML escaping of the payload one canonical way, in the
+             * server:
+             */
+            html_escape::encode_safe(&self.payload),
+        );
+
+        EventRow {
+            task: self.task,
+            css_class: self.css_class(),
+            fields: vec![
+                EventField {
+                    css_class: "num",
+                    local_time: false,
+                    value: self.seq.to_string(),
+                    anchor: Some(format!("S{}", self.seq)),
+                },
+                EventField {
+                    css_class: "field",
+                    local_time: false,
+                    value: self
+                        .time
+                        .to_rfc3339_opts(SecondsFormat::Millis, true),
+                    anchor: None,
+                },
+                EventField {
+                    css_class: "field",
+                    local_time: true,
+                    value: self
+                        .time_remote
+                        .map(|t| t.to_rfc3339_opts(SecondsFormat::Millis, true))
+                        .unwrap_or_else(|| "&nbsp;".into()),
+                    anchor: None,
+                },
+                EventField {
+                    css_class: "payload",
+                    local_time: false,
+                    value: payload,
+                    anchor: None,
+                },
+            ],
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct EventRow {
+    task: Option<u32>,
+    css_class: String,
+    fields: Vec<EventField>,
+}
+
+#[derive(Debug, Serialize)]
+struct EventField {
+    css_class: &'static str,
+    local_time: bool,
+    value: String,
+
+    /**
+     * This field is a permalink anchor, with this anchor ID:
+     */
+    anchor: Option<String>,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct BasicConfig {
@@ -1244,34 +1357,11 @@ pub(crate) async fn live(
             match eos {
                 Ok(EventOrState::State(_)) => (),
                 Ok(EventOrState::Event(ev)) => {
-                    /*
-                     * XXX Choose a colour (css classname) and generate the text
-                     * values for the columns in a new row.
-                     */
-                    let class = match ev.stream.as_str() {
-                        s @ ("stdout" | "stderr" | "task" | "worker"
-                        | "control" | "console") => format!("s_{s}"),
-                        s if s.starts_with("bg.") => "s_bgtask".into(),
-                        _ => "s_default".into(),
-                    };
-
-                    let t = vec![
-                        class,
-                        ev.seq.to_string(),
-                        ev.time.to_rfc3339_opts(SecondsFormat::Millis, true),
-                        ev.time_remote
-                            .map(|t| {
-                                t.to_rfc3339_opts(SecondsFormat::Millis, true)
-                            })
-                            .unwrap_or_else(|| "".into()),
-                        ev.payload,
-                    ];
-
                     if !sse
                         .build_event()
                         .id(&format!("seq-{}", ev.seq))
                         .event("row")
-                        .data(&serde_json::to_string(&t)?)
+                        .data(&serde_json::to_string(&ev.event_row())?)
                         .send()
                         .await
                     {
@@ -1288,12 +1378,6 @@ pub(crate) async fn live(
 
         Ok::<(), anyhow::Error>(())
     });
-
-    /*
-     * XXX Do the same dance with query/last-event-id header.
-     * XXX Fetch job events and transform them a bit so that we can do less
-     * work in the javascript...
-     */
 
     Ok(true)
 }
@@ -1418,74 +1502,55 @@ pub(crate) async fn details(
         };
 
         for ev in events {
-            if ev.task != last {
-                let cols = if local_time { 4 } else { 3 };
+            /*
+             * The rendering logic here is shared with the live version, so we
+             * use the same pre-formatted object to build the table output:
+             */
+            let evr = ev.event_row();
+
+            /*
+             * If the task has changed, render a full-width blank row in the
+             * table:
+             */
+            if evr.task != last {
+                let cols = evr
+                    .fields
+                    .iter()
+                    .filter(|f| !f.local_time || local_time)
+                    .count();
+
                 out += &format!("<tr><td colspan=\"{cols}\">&nbsp;</td></tr>");
             }
-            last = ev.task;
+            last = evr.task;
 
-            /*
-             * Set row colour based on the stream to which this event belongs.
-             */
-            let class = match ev.stream.as_str() {
-                s @ ("stdout" | "stderr" | "task" | "worker" | "control"
-                | "console") => format!("s_{s}"),
-                s if s.starts_with("bg.") => "s_bgtask".into(),
-                _ => "s_default".into(),
-            };
-            out += &format!("<tr class=\"{class}\">\n");
+            out += &format!("<tr class=\"{}\">\n", evr.css_class);
 
-            /*
-             * The first column is a permalink with the event sequence number.
-             */
-            out += &format!(
-                "<td class=\"num\">\
-                    <a id=\"S{}\"></a>\
-                    <a class=\"numlink\" href=\"#S{}\">{}</a>\
-                </td>",
-                ev.seq, ev.seq, ev.seq,
-            );
-
-            /*
-             * The second column is the event timestamp.
-             */
-            out += &format!(
-                "<td><span class=\"field\">{}</span></td>",
-                ev.time.to_rfc3339_opts(SecondsFormat::Millis, true),
-            );
-
-            if local_time {
-                /*
-                 * We may be asked to render the job-local time as well as the
-                 * global (NTP) time.
-                 */
-                let t = if let Some(t) = ev.time_remote {
-                    t.to_rfc3339_opts(SecondsFormat::Millis, true)
-                } else {
+            for f in evr.fields.iter() {
+                if f.local_time && !local_time {
                     /*
-                     * Not every record has a remote time.  In that case, we
-                     * render an empty column rather than make up something
-                     * potentially misleading.
+                     * Skip the local time column if the user has not requested
+                     * it.
                      */
-                    "&nbsp;".into()
-                };
-                out += &format!("<td><span class=\"field\">{t}</span></td>");
-            }
+                    continue;
+                }
 
-            /*
-             * The final column is the message payload for the event.
-             */
-            let pfx = ev
-                .stream
-                .strip_prefix("bg.")
-                .and_then(|s| s.split_once('.'))
-                .filter(|(_, s)| *s == "stdout" || *s == "stderr")
-                .map(|(n, _)| format!("[{}] ", html_escape::encode_safe(n)));
-            out += &format!(
-                "<td><span class=\"payload\">{}{}</span></td>",
-                pfx.as_deref().unwrap_or(""),
-                html_escape::encode_safe(&ev.payload),
-            );
+                out += &if let Some(id) = &f.anchor {
+                    format!(
+                        "<td class=\"{cls}\">\
+                            <a id=\"{id}\"></a>\
+                            <a class=\"{cls}link\" href=\"#{id}\">{value}</a>\
+                        </td>",
+                        cls = &f.css_class,
+                        value = &f.value,
+                    )
+                } else {
+                    format!(
+                        "<td><span class=\"{cls}\">{value}</span></td>",
+                        cls = &f.css_class,
+                        value = &f.value,
+                    )
+                };
+            }
 
             out += "</tr>";
         }

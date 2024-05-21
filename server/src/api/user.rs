@@ -169,10 +169,10 @@ pub(crate) async fn job_watch(
      * event stream for this endpoint is a mixture of job events, which have a
      * well-defined sequence number, and status change events, which do not.
      *
-     * We include in each ID value the the sequence number of the most recently
-     * sent job event, so that we can always seek to the right point in the
-     * events for the job.  This may lead to more than one event with the same
-     * sequence number, but that doesn't appear to be a problem in practice.
+     * We include in each ID value the sequence number of the most recently sent
+     * job event, so that we can always seek to the right point in the events
+     * for the job.  This may lead to more than one event with the same sequence
+     * number, but that doesn't appear to be a problem in practice.
      *
      * Note that this value must take precedence over the query parameter, as a
      * resumed stream from the browser will, each time it reconnects, include

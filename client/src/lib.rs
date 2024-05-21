@@ -121,36 +121,32 @@ impl ClientExtra {
                     return;
                 }
 
-                let mut chan = match c
-                    .job_watch()
-                    .job(&id)
-                    .minseq(minseq)
-                    .send()
-                    .await
-                {
-                    Ok(rvbs) => events::attach(rvbs),
-                    Err(e) => {
-                        if let Some(status) = e.status() {
-                            if status.as_u16() == 404 || status.as_u16() == 403
-                            {
-                                /*
-                                 * This job does not exist, or is not visible to
-                                 * us.
-                                 */
-                                tx.send(Err(format!("job {id} not found")))
-                                    .await
-                                    .ok();
-                                return;
+                let mut chan =
+                    match c.job_watch().job(&id).minseq(minseq).send().await {
+                        Ok(rvbs) => events::attach(rvbs),
+                        Err(e) => {
+                            if let Some(status) = e.status() {
+                                if status.as_u16() == 404
+                                    || status.as_u16() == 403
+                                {
+                                    /*
+                                     * This job does not exist, or is not visible to
+                                     * us.
+                                     */
+                                    tx.send(Err(format!("job {id} not found")))
+                                        .await
+                                        .ok();
+                                    return;
+                                }
                             }
-                        }
 
-                        /*
-                         * Sleep and try again.
-                         */
-                        sleep(Duration::from_secs(2)).await;
-                        continue;
-                    }
-                };
+                            /*
+                             * Sleep and try again.
+                             */
+                            sleep(Duration::from_secs(2)).await;
+                            continue;
+                        }
+                    };
 
                 loop {
                     if tx.is_closed() {
@@ -163,6 +159,7 @@ impl ClientExtra {
                             /*
                              * Early end of stream.  Connect again.
                              */
+                            sleep(Duration::from_secs(2)).await;
                             continue 'outer;
                         }
                     };
@@ -201,7 +198,7 @@ impl ClientExtra {
                                     }
                                 };
 
-                            if je.seq > minseq {
+                            if je.seq > minseq && minseq != 0 && je.seq != 1 {
                                 println!(
                                     "WARNING: dropped events; \
                                     skipped from {} to {} (inclusive)",
@@ -289,13 +286,7 @@ impl ClientExtra {
                     return;
                 }
 
-                match c
-                    .job_events_get()
-                    .job(&id)
-                    .minseq(minseq)
-                    .send()
-                    .await
-                {
+                match c.job_events_get().job(&id).minseq(minseq).send().await {
                     Ok(events) if events.is_empty() => {
                         tx.send(Ok(EventOrState::Done)).await.ok();
                         return;

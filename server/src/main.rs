@@ -107,18 +107,12 @@ impl<T> MakeInternalError<T> for serde_json::Result<T> {
 
 pub(crate) trait ApiResultEx {
     fn api_check(&self) -> Result<()>;
-    fn note(&self, n: &str) -> Result<()>;
 }
 
 impl ApiResultEx for std::result::Result<(), String> {
     fn api_check(&self) -> Result<()> {
         self.as_ref()
             .map_err(|e| anyhow!("API registration failure: {}", e))?;
-        Ok(())
-    }
-
-    fn note(&self, n: &str) -> Result<()> {
-        self.as_ref().map_err(|e| anyhow!("{}: {}", n, e))?;
         Ok(())
     }
 }
