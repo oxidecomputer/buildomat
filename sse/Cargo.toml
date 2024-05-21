@@ -1,0 +1,13 @@
+[package]
+name = "buildomat-sse"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+bytes = { workspace = true }
+http = { workspace = true }
+hyper = { workspace = true }
+slog = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
