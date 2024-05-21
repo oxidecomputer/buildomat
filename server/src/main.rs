@@ -654,7 +654,7 @@ impl Central {
              */
             let f = std::fs::File::open(op).or_500()?;
 
-            buildomat_download::stream_from_file(&log, info, f, range, head)
+            buildomat_download::stream_from_file(log, info, f, range, head)
                 .await
                 .or_500()
         } else {
@@ -662,7 +662,7 @@ impl Central {
              * Otherwise, try to get it from the object store.
              */
             buildomat_download::stream_from_s3(
-                &log,
+                log,
                 info,
                 &self.s3,
                 &self.config.storage.bucket,
@@ -863,7 +863,7 @@ async fn file_agent_common(
     info!(log, "using agent file {filename:?}");
 
     buildomat_download::stream_from_file(
-        &log,
+        log,
         format!("agent file: {filename:?}"),
         std::fs::File::open(&filename).or_500()?,
         None,

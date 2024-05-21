@@ -18,8 +18,8 @@ pub struct ServerSentEvents {
 const PING_INTERVAL_SECONDS: u64 = 5;
 const SEND_TIMEOUT: u64 = 15;
 
-impl ServerSentEvents {
-    pub fn new() -> ServerSentEvents {
+impl Default for ServerSentEvents {
+    fn default() -> Self {
         let (btx, brx) = mpsc::channel::<SResult<Bytes, std::io::Error>>(1);
         let (tx, mut rx) = mpsc::channel::<String>(64);
 
@@ -74,7 +74,6 @@ impl ServerSentEvents {
                          * messages and heartbeats are not getting through to
                          * the remote peer.
                          */
-                        /* XXX error!(log, "tx send: {e}"); */
                         return;
                     }
                 }
@@ -83,7 +82,9 @@ impl ServerSentEvents {
 
         ServerSentEvents { brx: Some(brx), tx }
     }
+}
 
+impl ServerSentEvents {
     pub fn to_response(&mut self) -> Result<Response<Body>> {
         Ok(Response::builder()
             .status(StatusCode::OK)
@@ -105,7 +106,7 @@ impl ServerSentEvents {
     }
 
     pub fn build_event(&self) -> EventBuilder {
-        EventBuilder { sse: &self, id: None, event: None, data: None }
+        EventBuilder { sse: self, id: None, event: None, data: None }
     }
 
     pub fn is_closed(&self) -> bool {
@@ -149,7 +150,7 @@ impl<'a> EventBuilder<'a> {
         }
         ev += "\n";
 
-        !self.sse.tx.send(ev).await.is_err()
+        self.sse.tx.send(ev).await.is_ok()
     }
 }
 

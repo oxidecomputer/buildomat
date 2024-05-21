@@ -425,7 +425,7 @@ async fn details_live(
         }
     };
 
-    let mut sse = ServerSentEvents::new();
+    let mut sse = ServerSentEvents::default();
     let response = match sse.to_response() {
         Ok(response) => response,
         Err(e) => {

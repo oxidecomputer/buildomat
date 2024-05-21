@@ -125,7 +125,7 @@ pub(crate) async fn job_watch(
     let owner = c.require_user(log, &rqctx.request).await?;
     let j = c.load_job_for_user(log, &owner, p.job()?).await?;
 
-    let mut sse = ServerSentEvents::new();
+    let mut sse = ServerSentEvents::default();
     let Some(mut rx) = c.db.job_subscribe(&j) else {
         /*
          * Tell the client that it is not currently possible to subscribe to
@@ -134,7 +134,7 @@ pub(crate) async fn job_watch(
          */
         sse.build_event().event("check").data("-").send().await;
 
-        return Ok(sse.to_response().or_500()?);
+        return sse.to_response().or_500();
     };
 
     /*

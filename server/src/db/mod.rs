@@ -520,7 +520,7 @@ impl Database {
                     .ok()
                     .flatten()
                     .unwrap_or(0);
-                self.i_job_notify(h, &j, seq, true, true);
+                self.i_job_notify(h, j, seq, true, true);
             }
 
             Ok(failed_jobs.into_iter().map(|j| j.id).collect())
