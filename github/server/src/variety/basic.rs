@@ -843,6 +843,7 @@ pub(crate) async fn run(
         if let Some(toolchain) = c.rust_toolchain.as_deref() {
             let mut buildenv = buildenv.clone();
             buildenv.insert("TOOLCHAIN".into(), toolchain.into());
+            buildenv.insert("RUSTUP_INIT_SKIP_PATH_CHECK".into(), "yes".into());
 
             tasks.push(buildomat_client::types::TaskSubmit {
                 name: "rust-toolchain".into(),
