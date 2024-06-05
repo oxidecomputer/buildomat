@@ -7,8 +7,8 @@ use std::io::Read;
 use std::path::Path;
 
 use anyhow::Result;
-use serde::Deserialize;
 use buildomat_common::*;
+use serde::Deserialize;
 
 #[derive(Deserialize)]
 pub struct Config {

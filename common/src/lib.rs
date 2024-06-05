@@ -203,3 +203,7 @@ impl DateTimeExt for DateTime<Utc> {
 pub fn looks_like_a_ulid(s: &str) -> bool {
     s.len() == 26 && s.chars().all(|c| c.is_ascii_alphanumeric())
 }
+
+pub fn true_if_missing() -> bool {
+    true
+}

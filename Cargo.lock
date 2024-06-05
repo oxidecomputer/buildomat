@@ -817,6 +817,7 @@ dependencies = [
  "serde_json",
  "slog",
  "strum",
+ "toml 0.8.12",
 ]
 
 [[package]]
@@ -875,6 +876,7 @@ dependencies = [
  "buildomat-github-client",
  "buildomat-github-database",
  "buildomat-github-hooktypes",
+ "buildomat-github-testdata",
  "buildomat-sse",
  "chrono",
  "dropshot",
@@ -895,6 +897,18 @@ dependencies = [
  "tokio-util 0.6.10",
  "toml 0.8.12",
  "usdt",
+]
+
+[[package]]
+name = "buildomat-github-testdata"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "buildomat-common",
+ "buildomat-github-database",
+ "serde",
+ "serde_json",
+ "toml 0.8.12",
 ]
 
 [[package]]

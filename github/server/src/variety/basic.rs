@@ -141,7 +141,12 @@ struct EventField {
     anchor: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+/*
+ * We can use "deny_unknown_fields" here because the global frontmatter fields
+ * were already removed in load_repo_job_files().
+ */
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 struct BasicConfig {
     #[serde(default)]
     output_rules: Vec<String>,
@@ -155,7 +160,8 @@ struct BasicConfig {
     skip_clone: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 struct BasicConfigPublish {
     from_output: String,
     series: String,
@@ -163,6 +169,7 @@ struct BasicConfigPublish {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct BasicPrivate {
     #[serde(default)]
     complete: bool,
@@ -190,6 +197,7 @@ struct BasicPrivate {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct BasicOutput {
     path: String,
     href: String,
@@ -1625,4 +1633,68 @@ pub(crate) async fn cancel(
     cr.set_private(p)?;
     db.update_check_run(cr)?;
     Ok(())
+}
+
+#[cfg(test)]
+pub mod test {
+    use super::*;
+    use buildomat_github_testdata::*;
+
+    #[test]
+    fn basic_parse_basic() -> Result<()> {
+        let (path, content, _) = real0();
+
+        let jf = JobFile::parse_content_at_path(&content, &path)?.unwrap();
+
+        let c: BasicConfig = serde_json::from_value(jf.config)?;
+        println!("basic config = {c:#?}");
+
+        let expect = BasicConfig {
+            output_rules: vec![
+                "=/work/manifest.toml".into(),
+                "=/work/repo.zip".into(),
+                "=/work/repo.zip.sha256.txt".into(),
+                "%/work/*.log".into(),
+            ],
+            rust_toolchain: Some("1.78.0".into()),
+            target: Some("helios-2.0".into()),
+            access_repos: vec![
+                "oxidecomputer/amd-apcb".into(),
+                "oxidecomputer/amd-efs".into(),
+                "oxidecomputer/amd-firmware".into(),
+                "oxidecomputer/amd-flash".into(),
+                "oxidecomputer/amd-host-image-builder".into(),
+                "oxidecomputer/boot-image-tools".into(),
+                "oxidecomputer/chelsio-t6-roms".into(),
+                "oxidecomputer/compliance-pilot".into(),
+                "oxidecomputer/facade".into(),
+                "oxidecomputer/helios".into(),
+                "oxidecomputer/helios-omicron-brand".into(),
+                "oxidecomputer/helios-omnios-build".into(),
+                "oxidecomputer/helios-omnios-extra".into(),
+                "oxidecomputer/nanobl-rs".into(),
+            ],
+            publish: vec![
+                BasicConfigPublish {
+                    from_output: "/work/manifest.toml".into(),
+                    series: "rot-all".into(),
+                    name: "manifest.toml".into(),
+                },
+                BasicConfigPublish {
+                    from_output: "/work/repo.zip".into(),
+                    series: "rot-all".into(),
+                    name: "repo.zip".into(),
+                },
+                BasicConfigPublish {
+                    from_output: "/work/repo.zip.sha256.txt".into(),
+                    series: "rot-all".into(),
+                    name: "repo.zip.sha256.txt".into(),
+                },
+            ],
+            skip_clone: false,
+        };
+        assert_eq!(c, expect);
+
+        Ok(())
+    }
 }

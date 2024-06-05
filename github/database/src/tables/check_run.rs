@@ -181,7 +181,7 @@ impl CheckRun {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct JobFileDepend {
     pub job: String,
     pub config: serde_json::Value,

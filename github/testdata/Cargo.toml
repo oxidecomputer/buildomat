@@ -1,0 +1,17 @@
+[package]
+name = "buildomat-github-testdata"
+version = "0.0.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lib]
+doctest = false
+
+[dependencies]
+buildomat-common = { path = "../../common" }
+buildomat-github-database = { path = "../database" }
+
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }

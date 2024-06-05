@@ -7,7 +7,8 @@ mod sublude {
     pub use std::str::FromStr;
 
     pub use crate::itypes::*;
-    pub use anyhow::{bail, Result};
+    pub use anyhow::{anyhow, bail, Result};
+    pub use buildomat_common::*;
     pub use buildomat_database::{
         rusqlite, sqlite_json_new_type, sqlite_sql_enum, FromRow,
     };

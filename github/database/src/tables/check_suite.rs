@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use super::check_run::{CheckRunVariety, JobFileDepend};
@@ -27,7 +27,7 @@ pub struct Plan {
     pub jobfiles: Vec<JobFile>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct JobFile {
     pub path: String,
     pub name: String,
@@ -36,6 +36,115 @@ pub struct JobFile {
     pub content: String,
     #[serde(default)]
     pub dependencies: HashMap<String, JobFileDepend>,
+}
+
+#[derive(Deserialize)]
+struct FrontMatter {
+    name: String,
+    variety: CheckRunVariety,
+    #[serde(default = "true_if_missing")]
+    enable: bool,
+    #[serde(default)]
+    dependencies: HashMap<String, FrontMatterDepend>,
+    #[serde(flatten)]
+    extra: toml::Value,
+}
+
+#[derive(Deserialize)]
+struct FrontMatterDepend {
+    job: String,
+    #[serde(flatten)]
+    extra: toml::Value,
+}
+
+impl JobFile {
+    /**
+     * Lift the TOML frontmatter out of a job file and parse the global values.
+     * Returns None if the file is valid, but not enabled.
+     */
+    pub fn parse_content_at_path(
+        content: &str,
+        path: &str,
+    ) -> Result<Option<JobFile>> {
+        let mut lines = content.lines();
+
+        if let Some(shebang) = lines.next() {
+            /*
+             * For now, we accept any script and assume it is effectively
+             * bourne-compatible, at least with respect to comments.
+             */
+            if !shebang.starts_with("#!") {
+                bail!("{:?} must have an interpreter line", path);
+            }
+        };
+
+        /*
+         * Extract lines after the interpreter line that begin with "#:".  Treat
+         * this as a TOML block wrapped in something that bourne shells will
+         * ignore as a comment.  Allow the use of regular comments interspersed
+         * with TOML lines, as long as there are no blank lines.
+         */
+        let frontmatter = lines
+            .by_ref()
+            .take_while(|l| l.starts_with('#'))
+            .filter(|l| l.starts_with("#:"))
+            .map(|l| l.trim_start_matches("#:"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        /*
+         * Parse the front matter as TOML:
+         */
+        let toml = toml::from_str::<FrontMatter>(&frontmatter)
+            .map_err(|e| anyhow!("TOML front matter in {path:?}: {e}"))?;
+
+        if !toml.enable {
+            /*
+             * Skip job files that have been marked as disabled.
+             */
+            return Ok(None);
+        }
+
+        /*
+         * Rule out some common mispellings of "enable", before we get
+         * all the way into variety processing:
+         */
+        if toml.extra.get("enabled").is_some()
+            || toml.extra.get("disable").is_some()
+            || toml.extra.get("disabled").is_some()
+        {
+            bail!(
+                "TOML front matter in {path:?}: \
+                use \"enable\" to disable a job"
+            );
+        }
+
+        Ok(Some(JobFile {
+            path: path.to_string(),
+            name: toml.name.to_string(),
+            variety: toml.variety,
+            /*
+             * The use of the flattened "extra" member here is critical, as it
+             * allows varieties to use "deny_unknown_fields" on their subset of
+             * the frontmatter because we have subtracted the global parts here.
+             */
+            config: serde_json::to_value(&toml.extra)?,
+            content: content.to_string(),
+            dependencies: toml
+                .dependencies
+                .iter()
+                .map(|(name, dep)| {
+                    Ok((
+                        name.to_string(),
+                        JobFileDepend {
+                            job: dep.job.to_string(),
+                            config: serde_json::to_value(&dep.extra)?,
+                        },
+                    ))
+                })
+                .collect::<Result<_>>()?,
+        }))
+    }
 }
 
 #[derive(Debug, Clone)]

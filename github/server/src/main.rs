@@ -15,7 +15,7 @@ use buildomat_github_hooktypes as hooktypes;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use slog::{debug, error, info, o, trace, warn, Logger};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use variety::control::{ControlPrivate, CONTROL_RUN_NAME};
@@ -49,29 +49,6 @@ pub struct RepoConfig {
      */
     #[serde(default)]
     pub allow_users: Vec<String>,
-}
-
-fn true_if_missing() -> bool {
-    true
-}
-
-#[derive(Deserialize)]
-struct FrontMatter {
-    name: String,
-    variety: CheckRunVariety,
-    #[serde(default = "true_if_missing")]
-    enable: bool,
-    #[serde(default)]
-    dependencies: HashMap<String, FrontMatterDepend>,
-    #[serde(flatten)]
-    extra: toml::Value,
-}
-
-#[derive(Deserialize)]
-struct FrontMatterDepend {
-    job: String,
-    #[serde(flatten)]
-    extra: toml::Value,
 }
 
 struct LoadedFromSha<T> {
@@ -252,73 +229,19 @@ impl App {
                         anyhow!("{:?} missing from repository?!", &ent.path)
                     })?;
 
-                let mut lines = f.lines();
-
-                if let Some(shebang) = lines.next() {
-                    /*
-                     * For now, we accept any script and assume it is
-                     * effectively bourne-compatible, at least with respect to
-                     * comments.
-                     */
-                    if !shebang.starts_with("#!") {
-                        bail!("{:?} must have an interpreter line", ent.path);
-                    }
-                };
-
-                /*
-                 * Extract lines after the interpreter line that begin with
-                 * "#:".  Treat this as a TOML block wrapped in something that
-                 * bourne shells will ignore as a comment.  Allow the use of
-                 * regular comments interspersed with TOML lines, as long as
-                 * there are no blank lines.
-                 */
-                let frontmatter = lines
-                    .by_ref()
-                    .take_while(|l| l.starts_with('#'))
-                    .filter(|l| l.starts_with("#:"))
-                    .map(|l| l.trim_start_matches("#:"))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-
-                /*
-                 * Parse the front matter as TOML:
-                 */
-                let toml = toml::from_str::<FrontMatter>(&frontmatter)
-                    .with_context(|| {
-                        anyhow!("TOML front matter in {:?}", ent.path)
-                    })?;
-
-                if !toml.enable {
+                let Some(jf) = JobFile::parse_content_at_path(&f, &ent.path)?
+                else {
                     /*
                      * Skip job files that have been marked as disabled.
                      */
                     continue;
-                }
+                };
 
                 if jobfiles.len() > 32 {
                     bail!("too many job files; you can have at most 32");
                 }
 
-                jobfiles.push(JobFile {
-                    path: ent.path.to_string(),
-                    name: toml.name.to_string(),
-                    variety: toml.variety,
-                    config: serde_json::to_value(&toml.extra)?,
-                    content: f.to_string(),
-                    dependencies: toml
-                        .dependencies
-                        .iter()
-                        .map(|(name, dep)| {
-                            Ok((
-                                name.to_string(),
-                                JobFileDepend {
-                                    job: dep.job.to_string(),
-                                    config: serde_json::to_value(&dep.extra)?,
-                                },
-                            ))
-                        })
-                        .collect::<Result<_>>()?,
-                });
+                jobfiles.push(jf);
             } else {
                 bail!("unexpected item in bagging area: {}", ent.path);
             }
