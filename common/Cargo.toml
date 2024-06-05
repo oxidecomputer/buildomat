@@ -12,6 +12,7 @@ anyhow = { workspace = true }
 chrono = { workspace = true }
 new_mime_guess = { workspace = true }
 rand = { workspace = true }
+regex = { workspace = true }
 rusty_ulid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

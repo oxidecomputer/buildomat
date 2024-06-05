@@ -298,7 +298,7 @@ pub(crate) async fn flush(
         summary += "The job produced the following artefacts:\n";
         for bo in p.job_outputs.iter() {
             summary += &format!("* [`{}`]({}) ({})", bo.path, bo.href, bo.size);
-            if bo.path.ends_with(".log") {
+            if guess_is_log_path(&bo.path) {
                 /*
                  * Add an additional link to view a pretty-printed copy of
                  * what might be a bunyan log:
@@ -1436,7 +1436,7 @@ pub(crate) async fn details(
                     html_escape::encode_safe(&bo.path),
                     bo.size,
                 );
-                if bo.path.ends_with(".log") && o.size < MAX_RENDERED_LOG {
+                if guess_is_log_path(&bo.path) && o.size < MAX_RENDERED_LOG {
                     /*
                      * If the file might be a bunyan log and is not larger than
                      * we are willing to render, add an additional link to view

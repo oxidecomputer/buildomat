@@ -669,6 +669,7 @@ dependencies = [
  "chrono",
  "new_mime_guess",
  "rand",
+ "regex",
  "rusty_ulid",
  "serde",
  "serde_json",

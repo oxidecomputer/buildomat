@@ -1,16 +1,17 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use std::io::{IsTerminal, Read};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use anyhow::Result;
 use chrono::prelude::*;
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
+use regex::Regex;
 use rusty_ulid::Ulid;
 use serde::Deserialize;
 use slog::{o, Drain, Logger};
@@ -90,10 +91,26 @@ impl UlidDateExt for Ulid {
     }
 }
 
+/**
+ * Guess at whether this is a log file based on the filename.  Try to handle
+ * both regular ".log" files and log files that have been rotated using an
+ * integer suffix, e.g., ".log.0".
+ */
+pub fn guess_is_log_path(filename: &str) -> bool {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\.log(\.[0-9]+)?$").unwrap())
+        .is_match(filename)
+}
+
 pub fn guess_mime_type(filename: &str) -> String {
     if filename == "Cargo.lock" {
         /*
          * This file may be TOML, but is almost certainly plain text.
+         */
+        "text/plain".to_string()
+    } else if guess_is_log_path(filename) {
+        /*
+         * Treat any file that looks like it might be a log file as plain text.
          */
         "text/plain".to_string()
     } else {
