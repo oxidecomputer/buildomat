@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use std::collections::HashMap;
@@ -56,9 +56,9 @@ impl Profile {
 
 fn read_file(p: &Path) -> Result<Config> {
     let mut f = std::fs::File::open(p)?;
-    let mut buf = Vec::new();
-    f.read_to_end(&mut buf)?;
-    Ok(toml::from_slice(&buf)?)
+    let mut s = String::new();
+    f.read_to_string(&mut s)?;
+    Ok(toml::from_str(&s)?)
 }
 
 pub fn load(profile_name: Option<&str>) -> Result<Profile> {

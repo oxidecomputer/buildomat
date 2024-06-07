@@ -607,7 +607,7 @@ dependencies = [
  "serde_json",
  "sigpipe",
  "tokio",
- "toml 0.5.11",
+ "toml 0.8.12",
 ]
 
 [[package]]
@@ -677,7 +677,7 @@ dependencies = [
  "slog-bunyan",
  "slog-term",
  "tokio",
- "toml 0.5.11",
+ "toml 0.8.12",
 ]
 
 [[package]]
@@ -732,7 +732,7 @@ dependencies = [
  "slog",
  "slog-term",
  "tokio",
- "toml 0.5.11",
+ "toml 0.8.12",
  "usdt",
 ]
 
@@ -759,7 +759,7 @@ dependencies = [
  "slog-term",
  "strum",
  "tokio",
- "toml 0.5.11",
+ "toml 0.8.12",
  "usdt",
 ]
 
@@ -787,7 +787,7 @@ dependencies = [
  "smf",
  "strum",
  "tokio",
- "toml 0.5.11",
+ "toml 0.8.12",
  "usdt",
  "zone",
 ]
@@ -839,6 +839,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "base64 0.13.1",
+ "buildomat-common",
  "buildomat-github-client",
  "buildomat-github-hooktypes",
  "chrono",
@@ -851,7 +852,7 @@ dependencies = [
  "serde_json",
  "slog",
  "tokio",
- "toml 0.5.11",
+ "toml 0.8.12",
 ]
 
 [[package]]
@@ -892,7 +893,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-util 0.6.10",
- "toml 0.5.11",
+ "toml 0.8.12",
  "usdt",
 ]
 

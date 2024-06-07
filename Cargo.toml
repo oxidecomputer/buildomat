@@ -81,6 +81,6 @@ tlvc-text = { git = "https://github.com/oxidecomputer/tlvc", version = "0.3.0" }
 tokio = { version = "1", features = [ "full" ] }
 tokio-stream = "0.1"
 tokio-util = { version = "0.6.9", features = [ "io" ] }
-toml = "0.5"
+toml = "0.8"
 usdt = "0.3"
 zone = { version = "0.3", features = [ "async" ], default-features = false }

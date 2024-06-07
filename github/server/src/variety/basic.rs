@@ -7,7 +7,7 @@ use anyhow::{bail, Result};
 use buildomat_client::types::{DependSubmit, JobEvent, JobOutput};
 use buildomat_client::{prelude::*, EventOrState};
 use buildomat_common::*;
-use buildomat_github_database::types::*;
+use buildomat_github_database::{types::*, Database};
 use buildomat_sse::ServerSentEvents;
 use chrono::SecondsFormat;
 use futures::StreamExt;
@@ -414,22 +414,35 @@ pub(crate) async fn run(
     let repo = db.load_repository(cs.repo)?;
     let log = &app.log;
 
-    let c: BasicConfig = cr.get_config()?;
-
     let mut p: BasicPrivate = cr.get_private()?;
     if p.complete {
         return Ok(false);
     }
 
-    let script = if let Some(p) = &cr.content {
-        p.to_string()
-    } else {
+    let fatal = |p: &mut BasicPrivate,
+                 cr: &mut CheckRun,
+                 db: &Database,
+                 msg: &str|
+     -> Result<bool> {
         p.complete = true;
-        p.error = Some("No script provided by user".into());
+        p.error = Some(msg.into());
         cr.set_private(p)?;
         cr.flushed = false;
         db.update_check_run(cr)?;
-        return Ok(false);
+        Ok(false)
+    };
+
+    let c: BasicConfig = match cr.get_config() {
+        Ok(c) => c,
+        Err(e) => {
+            return fatal(&mut p, cr, db, &format!("TOML front matter: {e}"));
+        }
+    };
+
+    let script = if let Some(p) = &cr.content {
+        p.to_string()
+    } else {
+        return fatal(&mut p, cr, db, "No script provided by user.");
     };
 
     let b = app.buildomat(&repo);
@@ -655,16 +668,11 @@ pub(crate) async fn run(
                 db.load_check_run_for_suite_by_name(cs.id, crd.job())?
             {
                 if !matches!(ocr.variety, CheckRunVariety::Basic) {
-                    p.complete = true;
-                    p.error = Some(
+                    let msg =
                         "Basic variety jobs can only depend on other Basic \
-                        variety jobs."
-                            .into(),
-                    );
-                    cr.set_private(p)?;
-                    cr.flushed = false;
-                    db.update_check_run(cr)?;
-                    return Ok(false);
+                        variety jobs.";
+
+                    return fatal(&mut p, cr, db, msg);
                 }
 
                 let op: BasicPrivate = ocr.get_private()?;
@@ -685,16 +693,13 @@ pub(crate) async fn run(
                 }
 
                 if op.complete || op.error.is_some() {
-                    p.complete = true;
-                    p.error = Some(format!(
+                    let msg = format!(
                         "Dependency \"{}\" did not start a buildomat job \
-                        before finishing.",
+                            before finishing.",
                         crd.job()
-                    ));
-                    cr.set_private(p)?;
-                    cr.flushed = false;
-                    db.update_check_run(cr)?;
-                    return Ok(false);
+                    );
+
+                    return fatal(&mut p, cr, db, &msg);
                 }
             }
 
@@ -722,16 +727,11 @@ pub(crate) async fn run(
              * organisation that owns the repository.
              */
             if cs.approved_by.is_none() {
-                p.complete = true;
-                p.error = Some(
+                let msg =
                     "Use of \"access_repos\" requires authorisation from \
-                    a member of the organisation that owns the repository."
-                        .into(),
-                );
-                cr.set_private(p)?;
-                cr.flushed = false;
-                db.update_check_run(cr)?;
-                return Ok(false);
+                    a member of the organisation that owns the repository.";
+
+                return fatal(&mut p, cr, db, msg);
             }
 
             /*
@@ -780,12 +780,7 @@ pub(crate) async fn run(
                  * to provide access, report it to the user and fail the check
                  * run.
                  */
-                p.complete = true;
-                p.error = Some(msg);
-                cr.set_private(p)?;
-                cr.flushed = false;
-                db.update_check_run(cr)?;
-                return Ok(false);
+                return fatal(&mut p, cr, db, &msg);
             }
         }
 
@@ -1021,12 +1016,8 @@ pub(crate) async fn run(
                     rv.status(),
                     rv.message,
                 );
-                p.complete = true;
-                p.error = Some(format!("Could not submit job: {}", rv.message));
-                cr.set_private(p)?;
-                cr.flushed = false;
-                db.update_check_run(cr)?;
-                return Ok(false);
+                let msg = format!("Could not submit job: {}", rv.message);
+                return fatal(&mut p, cr, db, &msg);
             }
             Err(e) => bail!("job submit failure: {:?}", e),
         };

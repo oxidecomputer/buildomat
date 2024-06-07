@@ -9,6 +9,7 @@ default = ['vendored-openssl']
 vendored-openssl = ['openssl/vendored']
 
 [dependencies]
+buildomat-common = { path = "../../common" }
 buildomat-github-client = { path = "../client" }
 buildomat-github-hooktypes = { path = "../hooktypes" }
 

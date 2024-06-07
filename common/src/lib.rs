@@ -21,9 +21,9 @@ where
     for<'de> T: Deserialize<'de>,
 {
     let mut f = std::fs::File::open(n.as_ref())?;
-    let mut buf: Vec<u8> = Vec::new();
-    f.read_to_end(&mut buf)?;
-    Ok(toml::from_slice(buf.as_slice())?)
+    let mut buf = String::new();
+    f.read_to_string(&mut buf)?;
+    Ok(toml::from_str(&buf)?)
 }
 
 pub fn make_log(name: &'static str) -> Logger {
