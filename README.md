@@ -595,7 +595,7 @@ Configuration properties supported for basic jobs include:
   Note that files published this way from private repositories will be
   available without authentication.
 
-- `rust_toolchain` **(string)**
+- `rust_toolchain` **(string or boolean)**
 
   If specified, `rustup` will be installed in the environment and the nominated
   toolchain will be available as the default toolchain.  Any toolchain
@@ -605,6 +605,17 @@ Configuration properties supported for basic jobs include:
 
   ```bash
   #: rust_toolchain = "stable"
+  ```
+
+  It is also possible to use the boolean value `true` here, at which point
+  the system will interpret the contents of the `rust-toolchain.toml` file
+  in the root of the repository to decide what to install.  The file must
+  contain a valid `channel` value, and may also contain a valid `profile`
+  value.  Neither the legacy (pre-TOML) file format, nor TOML files which
+  contain the `path` directive, are supported.
+
+  ```bash
+  #: rust_toolchain = true
   ```
 
 - `skip_clone` **(boolean)**
