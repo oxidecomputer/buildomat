@@ -607,7 +607,7 @@ dependencies = [
  "serde_json",
  "sigpipe",
  "tokio",
- "toml 0.8.12",
+ "toml",
 ]
 
 [[package]]
@@ -677,7 +677,7 @@ dependencies = [
  "slog-bunyan",
  "slog-term",
  "tokio",
- "toml 0.8.12",
+ "toml",
 ]
 
 [[package]]
@@ -732,7 +732,7 @@ dependencies = [
  "slog",
  "slog-term",
  "tokio",
- "toml 0.8.12",
+ "toml",
  "usdt",
 ]
 
@@ -759,7 +759,7 @@ dependencies = [
  "slog-term",
  "strum",
  "tokio",
- "toml 0.8.12",
+ "toml",
  "usdt",
 ]
 
@@ -787,7 +787,7 @@ dependencies = [
  "smf",
  "strum",
  "tokio",
- "toml 0.8.12",
+ "toml",
  "usdt",
  "zone",
 ]
@@ -817,7 +817,7 @@ dependencies = [
  "serde_json",
  "slog",
  "strum",
- "toml 0.8.12",
+ "toml",
 ]
 
 [[package]]
@@ -853,7 +853,7 @@ dependencies = [
  "serde_json",
  "slog",
  "tokio",
- "toml 0.8.12",
+ "toml",
 ]
 
 [[package]]
@@ -886,6 +886,7 @@ dependencies = [
  "hyper",
  "pem 2.0.1",
  "reqwest",
+ "rust-toolchain-file",
  "rusty_ulid",
  "schemars",
  "serde",
@@ -895,7 +896,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-util 0.6.10",
- "toml 0.8.12",
+ "toml",
  "usdt",
 ]
 
@@ -908,7 +909,7 @@ dependencies = [
  "buildomat-github-database",
  "serde",
  "serde_json",
- "toml 0.8.12",
+ "toml",
 ]
 
 [[package]]
@@ -1344,7 +1345,7 @@ dependencies = [
  "slog-term",
  "tokio",
  "tokio-rustls",
- "toml 0.8.12",
+ "toml",
  "uuid 1.8.0",
  "version_check",
  "waitgroup",
@@ -1962,7 +1963,7 @@ checksum = "b1a46d1a171d865aa5f83f92695765caa047a9b4cbae2cbf37dbd613a793fd4c"
 [[package]]
 name = "jmclib"
 version = "0.1.0"
-source = "git+https://github.com/jclulow/rust-jmclib#57294032f7876f777464cba2cafcee8ab270adec"
+source = "git+https://github.com/jclulow/rust-jmclib#13f004c3d3c9535a674a70345456f26357dbe825"
 dependencies = [
  "anyhow",
  "atty",
@@ -1972,7 +1973,7 @@ dependencies = [
  "slog",
  "slog-term",
  "tempfile",
- "toml 0.5.11",
+ "toml",
 ]
 
 [[package]]
@@ -2928,6 +2929,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-toolchain-file"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59d279f76ab68e15b334f6204993735caea7d153e22d4009f0040cb592b1939c"
+dependencies = [
+ "camino",
+ "serde",
+ "thiserror",
+ "toml_edit 0.20.7",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3824,15 +3837,6 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.5.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4f7f0dd8d50a853a531c426359045b1998f04219d88799810762cd4ad314234"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "toml"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9dd1545e8208b4a5af1aa9bbd0b4cf7e9ea08fabc5d0a5c67fcaafa17433aa3"
@@ -3840,7 +3844,7 @@ dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "toml_edit",
+ "toml_edit 0.22.9",
 ]
 
 [[package]]
@@ -3854,6 +3858,19 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
+version = "0.20.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70f427fce4d84c72b5b732388bf4a9f4531b53f74e2887e3ecb2481f68f66d81"
+dependencies = [
+ "indexmap",
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "winnow 0.5.40",
+]
+
+[[package]]
+name = "toml_edit"
 version = "0.22.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e40bb779c5187258fd7aad0eb68cb8706a0a81fa712fbea808ab43c4b8374c4"
@@ -3862,7 +3879,7 @@ dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "winnow",
+ "winnow 0.6.5",
 ]
 
 [[package]]
@@ -4415,6 +4432,15 @@ name = "windows_x86_64_msvc"
 version = "0.52.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32b752e52a2da0ddfbdbcc6fceadfeede4c939ed16d13e648833a61dfb611ed8"
+
+[[package]]
+name = "winnow"
+version = "0.5.40"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f593a95398737aeed53e489c785df13f3618e41dbcd6718c6addbf1395aa6876"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "winnow"

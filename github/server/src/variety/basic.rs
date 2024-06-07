@@ -141,6 +141,13 @@ struct EventField {
     anchor: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+enum StringOrBool {
+    String(String),
+    Bool(bool),
+}
+
 /*
  * We can use "deny_unknown_fields" here because the global frontmatter fields
  * were already removed in load_repo_job_files().
@@ -150,7 +157,7 @@ struct EventField {
 struct BasicConfig {
     #[serde(default)]
     output_rules: Vec<String>,
-    rust_toolchain: Option<String>,
+    rust_toolchain: Option<StringOrBool>,
     target: Option<String>,
     #[serde(default)]
     access_repos: Vec<String>,
@@ -664,6 +671,8 @@ pub(crate) async fn run(
          */
         return Ok(false);
     } else {
+        let gh = app.install_client(cs.install);
+
         /*
          * Before we can create this job in the buildomat backend, we need the
          * buildomat job ID for any job on which it depends.  If the job IDs for
@@ -748,8 +757,6 @@ pub(crate) async fn run(
              * names should result in a job error that the user can then
              * correct.
              */
-            let gh = app.install_client(cs.install);
-
             for dep in &c.access_repos {
                 let msg = if let Some((owner, name)) = dep.split_once('/') {
                     match gh.repos().get(owner, name).await {
@@ -843,9 +850,42 @@ pub(crate) async fn run(
         /*
          * If a Rust toolchain is requested, install it using rustup.
          */
-        if let Some(toolchain) = c.rust_toolchain.as_deref() {
+        let toolchain = match c.rust_toolchain.as_ref() {
+            Some(StringOrBool::String(s)) => Some(RustToolchain {
+                channel: s.to_string(),
+                profile: "default".into(),
+            }),
+            Some(StringOrBool::Bool(true)) => {
+                /*
+                 * We need to read and parse the "rust-toolchain.toml" file from
+                 * the repository for the commit under test:
+                 */
+                match load_rust_toolchain_from_repo(
+                    app,
+                    &gh,
+                    &repo,
+                    &cs.head_sha.to_string(),
+                )
+                .await
+                {
+                    Ok(rtc) => Some(rtc),
+                    Err(e) => {
+                        p.complete = true;
+                        p.error = Some(e.to_string());
+                        cr.set_private(p)?;
+                        cr.flushed = false;
+                        db.update_check_run(cr)?;
+                        return Ok(false);
+                    }
+                }
+            }
+            None | Some(StringOrBool::Bool(false)) => None,
+        };
+
+        if let Some(toolchain) = toolchain {
             let mut buildenv = buildenv.clone();
-            buildenv.insert("TOOLCHAIN".into(), toolchain.into());
+            buildenv.insert("TC_CHANNEL".into(), toolchain.channel);
+            buildenv.insert("TC_PROFILE".into(), toolchain.profile);
             buildenv.insert("RUSTUP_INIT_SKIP_PATH_CHECK".into(), "yes".into());
 
             tasks.push(buildomat_client::types::TaskSubmit {
@@ -860,11 +900,13 @@ pub(crate) async fn run(
                     set -o errexit\n\
                     set -o pipefail\n\
                     set -o xtrace\n\
+                    printf ' * toolchain channel = \"%s\"\n' \"$TC_CHANNEL\"\n\
+                    printf ' * toolchain profile = \"%s\"\n' \"$TC_PROFILE\"\n\
                     curl --proto '=https' --tlsv1.2 -sSf \
                         https://sh.rustup.rs | /bin/bash -s - \
                         -y --no-modify-path \
-                        --default-toolchain \"$TOOLCHAIN\" \
-                        --profile default\n\
+                        --default-toolchain \"$TC_CHANNEL\" \
+                        --profile \"$TC_PROFILE\"\n\
                     rustc --version\n\
                     "
                 .into(),
@@ -1635,6 +1677,67 @@ pub(crate) async fn cancel(
     Ok(())
 }
 
+struct RustToolchain {
+    channel: String,
+    profile: String,
+}
+
+async fn load_rust_toolchain_from_repo(
+    app: &App,
+    gh: &buildomat_github_client::Client,
+    repo: &Repository,
+    sha: &str,
+) -> Result<RustToolchain> {
+    use rust_toolchain_file::{
+        toml::ToolchainSection, ParseStrategy, Parser, ToolchainFile, Variant,
+    };
+
+    let Some(f) = app.load_file(gh, repo, sha, "rust-toolchain.toml").await?
+    else {
+        bail!(
+            "Your project must have a \"rust-toolchain.toml\" file if you \
+            wish to use \"rust_toolchain = true\".",
+        );
+    };
+
+    match Parser::new(&f, ParseStrategy::Only(Variant::Toml)).parse() {
+        Ok(ToolchainFile::Toml(toml)) => match toml.toolchain() {
+            ToolchainSection::Path(_) => {
+                bail!(
+                    "Use of \"path\" in \"rust-toolchain.toml\" file is not \
+                    supported with \"rust_toolchain = true\".",
+                );
+            }
+            ToolchainSection::Spec(spec) => {
+                let channel = match spec.channel() {
+                    Some(c) => c.name().to_string(),
+                    None => {
+                        bail!(
+                            "You must specify \"channel\" in \
+                            \"rust-toolchain.toml\" file when using
+                            \"rust_toolchain = true\".",
+                        );
+                    }
+                };
+
+                let profile = match spec.profile() {
+                    Some(p) => p.name().to_string(),
+                    None => "default".to_string(),
+                };
+
+                Ok(RustToolchain { channel, profile })
+            }
+        },
+        Ok(ToolchainFile::Legacy(_)) => {
+            bail!(
+                "You must use a TOML formatted \"rust-toolchain.toml\" file \
+                with \"rust_toolchain = true\".",
+            );
+        }
+        Err(e) => bail!("invalid \"rust-toolchain.toml\" file: {e}"),
+    }
+}
+
 #[cfg(test)]
 pub mod test {
     use super::*;
@@ -1656,7 +1759,7 @@ pub mod test {
                 "=/work/repo.zip.sha256.txt".into(),
                 "%/work/*.log".into(),
             ],
-            rust_toolchain: Some("1.78.0".into()),
+            rust_toolchain: Some(StringOrBool::String("1.78.0".into())),
             target: Some("helios-2.0".into()),
             access_repos: vec![
                 "oxidecomputer/amd-apcb".into(),

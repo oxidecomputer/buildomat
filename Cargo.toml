@@ -59,6 +59,7 @@ reqwest = { version = "0.11", features = [ "json", "stream" ] }
 rusoto_core = "0.48"
 rusoto_credential = "0.48"
 rusoto_ec2 = "0.48"
+rust-toolchain-file = "0.1"
 rusty_ulid = "1"
 schemars = { version = "0.8", features = [ "chrono" ] }
 sea-query = { version = "0.30", default-features = false, features = [ "derive", "attr", "backend-sqlite" ] }
