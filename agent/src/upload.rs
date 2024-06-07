@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::io::Read;
+use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
 
 use tokio::sync::mpsc;
@@ -227,6 +227,23 @@ pub(crate) fn upload(
             let mut f = match fs::File::open(&u.path) {
                 Ok(f) => f,
                 Err(e) => {
+                    if change_ok && e.kind() == ErrorKind::NotFound {
+                        /*
+                         * If this file is marked as being a potentially
+                         * fluctuating log file, we'll allow it to be completely
+                         * absent without raising a fatal error. It may have
+                         * been removed by some background process between when
+                         * we scanned the file system and when we went to upload
+                         * it.
+                         */
+                        let msg = format!(
+                            "file {:?} disappeared between scan and upload",
+                            u.path,
+                        );
+                        upl.tx.send(Activity::Warning(msg)).await.unwrap();
+                        continue;
+                    }
+
                     upl.tx
                         .send(Activity::Error(format!(
                             "open {:?} failed: {:?}",

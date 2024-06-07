@@ -504,9 +504,10 @@ Configuration properties supported for basic jobs include:
   artefacts.  If the size or modified time of a file changes while it is being
   uploaded, the job will fail.  To relax this restriction, the `%` prefix may
   be used to signify that "this file is allowed to change while it is being
-  uploaded".  This is used to make best effort uploads of diagnostic log files
-  for background processes which may continue running even though the job is
-  nominally complete; e.g.,
+  uploaded".  The `%` prefix will also ignore a file that is completely removed
+  by a background process before it is able to be uploaded.  This is used to
+  make best effort uploads of diagnostic log files for background processes
+  which may continue running even though the job is nominally complete; e.g.,
 
   ```bash
   #: output_rules = [
