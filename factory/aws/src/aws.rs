@@ -18,18 +18,17 @@ use aws_sdk_ec2::types::{
 };
 use base64::Engine;
 use buildomat_client::types::*;
-use rusty_ulid::Ulid;
 use slog::{debug, error, info, o, warn, Logger};
 
-use super::{config::ConfigFileAwsTarget, Central, ConfigFile};
+use super::{config::ConfigFileAwsTarget, types::*, Central, ConfigFile};
 
 #[derive(Debug)]
 struct Instance {
     id: String,
     state: String,
     ip: Option<String>,
-    worker_id: Option<Ulid>,
-    lease_id: Option<Ulid>,
+    worker_id: Option<WorkerId>,
+    lease_id: Option<LeaseId>,
     launch_time: Option<aws_sdk_ec2::primitives::DateTime>,
 }
 
@@ -45,13 +44,13 @@ impl From<(&aws_sdk_ec2::types::Instance, &str)> for Instance {
             .tags()
             .tag(&format!("{tag}-worker_id"))
             .as_ref()
-            .and_then(|v| Ulid::from_str(v).ok());
+            .and_then(|v| WorkerId::from_str(v).ok());
 
         let lease_id = i
             .tags()
             .tag(&format!("{tag}-lease_id"))
             .as_ref()
-            .and_then(|v| Ulid::from_str(v).ok());
+            .and_then(|v| LeaseId::from_str(v).ok());
 
         let ip = i.private_ip_address.clone();
 

@@ -14,6 +14,48 @@ mod aws;
 mod config;
 use config::ConfigFile;
 
+mod types {
+    use rusty_ulid::Ulid;
+    use std::str::FromStr;
+
+    macro_rules! ulid_new_type {
+        ($name:ident, $prefix:literal) => {
+            #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+            #[repr(transparent)]
+            pub struct $name(Ulid);
+
+            impl FromStr for $name {
+                type Err = anyhow::Error;
+
+                fn from_str(s: &str) -> Result<Self, Self::Err> {
+                    Ok($name(Ulid::from_str(s)?))
+                }
+            }
+
+            impl std::fmt::Display for $name {
+                fn fmt(
+                    &self,
+                    f: &mut std::fmt::Formatter<'_>,
+                ) -> std::fmt::Result {
+                    self.0.fmt(f)
+                }
+            }
+
+            impl std::fmt::Debug for $name {
+                fn fmt(
+                    &self,
+                    f: &mut std::fmt::Formatter<'_>,
+                ) -> std::fmt::Result {
+                    format_args!("{}:{self}", $prefix).fmt(f)
+                }
+            }
+        };
+    }
+
+    ulid_new_type!(LeaseId, "lease");
+    ulid_new_type!(WorkerId, "worker");
+}
+
 struct Central {
     log: Logger,
     config: config::ConfigFile,
