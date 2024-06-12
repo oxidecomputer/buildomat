@@ -28,9 +28,10 @@ resolver = "2"
 anyhow = "1"
 aws-config = "1"
 aws-credential-types = "1"
+aws-sdk-ec2 = "1"
 aws-sdk-s3 = "1"
 aws-types = "1"
-base64 = "0.13"
+base64 = "0.22"
 bytes = "1.1"
 chrono = { version = "0.4", features = [ "serde" ] }
 dirs-next = "2"
@@ -56,9 +57,6 @@ progenitor = { git = "https://github.com/oxidecomputer/progenitor" }
 rand = "0.8"
 regex = "1"
 reqwest = { version = "0.11", features = [ "json", "stream" ] }
-rusoto_core = "0.48"
-rusoto_credential = "0.48"
-rusoto_ec2 = "0.48"
 rust-toolchain-file = "0.1"
 rusty_ulid = "1"
 schemars = { version = "0.8", features = [ "chrono" ] }
@@ -84,5 +82,5 @@ tokio = { version = "1", features = [ "full" ] }
 tokio-stream = "0.1"
 tokio-util = { version = "0.6.9", features = [ "io" ] }
 toml = "0.8"
-usdt = "0.3"
+usdt = "0.5"
 zone = { version = "0.3", features = [ "async" ], default-features = false }

@@ -2,61 +2,56 @@
  * Copyright 2024 Oxide Computer Company
  */
 
-use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, UNIX_EPOCH};
+use std::{collections::HashMap, time::SystemTime};
 
-use anyhow::{bail, Result};
-use buildomat_client::types::*;
-use chrono::prelude::*;
-use rusoto_core::{HttpClient, Region};
-use rusoto_credential::StaticProvider;
-use rusoto_ec2::{
-    BlockDeviceMapping, DescribeInstancesRequest, EbsBlockDevice, Ec2,
-    Ec2Client, Filter, InstanceNetworkInterfaceSpecification,
-    RunInstancesRequest, StopInstancesRequest, Tag, TagSpecification,
-    TerminateInstancesRequest,
+use anyhow::{anyhow, bail, Result};
+use aws_config::Region;
+use aws_config::{meta::region::RegionProviderChain, BehaviorVersion};
+use aws_sdk_ec2::config::Credentials;
+use aws_sdk_ec2::types::{
+    BlockDeviceMapping, EbsBlockDevice, Filter,
+    InstanceNetworkInterfaceSpecification, InstanceType, ResourceType, Tag,
+    TagSpecification,
 };
+use base64::Engine;
+use buildomat_client::types::*;
 use rusty_ulid::Ulid;
 use slog::{debug, error, info, o, warn, Logger};
 
 use super::{config::ConfigFileAwsTarget, Central, ConfigFile};
 
 #[derive(Debug)]
-#[allow(dead_code)]
 struct Instance {
     id: String,
     state: String,
     ip: Option<String>,
     worker_id: Option<Ulid>,
     lease_id: Option<Ulid>,
-    launch_time: Option<DateTime<Utc>>,
+    launch_time: Option<aws_sdk_ec2::primitives::DateTime>,
 }
 
-impl From<(&rusoto_ec2::Instance, &str)> for Instance {
-    fn from((i, tag): (&rusoto_ec2::Instance, &str)) -> Self {
+impl From<(&aws_sdk_ec2::types::Instance, &str)> for Instance {
+    fn from((i, tag): (&aws_sdk_ec2::types::Instance, &str)) -> Self {
         let id = i.instance_id.as_ref().unwrap().to_string();
         let state =
             i.state.as_ref().unwrap().name.as_ref().unwrap().to_string();
 
-        let launch_time = i
-            .launch_time
-            .as_ref()
-            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| dt.into());
+        let launch_time = i.launch_time;
 
         let worker_id = i
-            .tags
-            .tag(&format!("{}-worker_id", tag))
-            .map(|s| Ulid::from_str(&s).ok())
-            .unwrap_or_default();
+            .tags()
+            .tag(&format!("{tag}-worker_id"))
+            .as_ref()
+            .and_then(|v| Ulid::from_str(v).ok());
 
         let lease_id = i
-            .tags
-            .tag(&format!("{}-lease_id", tag))
-            .map(|s| Ulid::from_str(&s).ok())
-            .unwrap_or_default();
+            .tags()
+            .tag(&format!("{tag}-lease_id"))
+            .as_ref()
+            .and_then(|v| Ulid::from_str(v).ok());
 
         let ip = i.private_ip_address.clone();
 
@@ -68,11 +63,15 @@ impl Instance {
     fn age_secs(&self) -> u64 {
         self.launch_time
             .map(|dt| {
-                Utc::now()
-                    .signed_duration_since(dt)
-                    .to_std()
-                    .unwrap_or_else(|_| Duration::from_secs(0))
-                    .as_secs()
+                let when: u64 = dt.to_millis().unwrap().try_into().unwrap();
+                let now: u64 = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis()
+                    .try_into()
+                    .unwrap();
+
+                (if when <= now { now - when } else { 0 }) / 1000
             })
             .unwrap_or(0)
     }
@@ -82,25 +81,17 @@ trait TagExtractor {
     fn tag(&self, n: &str) -> Option<String>;
 }
 
-impl TagExtractor for Option<Vec<Tag>> {
+impl TagExtractor for &[Tag] {
     fn tag(&self, n: &str) -> Option<String> {
-        if let Some(tags) = self.as_ref() {
-            for tag in tags.iter() {
-                if let Some(k) = tag.key.as_deref() {
-                    if k == n {
-                        return tag.value.clone();
-                    }
-                }
-            }
-        }
-
-        None
+        self.iter()
+            .find(|t| t.key() == Some(n))
+            .and_then(|t| t.value().map(str::to_string))
     }
 }
 
 async fn destroy_instance(
     log: &Logger,
-    ec2: &Ec2Client,
+    ec2: &aws_sdk_ec2::Client,
     id: &str,
     force_stop: bool,
 ) -> Result<()> {
@@ -114,27 +105,18 @@ async fn destroy_instance(
      */
     if force_stop {
         info!(log, "forcing stop of instance {id}...");
-        ec2.stop_instances(StopInstancesRequest {
-            instance_ids: vec![id.to_string()],
-            force: Some(true),
-            ..Default::default()
-        })
-        .await?;
+        ec2.stop_instances().instance_ids(id).force(true).send().await?;
     }
 
     info!(log, "terminating instance {id}...");
-    ec2.terminate_instances(TerminateInstancesRequest {
-        instance_ids: vec![id.to_string()],
-        ..Default::default()
-    })
-    .await?;
+    ec2.terminate_instances().instance_ids(id).send().await?;
 
     Ok(())
 }
 
 async fn create_instance(
     log: &Logger,
-    ec2: &Ec2Client,
+    ec2: &aws_sdk_ec2::Client,
     config: &ConfigFile,
     target: &ConfigFileAwsTarget,
     worker: &FactoryWorker,
@@ -147,68 +129,72 @@ async fn create_instance(
         .replace("%URL%", &config.general.baseurl)
         .replace("%STRAP%", &worker.bootstrap);
 
-    let script = base64::encode(&script);
+    let script = base64::engine::general_purpose::STANDARD.encode(&script);
 
     info!(log, "creating an instance (worker {})...", id);
     let res = ec2
-        .run_instances(RunInstancesRequest {
-            image_id: Some(target.ami.to_string()),
-            instance_type: Some(target.instance_type.to_string()),
-            key_name: Some(config.aws.key.to_string()),
-            min_count: 1,
-            max_count: 1,
-            tag_specifications: Some(vec![TagSpecification {
-                resource_type: Some("instance".to_string()),
-                tags: Some(vec![
-                    Tag {
-                        key: Some("Name".to_string()),
-                        value: Some(format!("w-{}", id)),
-                    },
-                    Tag {
-                        key: Some(config.aws.tag.to_string()),
-                        value: Some("1".to_string()),
-                    },
-                    Tag {
-                        key: Some(format!("{}-worker_id", config.aws.tag)),
-                        value: Some(id),
-                    },
-                    Tag {
-                        key: Some(format!("{}-lease_id", config.aws.tag)),
-                        value: Some(lease_id.to_string()),
-                    },
-                ]),
-            }]),
-            block_device_mappings: Some(vec![BlockDeviceMapping {
-                device_name: Some("/dev/sda1".to_string()),
-                ebs: Some(EbsBlockDevice {
-                    volume_size: Some(target.root_size_gb),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }]),
-            network_interfaces: Some(vec![
-                InstanceNetworkInterfaceSpecification {
-                    subnet_id: Some(config.aws.subnet.to_string()),
-                    device_index: Some(0),
-                    associate_public_ip_address: Some(false),
-                    groups: Some(vec![config.aws.security_group.to_string()]),
-                    ..Default::default()
-                },
-            ]),
-            user_data: Some(script),
-            ..Default::default()
-        })
+        .run_instances()
+        .image_id(&target.ami)
+        .instance_type(InstanceType::from_str(&target.instance_type)?)
+        .key_name(&config.aws.key)
+        .min_count(1)
+        .max_count(1)
+        .tag_specifications(
+            TagSpecification::builder()
+                .resource_type(ResourceType::Instance)
+                .tags(
+                    Tag::builder().key("Name").value(format!("w-{id}")).build(),
+                )
+                .tags(
+                    Tag::builder()
+                        .key(&config.aws.tag)
+                        .value("1".to_string())
+                        .build(),
+                )
+                .tags(
+                    Tag::builder()
+                        .key(config.aws.tagkey_worker())
+                        .value(&id)
+                        .build(),
+                )
+                .tags(
+                    Tag::builder()
+                        .key(config.aws.tagkey_lease())
+                        .value(lease_id)
+                        .build(),
+                )
+                .build(),
+        )
+        .block_device_mappings(
+            BlockDeviceMapping::builder()
+                .device_name("/dev/sda1")
+                .ebs(
+                    EbsBlockDevice::builder()
+                        .volume_size(target.root_size_gb)
+                        .build(),
+                )
+                .build(),
+        )
+        .network_interfaces(
+            InstanceNetworkInterfaceSpecification::builder()
+                .subnet_id(&config.aws.subnet)
+                .device_index(0)
+                .associate_public_ip_address(false)
+                .groups(&config.aws.security_group)
+                .build(),
+        )
+        .user_data(script)
+        .send()
         .await?;
 
-    let mut instances = Vec::new();
-    if let Some(insts) = &res.instances {
-        insts.iter().for_each(|i| {
-            instances.push(Instance::from((i, config.aws.tag.as_str())))
-        });
-    }
+    let mut instances = res
+        .instances()
+        .into_iter()
+        .map(|i| Instance::from((i, config.aws.tag.as_str())))
+        .collect::<Vec<_>>();
 
     if instances.len() != 1 {
-        bail!("wanted one instance, got {:?}", instances);
+        bail!("wanted one instance, got {instances:?}");
     } else {
         Ok(instances.pop().unwrap())
     }
@@ -216,49 +202,37 @@ async fn create_instance(
 
 async fn instances(
     _log: &Logger,
-    ec2: &Ec2Client,
+    ec2: &aws_sdk_ec2::Client,
     tag: &str,
     vpc: &str,
 ) -> Result<HashMap<String, Instance>> {
-    let filters = Some(vec![
-        Filter {
-            name: Some("tag-key".to_string()),
-            values: Some(vec![tag.to_string()]),
-        },
-        Filter {
-            name: Some("vpc-id".to_string()),
-            values: Some(vec![vpc.to_string()]),
-        },
-    ]);
     let res = ec2
-        .describe_instances(DescribeInstancesRequest {
-            filters,
-            ..Default::default()
-        })
+        .describe_instances()
+        .filters(Filter::builder().name("tag-key").values(tag).build())
+        .filters(Filter::builder().name("vpc-id").values(vpc).build())
+        .send()
         .await?;
     if res.next_token.is_some() {
         bail!("did not expect more than one page of results for now");
     }
 
-    let mut out = HashMap::new();
-    if let Some(resv) = &res.reservations {
-        for r in resv.iter() {
-            if let Some(insts) = &r.instances {
-                insts.iter().for_each(|i| {
-                    let i = Instance::from((i, tag));
-                    out.insert(i.id.to_string(), i);
-                });
-            }
-        }
-    }
-
-    Ok(out)
+    Ok(res
+        .reservations()
+        .iter()
+        .map(|r| {
+            r.instances().iter().map(|i| {
+                let i = Instance::from((i, tag));
+                (i.id.to_string(), i)
+            })
+        })
+        .flatten()
+        .collect())
 }
 
 async fn aws_worker_one(
     log: &Logger,
     c: &Central,
-    ec2: &Ec2Client,
+    ec2: &aws_sdk_ec2::Client,
     config: &ConfigFile,
 ) -> Result<()> {
     /*
@@ -611,15 +585,27 @@ async fn aws_worker_one(
 pub(crate) async fn aws_worker(c: Arc<Central>) -> Result<()> {
     let log = c.log.new(o!("component" => "worker"));
 
-    let credprov = StaticProvider::new_minimal(
-        c.config.aws.access_key_id.clone(),
-        c.config.aws.secret_access_key.clone(),
+    let region = RegionProviderChain::first_try(Region::new(
+        c.config.aws.region.clone(),
+    ))
+    .region()
+    .await
+    .ok_or_else(|| anyhow!("could not select region"))?;
+    let creds = Credentials::new(
+        &c.config.aws.access_key_id,
+        &c.config.aws.secret_access_key,
+        None,
+        None,
+        "config-file",
     );
-    let ec2 = Ec2Client::new_with(
-        HttpClient::new()?,
-        credprov,
-        Region::from_str(&c.config.aws.region)?,
-    );
+
+    let cfg = aws_config::defaults(BehaviorVersion::v2024_03_28())
+        .region(region)
+        .credentials_provider(creds)
+        .load()
+        .await;
+
+    let ec2 = aws_sdk_ec2::Client::new(&cfg);
 
     let delay = Duration::from_secs(7);
 

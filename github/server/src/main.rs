@@ -5,6 +5,7 @@
 #![allow(clippy::vec_init_then_push)]
 
 use anyhow::{anyhow, bail, Context, Result};
+use base64::Engine;
 use buildomat_common::*;
 use buildomat_github_client::types::{
     ActionsListJobsWorkflowRunFilter, ChecksCreateRequestActions,
@@ -146,7 +147,9 @@ impl App {
                 let ctx = || anyhow!("content: {:?}", &encoded);
                 Ok(Some(
                     String::from_utf8(
-                        base64::decode(&encoded).with_context(ctx)?,
+                        base64::engine::general_purpose::STANDARD
+                            .decode(&encoded)
+                            .with_context(ctx)?,
                     )
                     .with_context(ctx)?,
                 ))

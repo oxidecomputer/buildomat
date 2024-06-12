@@ -31,7 +31,7 @@ pub(crate) struct ConfigFileFactory {
 #[serde(deny_unknown_fields)]
 pub(crate) struct ConfigFileAwsTarget {
     pub instance_type: String,
-    pub root_size_gb: i64,
+    pub root_size_gb: i32,
     pub ami: String,
     pub post_job_diagnostic_script: Option<String>,
     pub pre_job_diagnostic_script: Option<String>,
@@ -52,4 +52,14 @@ pub(crate) struct ConfigFileAws {
     pub root_password_hash: Option<String>,
     pub root_authorized_keys: Option<String>,
     pub dump_to_rpool: Option<u32>,
+}
+
+impl ConfigFileAws {
+    pub fn tagkey_worker(&self) -> String {
+        format!("{}-worker_id", self.tag)
+    }
+
+    pub fn tagkey_lease(&self) -> String {
+        format!("{}-lease_id", self.tag)
+    }
 }
