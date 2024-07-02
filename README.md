@@ -470,7 +470,12 @@ Configuration properties supported for basic jobs include:
 
   The `output_rules` property is a list of `/`-anchored glob patterns that
   match files in the ephemeral machine; e.g., `/tmp/*.txt` would match
-  `/tmp/something.txt` but not `/tmp/nothing.png`.
+  `/tmp/something.txt` but not `/tmp/nothing.png`.  Like the shell, a single
+  asterisk (`*`) will not descend into a hierarchy of directories.  If you want
+  to match recursively, a double asterisk (`**`) pattern will match the current
+  directory or any directory under that directory, but not files.  You can
+  combine these to get a recursive match; e.g., `/tmp/**/*.txt` would match
+  `/tmp/a.txt`, `/tmp/dir/a.txt`, and `/tmp/dir/dir/a.txt`.
 
   By default, it is not an error to specify a pattern that does not match any
   files.  Provided the job is not cancelled, matching files are uploaded
