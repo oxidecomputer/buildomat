@@ -13,6 +13,7 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 pub struct Config {
     pub id: u64,
+    #[allow(unused)]
     pub secret: String,
 }
 

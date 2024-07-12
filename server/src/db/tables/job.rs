@@ -6,6 +6,7 @@ use super::sublude::*;
 
 #[derive(Clone, Debug)]
 #[enum_def(prefix = "", suffix = "Def")]
+#[allow(unused)]
 pub struct Job {
     pub id: JobId,
     pub owner: UserId,

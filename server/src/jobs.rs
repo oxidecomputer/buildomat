@@ -21,6 +21,7 @@ const LEASE_LENGTH: Duration = Duration::from_secs(60);
 
 #[derive(Clone)]
 pub struct Lease {
+    #[allow(unused)]
     pub job: JobId,
     pub factory: FactoryId,
     pub expiry: Instant,

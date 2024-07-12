@@ -88,6 +88,7 @@ fn mac_sanitise(input: &str) -> String {
 }
 
 pub struct Vnic {
+    #[allow(unused)]
     pub name: String,
     pub physical: String,
     pub mac: String,

@@ -19,6 +19,7 @@ use tokio::net::UnixListener;
 use tokio::{io::Interest, net::UnixStream};
 
 #[derive(Debug)]
+#[allow(unused)]
 pub enum SerialData {
     Line(String),
 }
