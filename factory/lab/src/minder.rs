@@ -386,18 +386,18 @@ async fn ipxe_script(
     Ok(hyper::Response::builder().body(script.into())?)
 }
 
-fn make_api() -> dropshot::ApiDescription<Arc<Central>> {
+fn make_api() -> Result<dropshot::ApiDescription<Arc<Central>>> {
     let mut ad = dropshot::ApiDescription::new();
-    ad.register(ipxe_script).unwrap();
-    ad.register(postboot_script).unwrap();
-    ad.register(signal).unwrap();
-    ad.register(os_file).unwrap();
-    ad
+    ad.register(ipxe_script)?;
+    ad.register(postboot_script)?;
+    ad.register(signal)?;
+    ad.register(os_file)?;
+    Ok(ad)
 }
 
 pub fn dump_api<P: AsRef<Path>>(p: P) -> Result<()> {
     let p = p.as_ref();
-    let ad = make_api();
+    let ad = make_api()?;
     let mut f =
         std::fs::OpenOptions::new().create_new(true).write(true).open(p)?;
     ad.openapi("Minder", "1.0").write(&mut f)?;
@@ -408,7 +408,7 @@ pub(crate) async fn server(
     central: &Arc<Central>,
     bind_address: std::net::SocketAddr,
 ) -> Result<dropshot::HttpServerStarter<Arc<Central>>> {
-    let ad = make_api();
+    let ad = make_api()?;
     let log = central.log.clone();
 
     let server = dropshot::HttpServerStarter::new(

@@ -105,18 +105,6 @@ impl<T> MakeInternalError<T> for serde_json::Result<T> {
     }
 }
 
-pub(crate) trait ApiResultEx {
-    fn api_check(&self) -> Result<()>;
-}
-
-impl ApiResultEx for std::result::Result<(), String> {
-    fn api_check(&self) -> Result<()> {
-        self.as_ref()
-            .map_err(|e| anyhow!("API registration failure: {}", e))?;
-        Ok(())
-    }
-}
-
 struct FilePresignedUrl {
     pub info: String,
     pub url: String,
@@ -949,88 +937,88 @@ async fn main() -> Result<()> {
     };
 
     let mut ad = ApiDescription::new();
-    ad.register(api::admin::control_hold).api_check()?;
-    ad.register(api::admin::control_resume).api_check()?;
-    ad.register(api::admin::users_list).api_check()?;
-    ad.register(api::admin::user_get).api_check()?;
-    ad.register(api::admin::user_create).api_check()?;
-    ad.register(api::admin::user_privilege_grant).api_check()?;
-    ad.register(api::admin::user_privilege_revoke).api_check()?;
-    ad.register(api::admin::worker).api_check()?;
-    ad.register(api::admin::workers_list).api_check()?;
-    ad.register(api::admin::workers_list_old).api_check()?;
-    ad.register(api::admin::workers_recycle).api_check()?;
-    ad.register(api::admin::worker_recycle).api_check()?;
-    ad.register(api::admin::worker_hold_mark).api_check()?;
-    ad.register(api::admin::worker_hold_release).api_check()?;
-    ad.register(api::admin::worker_events_get).api_check()?;
-    ad.register(api::admin::admin_job_get).api_check()?;
-    ad.register(api::admin::admin_job_archive_request).api_check()?;
-    ad.register(api::admin::admin_jobs_get).api_check()?;
-    ad.register(api::admin::admin_jobs_list).api_check()?;
-    ad.register(api::admin::factory_create).api_check()?;
-    ad.register(api::admin::factory_enable).api_check()?;
-    ad.register(api::admin::factory_disable).api_check()?;
-    ad.register(api::admin::factories_list).api_check()?;
-    ad.register(api::admin::target_create).api_check()?;
-    ad.register(api::admin::targets_list).api_check()?;
-    ad.register(api::admin::target_require_privilege).api_check()?;
-    ad.register(api::admin::target_require_no_privilege).api_check()?;
-    ad.register(api::admin::target_redirect).api_check()?;
-    ad.register(api::admin::target_rename).api_check()?;
-    ad.register(api::user::job_events_get).api_check()?;
-    ad.register(api::user::job_watch).api_check()?;
-    ad.register(api::user::job_outputs_get).api_check()?;
-    ad.register(api::user::job_output_download).api_check()?;
-    ad.register(api::user::job_output_head).api_check()?;
-    ad.register(api::user::job_output_signed_url).api_check()?;
-    ad.register(api::user::job_output_publish).api_check()?;
-    ad.register(api::user::job_get).api_check()?;
-    ad.register(api::user::job_store_get_all).api_check()?;
-    ad.register(api::user::job_store_put).api_check()?;
-    ad.register(api::user::job_submit).api_check()?;
-    ad.register(api::user::job_upload_chunk).api_check()?;
-    ad.register(api::user::job_add_input).api_check()?;
-    ad.register(api::user::job_add_input_sync).api_check()?;
-    ad.register(api::user::job_cancel).api_check()?;
-    ad.register(api::user::jobs_list).api_check()?;
-    ad.register(api::user::jobs_get_old).api_check()?;
-    ad.register(api::user::quota).api_check()?;
-    ad.register(api::user::whoami).api_check()?;
-    ad.register(api::worker::worker_bootstrap).api_check()?;
-    ad.register(api::worker::worker_ping).api_check()?;
-    ad.register(api::worker::worker_fail).api_check()?;
-    ad.register(api::worker::worker_diagnostics_enable).api_check()?;
-    ad.register(api::worker::worker_diagnostics_complete).api_check()?;
-    ad.register(api::worker::worker_append).api_check()?;
-    ad.register(api::worker::worker_job_append).api_check()?;
-    ad.register(api::worker::worker_job_append_one).api_check()?;
-    ad.register(api::worker::worker_job_complete).api_check()?;
-    ad.register(api::worker::worker_job_upload_chunk).api_check()?;
-    ad.register(api::worker::worker_job_quota).api_check()?;
-    ad.register(api::worker::worker_job_add_output).api_check()?;
-    ad.register(api::worker::worker_job_add_output_sync).api_check()?;
-    ad.register(api::worker::worker_job_input_download).api_check()?;
-    ad.register(api::worker::worker_job_store_get).api_check()?;
-    ad.register(api::worker::worker_job_store_put).api_check()?;
-    ad.register(api::worker::worker_task_append).api_check()?;
-    ad.register(api::worker::worker_task_complete).api_check()?;
-    ad.register(api::factory::factory_workers).api_check()?;
-    ad.register(api::factory::factory_worker_get).api_check()?;
-    ad.register(api::factory::factory_ping).api_check()?;
-    ad.register(api::factory::factory_worker_create).api_check()?;
-    ad.register(api::factory::factory_worker_append).api_check()?;
-    ad.register(api::factory::factory_worker_flush).api_check()?;
-    ad.register(api::factory::factory_worker_associate).api_check()?;
-    ad.register(api::factory::factory_worker_destroy).api_check()?;
-    ad.register(api::factory::factory_lease).api_check()?;
-    ad.register(api::factory::factory_lease_renew).api_check()?;
-    ad.register(api::public::public_file_download).api_check()?;
-    ad.register(api::public::public_file_head).api_check()?;
-    ad.register(file_agent).api_check()?;
-    ad.register(head_file_agent).api_check()?;
-    ad.register(file_agent_gz).api_check()?;
-    ad.register(head_file_agent_gz).api_check()?;
+    ad.register(api::admin::control_hold)?;
+    ad.register(api::admin::control_resume)?;
+    ad.register(api::admin::users_list)?;
+    ad.register(api::admin::user_get)?;
+    ad.register(api::admin::user_create)?;
+    ad.register(api::admin::user_privilege_grant)?;
+    ad.register(api::admin::user_privilege_revoke)?;
+    ad.register(api::admin::worker)?;
+    ad.register(api::admin::workers_list)?;
+    ad.register(api::admin::workers_list_old)?;
+    ad.register(api::admin::workers_recycle)?;
+    ad.register(api::admin::worker_recycle)?;
+    ad.register(api::admin::worker_hold_mark)?;
+    ad.register(api::admin::worker_hold_release)?;
+    ad.register(api::admin::worker_events_get)?;
+    ad.register(api::admin::admin_job_get)?;
+    ad.register(api::admin::admin_job_archive_request)?;
+    ad.register(api::admin::admin_jobs_get)?;
+    ad.register(api::admin::admin_jobs_list)?;
+    ad.register(api::admin::factory_create)?;
+    ad.register(api::admin::factory_enable)?;
+    ad.register(api::admin::factory_disable)?;
+    ad.register(api::admin::factories_list)?;
+    ad.register(api::admin::target_create)?;
+    ad.register(api::admin::targets_list)?;
+    ad.register(api::admin::target_require_privilege)?;
+    ad.register(api::admin::target_require_no_privilege)?;
+    ad.register(api::admin::target_redirect)?;
+    ad.register(api::admin::target_rename)?;
+    ad.register(api::user::job_events_get)?;
+    ad.register(api::user::job_watch)?;
+    ad.register(api::user::job_outputs_get)?;
+    ad.register(api::user::job_output_download)?;
+    ad.register(api::user::job_output_head)?;
+    ad.register(api::user::job_output_signed_url)?;
+    ad.register(api::user::job_output_publish)?;
+    ad.register(api::user::job_get)?;
+    ad.register(api::user::job_store_get_all)?;
+    ad.register(api::user::job_store_put)?;
+    ad.register(api::user::job_submit)?;
+    ad.register(api::user::job_upload_chunk)?;
+    ad.register(api::user::job_add_input)?;
+    ad.register(api::user::job_add_input_sync)?;
+    ad.register(api::user::job_cancel)?;
+    ad.register(api::user::jobs_list)?;
+    ad.register(api::user::jobs_get_old)?;
+    ad.register(api::user::quota)?;
+    ad.register(api::user::whoami)?;
+    ad.register(api::worker::worker_bootstrap)?;
+    ad.register(api::worker::worker_ping)?;
+    ad.register(api::worker::worker_fail)?;
+    ad.register(api::worker::worker_diagnostics_enable)?;
+    ad.register(api::worker::worker_diagnostics_complete)?;
+    ad.register(api::worker::worker_append)?;
+    ad.register(api::worker::worker_job_append)?;
+    ad.register(api::worker::worker_job_append_one)?;
+    ad.register(api::worker::worker_job_complete)?;
+    ad.register(api::worker::worker_job_upload_chunk)?;
+    ad.register(api::worker::worker_job_quota)?;
+    ad.register(api::worker::worker_job_add_output)?;
+    ad.register(api::worker::worker_job_add_output_sync)?;
+    ad.register(api::worker::worker_job_input_download)?;
+    ad.register(api::worker::worker_job_store_get)?;
+    ad.register(api::worker::worker_job_store_put)?;
+    ad.register(api::worker::worker_task_append)?;
+    ad.register(api::worker::worker_task_complete)?;
+    ad.register(api::factory::factory_workers)?;
+    ad.register(api::factory::factory_worker_get)?;
+    ad.register(api::factory::factory_ping)?;
+    ad.register(api::factory::factory_worker_create)?;
+    ad.register(api::factory::factory_worker_append)?;
+    ad.register(api::factory::factory_worker_flush)?;
+    ad.register(api::factory::factory_worker_associate)?;
+    ad.register(api::factory::factory_worker_destroy)?;
+    ad.register(api::factory::factory_lease)?;
+    ad.register(api::factory::factory_lease_renew)?;
+    ad.register(api::public::public_file_download)?;
+    ad.register(api::public::public_file_head)?;
+    ad.register(file_agent)?;
+    ad.register(head_file_agent)?;
+    ad.register(file_agent_gz)?;
+    ad.register(head_file_agent_gz)?;
 
     if let Some(s) = p.opt_str("S") {
         let mut f =

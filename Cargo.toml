@@ -35,7 +35,7 @@ base64 = "0.22"
 bytes = "1.1"
 chrono = { version = "0.4", features = [ "serde" ] }
 dirs-next = "2"
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "x-forwarded-for" }
+dropshot = { git = "https://github.com/oxidecomputer/dropshot" }
 futures = "0.3"
 futures-core = "0.3"
 getopts = "0.2"

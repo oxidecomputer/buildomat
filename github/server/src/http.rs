@@ -1135,15 +1135,15 @@ pub(crate) async fn server(
     };
 
     let mut api = dropshot::ApiDescription::new();
-    api.register(webhook).unwrap();
-    api.register(details).unwrap();
-    api.register(details_live).unwrap();
-    api.register(artefact).unwrap();
-    api.register(status).unwrap();
-    api.register(published_file).unwrap();
-    api.register(published_file_head).unwrap();
-    api.register(branch_to_commit).unwrap();
-    api.register(static_file).unwrap();
+    api.register(webhook)?;
+    api.register(details)?;
+    api.register(details_live)?;
+    api.register(artefact)?;
+    api.register(status)?;
+    api.register(published_file)?;
+    api.register(published_file_head)?;
+    api.register(branch_to_commit)?;
+    api.register(static_file)?;
 
     let log = app.log.clone();
     let s = dropshot::HttpServerStarter::new(&cd, api, app, &log)
