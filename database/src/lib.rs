@@ -522,21 +522,7 @@ impl Sqlite {
             *b = Some(curthread);
         }
 
-        let mut c = self.conn.lock().unwrap();
-        let tx = c.transaction_with_behavior(txb)?;
-
-        let mut h = Handle { tx, log: self.log.clone() };
-
-        let res = match func(&mut h) {
-            Ok(res) => {
-                h.tx.commit()?;
-                Ok(res)
-            }
-            Err(e) => {
-                h.tx.rollback()?;
-                Err(e)
-            }
-        };
+        let res = self.tx_common_locked(txb, func);
 
         {
             let mut b = self.busy.lock().unwrap();
@@ -551,6 +537,38 @@ impl Sqlite {
         }
 
         res
+    }
+
+    fn tx_common_locked<T>(
+        &self,
+        txb: rusqlite::TransactionBehavior,
+        func: impl FnOnce(&mut Handle) -> DBResult<T>,
+    ) -> DBResult<T> {
+        let mut c = self.conn.lock().unwrap();
+
+        let mut h = Handle {
+            tx: c.transaction_with_behavior(txb)?,
+            log: self.log.clone(),
+        };
+
+        /*
+         * If this routine exits before expected due to an error, make sure we
+         * roll back any work that was done.  This is the current default
+         * behaviour, but is sufficiently critical that we explicitly request
+         * it:
+         */
+        h.tx.set_drop_behavior(rusqlite::DropBehavior::Rollback);
+
+        match func(&mut h) {
+            Ok(res) => {
+                h.tx.commit()?;
+                Ok(res)
+            }
+            Err(e) => {
+                h.tx.rollback()?;
+                Err(e)
+            }
+        }
     }
 }
 
