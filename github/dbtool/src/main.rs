@@ -221,13 +221,14 @@ async fn do_delivery_dump(mut l: Level<Stuff>) -> Result<()> {
 }
 
 async fn do_delivery_list(mut l: Level<Stuff>) -> Result<()> {
-    l.add_column("seq", 5, true);
+    l.add_column("seq", 7, true);
     l.add_column("ack", 3, true);
     l.add_column("recvtime", 20, true);
     l.add_column("event", 14, true);
     l.add_column("action", 24, true);
     l.add_column("uuid", 36, false);
-    l.add_column("sender", 36, false);
+    l.add_column("sender", 24, false);
+    l.add_column("install", 8, false);
 
     l.optopt("n", "", "limit to this many of the most recent entries", "N");
 
@@ -262,6 +263,11 @@ async fn do_delivery_list(mut l: Level<Stuff>) -> Result<()> {
             Ok(payload) => {
                 r.add_str("action", &payload.action);
                 r.add_str("sender", &payload.sender.login);
+                if let Some(inst) = &payload.installation {
+                    r.add_str("install", inst.id.to_string());
+                } else {
+                    r.add_str("install", "-");
+                }
             }
             Err(e) => {
                 if &del.event != "ping" {
@@ -269,6 +275,7 @@ async fn do_delivery_list(mut l: Level<Stuff>) -> Result<()> {
                 }
                 r.add_str("action", "-");
                 r.add_str("sender", "-");
+                r.add_str("install", "-");
             }
         }
 
