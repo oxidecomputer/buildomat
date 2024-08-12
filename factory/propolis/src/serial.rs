@@ -1,10 +1,9 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use std::{
     collections::HashMap,
-    ffi::CString,
     os::{fd::AsRawFd, unix::prelude::PermissionsExt},
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -12,8 +11,8 @@ use std::{
 };
 
 use crate::ucred::PeerUCred;
+use crate::zones::*;
 use anyhow::{anyhow, bail, Result};
-use libc::zoneid_t;
 use slog::{debug, error, info, o, trace, warn, Logger};
 use tokio::net::UnixListener;
 use tokio::{io::Interest, net::UnixStream};
@@ -181,7 +180,9 @@ impl Serial {
     }
 
     pub fn zone_add(&self, name: &str) -> Result<SerialForZone> {
-        let zoneid = zone_name_to_id(name)?;
+        let Some(zoneid) = zone_name_to_id(name)? else {
+            bail!("zone {name:?} not found!");
+        };
 
         let (tx, rx) = tokio::sync::mpsc::channel(100);
         let (shut_tx, shut_rx) = tokio::sync::watch::channel(false);
@@ -212,23 +213,6 @@ impl Serial {
 
         Ok(z)
     }
-}
-
-#[link(name = "c")]
-extern "C" {
-    fn getzoneidbyname(name: *const libc::c_char) -> zoneid_t;
-}
-
-fn zone_name_to_id(name: &str) -> Result<zoneid_t> {
-    let cs = CString::new(name)?;
-
-    let id = unsafe { getzoneidbyname(cs.as_ptr()) };
-    if id < 0 {
-        let e = std::io::Error::last_os_error();
-        bail!("getzoneidbyname({name}): {e}");
-    }
-
-    Ok(id)
 }
 
 fn clean_line(linebuf: &[u8]) -> Option<String> {

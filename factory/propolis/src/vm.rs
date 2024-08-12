@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use std::{
@@ -15,6 +15,7 @@ use crate::{
     config::ImageSource,
     db::types::*,
     net::{dladm_create_vnic, dladm_delete_vnic, dladm_vnic_get, Vnic},
+    zones::*,
     Central,
 };
 use anyhow::{anyhow, bail, Result};
@@ -437,6 +438,8 @@ async fn instance_worker_one(
             let vmdir = root.join("vm");
             let smfdir =
                 root.join("var").join("svc").join("manifest").join("site");
+            let siteprofile =
+                root.join("var").join("svc").join("profile").join("site.xml");
 
             info!(log, "add /vm files to zone {zn}...");
             if vmdir.exists() {
@@ -461,6 +464,8 @@ async fn instance_worker_one(
                 std::fs::write(&vmdir.join(&format!("{name}.sh")), script)?;
                 std::fs::write(&smfdir.join(format!("{name}.xml")), bundle)?;
             }
+
+            std::fs::write(&siteprofile, include_str!("../smf/site.xml"))?;
 
             info!(log, "make root disk...");
             match targ.source()? {
@@ -523,6 +528,17 @@ async fn instance_worker_one(
             Ok(DoNext::Immediate)
         }
         InstanceState::ZoneOnline => {
+            /*
+             * Confirm that the zone exists.  It's possible that the host, which
+             * boots from a ramdisk, has rebooted and taken some partial zones
+             * along with it.
+             */
+            if !zone_exists(&zn)? {
+                warn!(log, "zone {zn}: no longer exists; giving up!");
+                c.db.instance_new_state(&id, InstanceState::Destroying)?;
+                return Ok(DoNext::Immediate);
+            }
+
             let ser = if let Some(ser) = ser.as_mut() {
                 ser
             } else {

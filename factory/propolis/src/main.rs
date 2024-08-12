@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 use std::{sync::Arc, time::Duration};
@@ -19,6 +19,7 @@ mod serial;
 mod svc;
 mod ucred;
 mod vm;
+mod zones;
 
 struct Central {
     log: Logger,
