@@ -1620,7 +1620,9 @@ pub(crate) async fn details(
              */
             out += "function basic_onload() {}\n";
         } else {
-            out += &app.templates.load("variety/basic/live.js")?
+            out += &app
+                .templates
+                .load("variety/basic/live.js")?
                 .replace("%LOCAL_TIME%", &local_time.to_string())
                 .replace("%CHECKRUN%", &cr.id.to_string())
                 .replace("%MINSEQ%", &minseq.to_string());

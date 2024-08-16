@@ -155,9 +155,13 @@ pub(crate) async fn job_watch(
      */
     let mut resuming = false;
     if let Some(minseq) =
-        query.into_inner().minseq.and_then(|n| n.try_into().ok())
+        query.into_inner().minseq.and_then(|n| u32::try_from(n).ok())
     {
-        seq = minseq;
+        /*
+         * The "seq" value refers to the last record we have seen, but the
+         * "minseq" parameter specifies the next record we _want_ to see.
+         */
+        seq = minseq.saturating_sub(1);
         if minseq > 1 {
             resuming = true;
         }
