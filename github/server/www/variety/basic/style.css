@@ -1,3 +1,7 @@
+/*
+ * Copyright 2024 Oxide Computer Company
+ */
+
 table.table_output {
     border: none;
 }
@@ -64,4 +68,23 @@ a.numlink {
     font-family: monospace;
     text-decoration: none;
     color: #111111;
+}
+
+div.more {
+    position: fixed;
+    z-index: 1;
+    bottom: 3rem;
+    right: 3rem;
+
+    padding: 1.6rem;
+
+    border: 0.3rem solid black;
+
+    background-color: #a4ff91;
+    color: #000000;
+}
+
+span.more_arrow {
+    font-size: 1.5rem;
+    font-weight: bold;
 }

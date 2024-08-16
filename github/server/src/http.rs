@@ -309,7 +309,7 @@ async fn details(
          * The <style> tag needs to appear inside the <head>:
          */
         out += "<style>\n";
-        out += include_str!("../www/variety/basic/style.css");
+        out += &app.templates.load("variety/basic/style.css")?;
         out += "</style>\n";
     }
     out += "</head>\n";

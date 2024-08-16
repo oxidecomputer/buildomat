@@ -23,6 +23,7 @@ use variety::control::{ControlPrivate, CONTROL_RUN_NAME};
 
 mod config;
 mod http;
+mod templates;
 mod variety;
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -62,6 +63,7 @@ struct App {
     db: buildomat_github_database::Database,
     config: config::Config,
     jwt: buildomat_github_client::JWTCredentials,
+    templates: templates::Templates,
 }
 
 impl App {
@@ -1101,7 +1103,7 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                  * must be very careful to correctly ignore such deliveries.
                  */
                 if suite.app.id != app.config.id as i64 {
-                    warn!(
+                    info!(
                         log,
                         "delivery {} from foreign GitHub Application: {:?}",
                         del.seq,
@@ -2125,6 +2127,7 @@ async fn main() -> Result<()> {
             config.sqlite.cache_kb,
         )?,
         config,
+        templates: templates::Templates::new(log.clone())?,
     });
 
     /*
