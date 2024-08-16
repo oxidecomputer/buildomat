@@ -82,6 +82,12 @@ div.more {
 
     background-color: #a4ff91;
     color: #000000;
+
+    /*
+     * Change the mouse cursor to the pointer, like the browser would do for a
+     * clickable link:
+     */
+    cursor: pointer;
 }
 
 span.more_arrow {
