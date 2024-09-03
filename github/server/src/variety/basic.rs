@@ -135,12 +135,17 @@ fn encode_payload(payload: &str) -> Cow<'_, str> {
     ansi_to_html::convert_with_opts(
         &encoded_payload,
         // We've already escaped the payload above (and we also escape `/` which ansi_to_html
-        // doesn't do)
+        // doesn't).
+        //
+        // We can't just rely on ansi_to_html's escaping alone because: what if the conversion to
+        // ANSI fails? Currently we return the payload with HTML escapes, but that wouldn't be
+        // possible because ansi-to-html's error type doesn't carry the escaped-but-not-ANSI-ified
+        // payload.
         &ansi_to_html::Opts::default().skip_escape(true),
     )
     .map_or_else(
         |_| {
-            // Invalid ANSI code: just return the original payload.
+            // Invalid ANSI code: just return the encoded payload.
             encoded_payload
         },
         Cow::Owned,
@@ -1786,15 +1791,34 @@ pub mod test {
                 "<span style='color:var(--red,#a00)'>Hello, world!</span>",
             ),
             (
-                // Truecolor, bold, italic, underline, and also with escapes.
-                "\x1b[38;2;255;0;0;1;3;4mTest message\x1b[0m and &/' \x1b[38;2;0;255;0;1;3;4manother\x1b[0m",
+                // Truecolor, bold, italic, underline, and also with escapes. The second code
+                // ("another") does not have a reset, but we want to ensure that we generate closing
+                // HTML tags anyway.
+                "\x1b[38;2;255;0;0;1;3;4mTest message\x1b[0m and &/' \x1b[38;2;0;255;0;1;3;4manother",
                 "<span style='color:#ff0000'><b><i><u>Test message</u></i></b></span> and &amp;&#x2F;&#x27; <span style='color:#00ff00'><b><i><u>another</u></i></b></span>",
+            ),
+            (
+                // Invalid ANSI code "xx" -- should be HTML-escaped but the invalid ANSI code should
+                // remain as-is. (The second ANSI code is valid, and ansi-to-html should handle it.)
+                "\x1b[xx;2;255;0;0;1;3;4mTest message\x1b[0m and &/' \x1b[38;2;0;255;0;1;3;4manother",
+                "\u{1b}[xx;2;255;0;0;1;3;4mTest message and &amp;&#x2F;&#x27; <span style='color:#00ff00'><b><i><u>another</u></i></b></span>",
+            ),
+            (
+                // Invalid ANSI code "9000" -- should be HTML-escaped but the invalid ANSI code
+                // should remain as-is. (The second ANSI code is valid, but ansi-to-html's current
+                // behavior is to error out in this case. This can probably be improved.)
+                "\x1b[9000;2;255;0;0;1;3;4mTest message\x1b[0m and &/' \x1b[38;2;0;255;0;1;3;4manother",
+                "\u{1b}[9000;2;255;0;0;1;3;4mTest message\u{1b}[0m and &amp;&#x2F;&#x27; \u{1b}[38;2;0;255;0;1;3;4manother",
             )
         ];
 
         for (input, expected) in data {
             let output = encode_payload(input);
-            assert_eq!(output, *expected, "input: {:?}", input);
+            assert_eq!(
+                output, *expected,
+                "output != expected: input: {:?}",
+                input
+            );
         }
     }
 
