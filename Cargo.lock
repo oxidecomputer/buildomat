@@ -60,6 +60,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ansi-to-html"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d73c455ae09fa2223a75114789f30ad605e9e297f79537953523366c05995f5f"
+dependencies = [
+ "regex",
+ "thiserror",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.86"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -880,6 +890,7 @@ dependencies = [
 name = "buildomat-github-server"
 version = "0.0.0"
 dependencies = [
+ "ansi-to-html",
  "anyhow",
  "base64 0.22.1",
  "buildomat-bunyan",

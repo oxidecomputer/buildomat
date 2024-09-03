@@ -14,6 +14,7 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use slog::{debug, error, info, o, trace, warn, Logger};
+use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
@@ -64,6 +65,8 @@ impl JobEventEx for JobEvent {
     }
 
     fn event_row(&self) -> EventRow {
+        let encoded_payload = encode_payload(&self.payload);
+
         let payload = format!(
             "{}{}",
             /*
@@ -77,11 +80,7 @@ impl JobEventEx for JobEvent {
                 .map(|(n, _)| format!("[{}] ", html_escape::encode_safe(n)))
                 .as_deref()
                 .unwrap_or(""),
-            /*
-             * Do the HTML escaping of the payload one canonical way, in the
-             * server:
-             */
-            html_escape::encode_safe(&self.payload),
+            encoded_payload,
         );
 
         EventRow {
@@ -120,6 +119,32 @@ impl JobEventEx for JobEvent {
             ],
         }
     }
+}
+
+fn encode_payload(payload: &str) -> Cow<'_, str> {
+    /*
+     * Do the HTML escaping of the payload one canonical way, in the
+     * server:
+     */
+    let encoded_payload = html_escape::encode_safe(payload);
+
+    /*
+     * Apply ANSI formatting to the payload after escaping it (we want to transmit the
+     * corresponding HTML tags over:
+     */
+    ansi_to_html::convert_with_opts(
+        &encoded_payload,
+        // We've already escaped the payload above (and we also escape `/` which ansi_to_html
+        // doesn't do)
+        &ansi_to_html::Opts::default().skip_escape(true),
+    )
+    .map_or_else(
+        |_| {
+            // Invalid ANSI code: just return the original payload.
+            encoded_payload
+        },
+        Cow::Owned,
+    )
 }
 
 #[derive(Debug, Serialize)]
@@ -1744,6 +1769,34 @@ async fn load_rust_toolchain_from_repo(
 pub mod test {
     use super::*;
     use buildomat_github_testdata::*;
+
+    #[test]
+    fn test_encode_payload() {
+        let data = &[
+            ("Hello, world!", "Hello, world!"),
+            // HTML escapes
+            (
+                "2 & 3 < 4 > 5 / 6 ' 7 \" 8",
+                "2 &amp; 3 &lt; 4 &gt; 5 &#x2F; 6 &#x27; 7 &quot; 8",
+            ),
+            // ANSI color codes
+            (
+                // Basic 16-color example
+                "\x1b[31mHello, world!\x1b[0m",
+                "<span style='color:var(--red,#a00)'>Hello, world!</span>",
+            ),
+            (
+                // Truecolor, bold, italic, underline, and also with escapes.
+                "\x1b[38;2;255;0;0;1;3;4mTest message\x1b[0m and &/' \x1b[38;2;0;255;0;1;3;4manother\x1b[0m",
+                "<span style='color:#ff0000'><b><i><u>Test message</u></i></b></span> and &amp;&#x2F;&#x27; <span style='color:#00ff00'><b><i><u>another</u></i></b></span>",
+            )
+        ];
+
+        for (input, expected) in data {
+            let output = encode_payload(input);
+            assert_eq!(output, *expected, "input: {:?}", input);
+        }
+    }
 
     #[test]
     fn basic_parse_basic() -> Result<()> {

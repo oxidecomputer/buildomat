@@ -14,6 +14,7 @@ buildomat-github-database = { path = "../database" }
 buildomat-github-hooktypes = { path = "../hooktypes" }
 buildomat-sse = { path = "../../sse" }
 
+ansi-to-html = { workspace = true }
 anyhow = { workspace = true }
 base64 = { workspace = true }
 chrono = { workspace = true }
