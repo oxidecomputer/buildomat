@@ -1,6 +1,6 @@
 /target
 /config.toml
 /data.sqlite3
-/cache/
-/etc/
-/var/
+/cache
+/etc
+/var
