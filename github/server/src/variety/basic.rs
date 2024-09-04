@@ -132,7 +132,12 @@ fn encode_payload(payload: &str) -> Cow<'_, str> {
      * GitHub Actions (as checked on 2024-09-03) don't handle multiline color either,
      * so it's fine to punt on that.
      */
-    ansi_to_html::convert(payload).map_or_else(
+    ansi_to_html::convert_with_opts(
+        payload,
+        &ansi_to_html::Opts::default()
+            .four_bit_var_prefix(Some("ansi-".to_string())),
+    )
+    .map_or_else(
         |_| {
             // Invalid ANSI code: only escape HTML in case the conversion to ANSI fails. To maintain
             // consistency we use the same logic as ansi-to-html -- do not escape `/`. (There are
@@ -1778,9 +1783,10 @@ pub mod test {
             ),
             // ANSI color codes
             (
-                // Basic 16-color example
-                "\x1b[31mHello, world!\x1b[0m",
-                "<span style='color:var(--red,#a00)'>Hello, world!</span>",
+                // Basic 16-color example -- also tests a bright color (96). (ansi-to-html 0.2.1
+                // claims not to support bright colors, but it actually does.)
+                "\x1b[31mHello, world!\x1b[0m \x1b[96mAnother message\x1b[0m",
+                "<span style='color:var(--ansi-red,#a00)'>Hello, world!</span> <span style='color:var(--ansi-bright-cyan,#5ff)'>Another message</span>",
             ),
             (
                 // Truecolor, bold, italic, underline, and also with escapes. The second code
