@@ -123,14 +123,14 @@ impl JobEventEx for JobEvent {
 
 fn encode_payload(payload: &str) -> Cow<'_, str> {
     /*
-     * Apply ANSI formatting to the payload after escaping it (we want to transmit the
-     * corresponding HTML tags over.
+     * Apply ANSI formatting to the payload after escaping it (we want to
+     * transmit the corresponding HTML tags over the wire).
      *
-     * One of the cases this does not handle is multiline color output split across
-     * several payloads. Doing so is quite tricky, because buildomat works with a single
-     * bash script and doesn't know when commands are completed. Other systems like
-     * GitHub Actions (as checked on 2024-09-03) don't handle multiline color either,
-     * so it's fine to punt on that.
+     * One of the cases this does not handle is multi-line color output split
+     * across several payloads. Doing so is quite tricky, because buildomat
+     * works with a single bash script and doesn't know when commands are
+     * completed. Other systems like GitHub Actions (as checked on 2024-09-03)
+     * don't handle multiline color either, so it's fine to punt on that.
      */
     ansi_to_html::convert_with_opts(
         payload,
@@ -139,10 +139,11 @@ fn encode_payload(payload: &str) -> Cow<'_, str> {
     )
     .map_or_else(
         |_| {
-            // Invalid ANSI code: only escape HTML in case the conversion to ANSI fails. To maintain
-            // consistency we use the same logic as ansi-to-html -- do not escape `/`. (There are
-            // other differences, such as ansi-to-html using decimal escapes while html_escape uses
-            // hex, but those are immaterial.)
+            // Invalid ANSI code: only escape HTML in case the conversion to
+            // ANSI fails. To maintain consistency we use the same logic as
+            // ansi-to-html -- do not escape `/`. (There are other differences,
+            // such as ansi-to-html using decimal escapes while html_escape
+            // uses hex, but those are immaterial.)
             html_escape::encode_quoted_attribute(payload)
         },
         Cow::Owned,
@@ -600,7 +601,12 @@ pub(crate) async fn run(
                      */
                     let mut line =
                         if console { "|C| " } else { "| " }.to_string();
-                    let mut chars = ev.payload.chars();
+                    // We support ANSI escapes in the log renderer, which means
+                    // that tools will generate ANSI sequences. But that
+                    // doesn't work in the GitHub renderer, so we need to
+                    // strip them out entirely.
+                    let payload = strip_ansi_escapes::strip_str(&ev.payload);
+                    let mut chars = payload.chars();
                     for _ in 0..MAX_LINE_LENGTH {
                         if let Some(c) = chars.next() {
                             line.push(c);
@@ -1783,28 +1789,31 @@ pub mod test {
             ),
             // ANSI color codes
             (
-                // Basic 16-color example -- also tests a bright color (96). (ansi-to-html 0.2.1
-                // claims not to support bright colors, but it actually does.)
+                // Basic 16-color example -- also tests a bright color (96).
+                // (ansi-to-html 0.2.1 claims not to support bright colors, but
+                // it actually does.)
                 "\x1b[31mHello, world!\x1b[0m \x1b[96mAnother message\x1b[0m",
                 "<span style='color:var(--ansi-red,#a00)'>Hello, world!</span> <span style='color:var(--ansi-bright-cyan,#5ff)'>Another message</span>",
             ),
             (
-                // Truecolor, bold, italic, underline, and also with escapes. The second code
-                // ("another") does not have a reset, but we want to ensure that we generate closing
-                // HTML tags anyway.
+                // Truecolor, bold, italic, underline, and also with escapes.
+                // The second code ("another") does not have a reset, but we
+                // want to ensure that we generate closing HTML tags anyway.
                 "\x1b[38;2;255;0;0;1;3;4mTest message\x1b[0m and &/' \x1b[38;2;0;255;0;1;3;4manother",
                 "<span style='color:#ff0000'><b><i><u>Test message</u></i></b></span> and &amp;/&#39; <span style='color:#00ff00'><b><i><u>another</u></i></b></span>",
             ),
             (
-                // Invalid ANSI code "xx" -- should be HTML-escaped but the invalid ANSI code should
-                // remain as-is. (The second ANSI code is valid, and ansi-to-html should handle it.)
+                // Invalid ANSI code "xx" -- should be HTML-escaped but the
+                // invalid ANSI code should remain as-is. (The second ANSI code
+                // is valid, and ansi-to-html should handle it.)
                 "\x1b[xx;2;255;0;0;1;3;4mTest message\x1b[0m and &/' \x1b[38;2;0;255;0;1;3;4manother",
                 "\u{1b}[xx;2;255;0;0;1;3;4mTest message and &amp;/&#39; <span style='color:#00ff00'><b><i><u>another</u></i></b></span>",
             ),
             (
-                // Invalid ANSI code "9000" -- should be HTML-escaped but the invalid ANSI code
-                // should remain as-is. (The second ANSI code is valid, but ansi-to-html's current
-                // behavior is to error out in this case. This can probably be improved.)
+                // Invalid ANSI code "9000" -- should be HTML-escaped but the
+                // invalid ANSI code should remain as-is. (The second ANSI code
+                // is valid, but ansi-to-html's current behavior is to error
+                // out in this case. This can probably be improved.)
                 "\x1b[9000;2;255;0;0;1;3;4mTest message\x1b[0m and &/' \x1b[38;2;0;255;0;1;3;4manother",
                 "\u{1b}[9000;2;255;0;0;1;3;4mTest message\u{1b}[0m and &amp;/&#x27; \u{1b}[38;2;0;255;0;1;3;4manother",
             )
