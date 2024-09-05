@@ -1486,7 +1486,8 @@ pub(crate) async fn details(
         /*
          * Try to fetch the log output of the job itself.
          */
-        let bm = app.buildomat(&app.db.load_repository(cs.repo)?);
+        let repo = app.db.load_repository(cs.repo)?;
+        let bm = app.buildomat(&repo);
         let job = bm.job_get().job(jid).send().await?;
         let outputs = bm.job_outputs_get().job(jid).send().await?.into_inner();
 
@@ -1495,13 +1496,49 @@ pub(crate) async fn details(
         if !job.tags.is_empty() {
             out += "<h3>Tags:</h3>\n";
             out += "<ul>\n";
+
             let mut keys = job.tags.keys().collect::<Vec<_>>();
             keys.sort_unstable();
+
             for &n in keys.iter() {
+                let v = job.tags.get(n).unwrap();
+                let url = match n.as_str() {
+                    "gong.head.sha" | "gong.plan.sha" => Some(format!(
+                        "https://github.com/{}/{}/commit/{}",
+                        html_escape::encode_quoted_attribute(&repo.owner),
+                        html_escape::encode_quoted_attribute(&repo.name),
+                        html_escape::encode_quoted_attribute(v),
+                    )),
+                    "gong.repo.name" => Some(format!(
+                        "https://github.com/{}/{}",
+                        html_escape::encode_quoted_attribute(&repo.owner),
+                        html_escape::encode_quoted_attribute(&repo.name),
+                    )),
+                    "gong.repo.owner" => Some(format!(
+                        "https://github.com/{}",
+                        html_escape::encode_quoted_attribute(&repo.owner),
+                    )),
+                    "gong.run.github_id" => Some(format!(
+                        "https://github.com/{}/{}/runs/{}",
+                        html_escape::encode_quoted_attribute(&repo.owner),
+                        html_escape::encode_quoted_attribute(&repo.name),
+                        html_escape::encode_quoted_attribute(v),
+                    )),
+                    _ => None,
+                };
+
+                let value = if let Some(url) = url {
+                    format!(
+                        "<a href=\"{url}\">{}</a>",
+                        html_escape::encode_safe(v),
+                    )
+                } else {
+                    html_escape::encode_safe(v).to_string()
+                };
+
                 out += &format!(
-                    "<li><b>{}:</b> {}\n",
+                    "<li><b>{}:</b> {value}\n",
                     html_escape::encode_safe(n),
-                    html_escape::encode_safe(job.tags.get(n).unwrap()),
                 );
             }
             out += "</ul>\n";
