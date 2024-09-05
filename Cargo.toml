@@ -25,6 +25,7 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
+ansi-to-html = "0.2"
 anyhow = "1"
 aws-config = "1"
 aws-credential-types = "1"
@@ -73,6 +74,7 @@ slog = { version = "2.7", features = [ "release_max_level_debug" ] }
 slog-bunyan = "2.4"
 slog-term = "2.7"
 smf = { git = "https://github.com/illumos/smf-rs.git" }
+strip-ansi-escapes = "0.2"
 strum = { version = "0.25", features = [ "derive" ] }
 tempfile = "3.3"
 thiserror = "1"

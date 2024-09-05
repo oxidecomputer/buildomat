@@ -2,6 +2,32 @@
  * Copyright 2024 Oxide Computer Company
  */
 
+/*
+ * The "ansi-to-html" crate uses CSS variables when emitting text that uses the
+ * classic ANSI colour palette.  Adjust the default colours to be a little
+ * darker for more contrast against "s_stdout" and "s_stderr" backgrounds,
+ * which are both quite light.
+ */
+:root {
+    --ansi-black:           #000000;
+    --ansi-red:             #b0000f;
+    --ansi-green:           #007000;
+    --ansi-yellow:          #808000;
+    --ansi-blue:            #1d1dc9;
+    --ansi-magenta:         #7027b9;
+    --ansi-cyan:            #0a8080;
+    --ansi-white:           #ffffff;
+
+    --ansi-bright-black:    #000000;
+    --ansi-bright-red:      #b20f00;
+    --ansi-bright-green:    #557000;
+    --ansi-bright-yellow:   #b44405;
+    --ansi-bright-blue:     #5f55df;
+    --ansi-bright-magenta:  #bf2c90;
+    --ansi-bright-cyan:     #30a0a0;
+    --ansi-bright-white:    #ffffff;
+}
+
 table.table_output {
     border: none;
 }
@@ -19,7 +45,7 @@ tr.s_stdout {
 }
 
 tr.s_stderr {
-    background-color: #ffd9da;
+    background-color: #f3f3f3;
 }
 
 tr.s_task {
