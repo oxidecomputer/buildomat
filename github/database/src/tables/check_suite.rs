@@ -95,8 +95,10 @@ impl JobFile {
         /*
          * Parse the front matter as TOML:
          */
-        let toml = toml::from_str::<FrontMatter>(&frontmatter)
-            .map_err(|e| anyhow!("TOML front matter in {path:?}: {e}"))?;
+        let toml =
+            toml::from_str::<FrontMatter>(&frontmatter).map_err(|e| {
+                anyhow!("TOML front matter in {path:?}: {}", e.message())
+            })?;
 
         if !toml.enable {
             /*
