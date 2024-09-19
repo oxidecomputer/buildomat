@@ -833,6 +833,7 @@ dependencies = [
  "buildomat-common",
  "buildomat-database",
  "buildomat-github-hooktypes",
+ "buildomat-jobsh",
  "chrono",
  "rand",
  "rusty_ulid",
@@ -902,6 +903,7 @@ dependencies = [
  "buildomat-github-database",
  "buildomat-github-hooktypes",
  "buildomat-github-testdata",
+ "buildomat-jobsh",
  "buildomat-sse",
  "chrono",
  "dropshot",
@@ -936,6 +938,41 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
+]
+
+[[package]]
+name = "buildomat-jobsh"
+version = "0.0.0"
+dependencies = [
+ "ansi-to-html",
+ "anyhow",
+ "base64 0.22.1",
+ "buildomat-bunyan",
+ "buildomat-client",
+ "buildomat-common",
+ "buildomat-download",
+ "buildomat-sse",
+ "chrono",
+ "dropshot",
+ "futures",
+ "hmac-sha256",
+ "html-escape",
+ "hyper",
+ "pem 2.0.1",
+ "reqwest",
+ "rust-toolchain-file",
+ "rusty_ulid",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "strip-ansi-escapes",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-util 0.6.10",
+ "toml",
+ "usdt",
 ]
 
 [[package]]

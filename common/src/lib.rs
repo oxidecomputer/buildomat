@@ -13,7 +13,7 @@ use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 use regex::Regex;
 use rusty_ulid::Ulid;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use slog::{o, Drain, Logger};
 
 pub fn read_toml<P: AsRef<Path>, T>(n: P) -> Result<T>
@@ -206,4 +206,11 @@ pub fn looks_like_a_ulid(s: &str) -> bool {
 
 pub fn true_if_missing() -> bool {
     true
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum StringOrBool {
+    String(String),
+    Bool(bool),
 }

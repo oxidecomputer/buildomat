@@ -17,6 +17,7 @@ members = [
 	"github/hooktypes",
 	"github/server",
 	"github/testdata",
+	"jobsh",
 	"server",
 	"sse",
 	"types",
