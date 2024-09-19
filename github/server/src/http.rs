@@ -7,7 +7,7 @@ use buildomat_client::prelude::*;
 use buildomat_common::*;
 use buildomat_download::RequestContextEx;
 use buildomat_github_database::types::*;
-use buildomat_sse::{HeaderMapEx, ServerSentEvents};
+use buildomat_sse::HeaderMapEx;
 use chrono::prelude::*;
 use dropshot::{
     endpoint, ConfigDropshot, HttpError, HttpResponseOk, RequestContext,
@@ -309,7 +309,7 @@ async fn details(
          * The <style> tag needs to appear inside the <head>:
          */
         out += "<style>\n";
-        out += &app.templates.load("variety/basic/style.css")?;
+        out += &app.templates.load("variety/basic/www/style.css")?;
         out += "</style>\n";
     }
     out += "</head>\n";
@@ -381,41 +381,6 @@ async fn details_live(
     let path = path.into_inner();
     let query = query.into_inner();
 
-    /*
-     * The "Last-Event-ID" header will be sent by a browser when reconnecting,
-     * with the "id" field of the last event it saw in the previous stream.  The
-     * event stream for this endpoint is a mixture of job events, which have a
-     * well-defined sequence number, and status change events, which do not.
-     *
-     * We include in each ID value the sequence number of the most recently sent
-     * job event, so that we can always seek to the right point in the events
-     * for the job.  This may lead to more than one event with the same sequence
-     * number, but that doesn't appear to be a problem in practice.
-     *
-     * Note that this value must take precedence over the query parameter, as a
-     * resumed stream from the browser will, each time it reconnects, include
-     * the original query string we gave to the EventSource.  It will only
-     * include the header on subsequent retries once it has seen at least one
-     * event.
-     */
-    let mut minseq = None;
-    if let Some(lei) = rc.request.headers().last_event_id() {
-        if let Some(num) = lei.strip_prefix("seq-") {
-            if let Ok(lei_seq) = num.parse::<u32>() {
-                if let Some(lei_seq) = lei_seq.checked_add(1) {
-                    /*
-                     * Resume the event stream from this earlier point.
-                     */
-                    minseq = Some(lei_seq);
-                }
-            }
-        }
-    }
-
-    if minseq.is_none() {
-        minseq = query.minseq;
-    }
-
     let load = match path.load(&rc) {
         Ok(Some(load)) => load,
         Ok(None) => return html_404(false),
@@ -425,28 +390,26 @@ async fn details_live(
         }
     };
 
-    let mut sse = ServerSentEvents::default();
-    let response = match sse.to_response() {
-        Ok(response) => response,
-        Err(e) => {
-            error!(rc.log, "details live: sse: {e}");
-            return html_500(&rc.request_id, false);
-        }
-    };
-
-    let ok = match load.cr.variety {
+    let res = match load.cr.variety {
         CheckRunVariety::Basic => {
-            variety::basic::live(app, &load.cs, &load.cr, minseq, sse).await
+            variety::basic::live(
+                app,
+                &load.cs,
+                &load.cr,
+                rc.request.headers().last_event_id(),
+                query.minseq,
+            )
+            .await
         }
         /*
          * No other variety exposes live details:
          */
-        _ => Ok(false),
+        _ => Ok(None),
     };
 
-    match ok {
-        Ok(true) => Ok(response),
-        Ok(false) => html_404(false),
+    match res {
+        Ok(Some(res)) => Ok(res),
+        Ok(None) => html_404(false),
         Err(e) => {
             error!(rc.log, "details live: {e}");
             html_500(&rc.request_id, false)

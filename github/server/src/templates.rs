@@ -18,13 +18,13 @@ impl Templates {
     pub fn new(log: Logger) -> Result<Self> {
         /*
          * We deploy this program in "/opt/buildomat/lib" and the templates, if
-         * present, are alongside in "/opt/buildomat/share/www".
+         * present, are alongside in "/opt/buildomat/share".
          */
         let dir = {
             let dir = std::env::current_exe()?;
             if let Some(lib) = dir.parent() {
                 if lib.file_name() == Some(std::ffi::OsStr::new("lib")) {
-                    Some(lib.parent().unwrap().join("share").join("www"))
+                    Some(lib.parent().unwrap().join("share"))
                 } else {
                     None
                 }
@@ -51,11 +51,8 @@ impl Templates {
         }
 
         match name {
-            "variety/basic/style.css" => {
-                Ok(include_str!("../www/variety/basic/style.css").into())
-            }
-            "variety/basic/live.js" => {
-                Ok(include_str!("../www/variety/basic/live.js").into())
+            "variety/basic/www/style.css" => {
+                Ok(include_str!("../../../variety/basic/www/style.css").into())
             }
             _ => Err(HttpError::for_internal_error(format!(
                 "could not locate template {name:?}"

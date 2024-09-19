@@ -16,7 +16,7 @@ var LAST_NEW_RECORD = null;
 function
 basic_onload()
 {
-	EVT = new EventSource("./%CHECKRUN%/live?minseq=%MINSEQ%");
+	EVT = new EventSource("%EVENTSOURCE%");
 	EVT.addEventListener("check", basic_check);
 	EVT.addEventListener("row", basic_row);
 	EVT.addEventListener("complete", basic_complete);

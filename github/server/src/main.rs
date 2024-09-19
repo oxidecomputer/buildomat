@@ -13,6 +13,7 @@ use buildomat_github_client::types::{
 };
 use buildomat_github_database::types::*;
 use buildomat_github_hooktypes as hooktypes;
+use buildomat_jobsh::jobfile::JobFileSet;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use slog::{debug, error, info, o, trace, warn, Logger};
@@ -215,148 +216,31 @@ impl App {
             }
         };
 
-        let mut jobfiles = Vec::new();
+        let mut jobfileset = JobFileSet::new(32);
 
         for ent in entries {
-            if ent.name.ends_with(".sh") {
-                /*
-                 * Currently we know how to parse a very specific shell script
-                 * with TOML front matter in a specially formatted comment
-                 * within the file.
-                 */
-                let f = self
-                    .load_file(gh, repo, &cs.head_sha, &ent.path)
-                    .await
-                    .with_context(|| {
-                        anyhow!("loading {:?} from repository", &ent.path)
-                    })?
-                    .ok_or_else(|| {
-                        anyhow!("{:?} missing from repository?!", &ent.path)
-                    })?;
+            let f = self
+                .load_file(gh, repo, &cs.head_sha, &ent.path)
+                .await
+                .with_context(|| {
+                    anyhow!("loading {:?} from repository", &ent.path)
+                })?
+                .ok_or_else(|| {
+                    anyhow!("{:?} missing from repository?!", &ent.path)
+                })?;
 
-                let Some(jf) = JobFile::parse_content_at_path(&f, &ent.path)?
-                else {
-                    /*
-                     * Skip job files that have been marked as disabled.
-                     */
-                    continue;
-                };
-
-                if jobfiles.len() > 32 {
-                    bail!("too many job files; you can have at most 32");
-                }
-
-                jobfiles.push(jf);
-            } else {
-                bail!("unexpected item in bagging area: {}", ent.path);
-            }
-        }
-
-        /*
-         * Check that the name of each job is unique, and that the job variety
-         * is one that is allowed for this type of file.
-         */
-        let mut names = HashSet::new();
-        for job in jobfiles.iter() {
-            if !names.insert(job.name.to_string()) {
-                bail!("job name {:?} is used in more than one file", job.name);
-            }
-
-            match job.variety {
-                CheckRunVariety::Control => {
-                    bail!("the control variety cannot be specified here");
-                }
-                CheckRunVariety::AlwaysPass
-                | CheckRunVariety::FailFirst
-                | CheckRunVariety::Basic => {}
-            }
-        }
-
-        /*
-         * We need to check each job for dependencies.  If a job has
-         * dependencies, each entry must be well-formed: it must refer to
-         * another job in the set by name, and it must not create a dependency
-         * cycle.
-         */
-        for job in jobfiles.iter() {
-            match job.variety {
-                CheckRunVariety::Basic => {}
-                CheckRunVariety::AlwaysPass | CheckRunVariety::FailFirst => {
-                    if !job.dependencies.is_empty() {
-                        bail!(
-                            "variety {} does not support dependencies",
-                            job.variety
-                        );
-                    }
-                }
-                CheckRunVariety::Control => panic!("lost control"),
-            }
-
-            fn visit(
-                topjob: &JobFile,
-                jobfiles: &Vec<JobFile>,
-                thisjob: &JobFile,
-                seen: &mut HashSet<String>,
-            ) -> Result<()> {
-                if !seen.insert(thisjob.name.to_string()) {
-                    if thisjob.name == topjob.name {
-                        /*
-                         * If we find our way back to the original job file that
-                         * we were looking at, there is definitely a cycle.
-                         */
-                        bail!(
-                            "job file {:?} creates a dependency cycle ({:?})",
-                            topjob.path,
-                            seen,
-                        );
-                    } else {
-                        /*
-                         * Otherwise, there might be a cycle or there might
-                         * just be a job that appears more than once in the
-                         * dependency graph; e.g.,
-                         *
-                         *      first <---- second-a
-                         *       ^             ^
-                         *       |             |
-                         *       `--------- second-b
-                         *
-                         * Here, "second-b" depends on "second-a" and also on
-                         * "first".  We will visit the "first" node twice as we
-                         * flood outward from "second-b", but there is no cycle.
-                         * To avoid accidentally looping forever, we only look
-                         * at each job once; if there is a real cycle it will be
-                         * detected when we start the walk from a job that
-                         * depends eventually on itself.
-                         */
-                        return Ok(());
-                    }
-                }
-
-                for dep in thisjob.dependencies.values() {
-                    if let Some(depjob) =
-                        jobfiles.iter().find(|j| j.name == dep.job)
-                    {
-                        visit(topjob, jobfiles, depjob, seen)?;
-                    } else {
-                        bail!(
-                            "job file {:?} depends on job {:?} that is not \
-                            present in the plan",
-                            topjob.path,
-                            dep.job,
-                        );
-                    }
-                }
-
-                Ok(())
-            }
-
-            let mut seen = HashSet::new();
-            visit(job, &jobfiles, job, &mut seen)?;
+            jobfileset.load(&f, &ent.path)?;
         }
 
         Ok(LoadedFromSha {
             sha: cs.head_sha.to_string(),
-            loaded: Plan { jobfiles },
+            loaded: Plan {
+                jobfiles: jobfileset
+                    .complete()?
+                    .into_iter()
+                    .map(JobFile::from)
+                    .collect(),
+            },
         })
     }
 

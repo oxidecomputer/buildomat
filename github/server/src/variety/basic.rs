@@ -4,17 +4,16 @@
 
 use crate::{App, FlushOut, FlushState};
 use anyhow::{bail, Result};
-use buildomat_client::types::{DependSubmit, JobEvent, JobOutput};
-use buildomat_client::{prelude::*, EventOrState};
+use buildomat_client::types::{DependSubmit, JobOutput};
 use buildomat_common::*;
 use buildomat_github_database::{types::*, Database};
-use buildomat_sse::ServerSentEvents;
+use buildomat_jobsh::variety::basic::{output_sse, output_table, BasicConfig};
 use chrono::SecondsFormat;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
+use hyper::{Body, Response};
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use slog::{debug, error, info, o, trace, warn, Logger};
-use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
@@ -28,184 +27,6 @@ const MAX_TAIL_LINES: usize = 20;
 const MAX_LINE_LENGTH: usize = 90;
 
 const MAX_RENDERED_LOG: u64 = 100 * 1024 * 1024;
-
-/*
- * Classes for these streams are defined in the "www/variety/basic/style.css",
- * which we send along with the generated HTML output.
- */
-const CSS_STREAM_CLASSES: &[&str] =
-    &["stdout", "stderr", "task", "worker", "control", "console"];
-
-trait JobEventEx {
-    /**
-     * Choose a colour (CSS class name) for the stream to which this event
-     * belongs.
-     */
-    fn css_class(&self) -> String;
-
-    /**
-     * Turn a job event into a somewhat abstract object with pre-formatted HTML
-     * values that we can either use for server-side or client-side (live)
-     * rendering.
-     */
-    fn event_row(&self) -> EventRow;
-}
-
-impl JobEventEx for JobEvent {
-    fn css_class(&self) -> String {
-        let s = self.stream.as_str();
-
-        if CSS_STREAM_CLASSES.contains(&s) {
-            format!("s_{s}")
-        } else if s.starts_with("bg.") {
-            "s_bgtask".into()
-        } else {
-            "s_default".into()
-        }
-    }
-
-    fn event_row(&self) -> EventRow {
-        let payload = format!(
-            "{}{}",
-            /*
-             * If this is a background task, prefix the output with the
-             * user-provided name of that task:
-             */
-            self.stream
-                .strip_prefix("bg.")
-                .and_then(|s| s.split_once('.'))
-                .filter(|(_, s)| *s == "stdout" || *s == "stderr")
-                .map(|(n, _)| format!("[{}] ", html_escape::encode_safe(n)))
-                .as_deref()
-                .unwrap_or(""),
-            /*
-             * Do the HTML escaping of the payload one canonical way, in the
-             * server:
-             */
-            encode_payload(&self.payload),
-        );
-
-        EventRow {
-            task: self.task,
-            css_class: self.css_class(),
-            fields: vec![
-                EventField {
-                    css_class: "num",
-                    local_time: false,
-                    value: self.seq.to_string(),
-                    anchor: Some(format!("S{}", self.seq)),
-                },
-                EventField {
-                    css_class: "field",
-                    local_time: false,
-                    value: self
-                        .time
-                        .to_rfc3339_opts(SecondsFormat::Millis, true),
-                    anchor: None,
-                },
-                EventField {
-                    css_class: "field",
-                    local_time: true,
-                    value: self
-                        .time_remote
-                        .map(|t| t.to_rfc3339_opts(SecondsFormat::Millis, true))
-                        .unwrap_or_else(|| "&nbsp;".into()),
-                    anchor: None,
-                },
-                EventField {
-                    css_class: "payload",
-                    local_time: false,
-                    value: payload,
-                    anchor: None,
-                },
-            ],
-        }
-    }
-}
-
-fn encode_payload(payload: &str) -> Cow<'_, str> {
-    /*
-     * Apply ANSI formatting to the payload after escaping it (we want to
-     * transmit the corresponding HTML tags over the wire).
-     *
-     * One of the cases this does not handle is multi-line color output split
-     * across several payloads.  Doing so is quite tricky, because buildomat
-     * works with a single bash script and doesn't know when commands are
-     * completed.  Other systems like GitHub Actions (as checked on 2024-09-03)
-     * don't handle multiline color either, so it's fine to punt on that.
-     */
-    ansi_to_html::convert_with_opts(
-        payload,
-        &ansi_to_html::Opts::default()
-            .four_bit_var_prefix(Some("ansi-".to_string())),
-    )
-    .map_or_else(
-        |_| {
-            /*
-             * Invalid ANSI code: only escape HTML in case the conversion to
-             * ANSI fails.  To maintain consistency we use the same logic as
-             * ansi-to-html: do not escape "/".  (There are other differences,
-             * such as ansi-to-html using decimal escapes while html_escape uses
-             * hex, but those are immaterial.)
-             */
-            html_escape::encode_quoted_attribute(payload)
-        },
-        Cow::Owned,
-    )
-}
-
-#[derive(Debug, Serialize)]
-struct EventRow {
-    task: Option<u32>,
-    css_class: String,
-    fields: Vec<EventField>,
-}
-
-#[derive(Debug, Serialize)]
-struct EventField {
-    css_class: &'static str,
-    local_time: bool,
-    value: String,
-
-    /**
-     * This field is a permalink anchor, with this anchor ID:
-     */
-    anchor: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(untagged)]
-enum StringOrBool {
-    String(String),
-    Bool(bool),
-}
-
-/*
- * We can use "deny_unknown_fields" here because the global frontmatter fields
- * were already removed in load_repo_job_files().
- */
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-struct BasicConfig {
-    #[serde(default)]
-    output_rules: Vec<String>,
-    rust_toolchain: Option<StringOrBool>,
-    target: Option<String>,
-    #[serde(default)]
-    access_repos: Vec<String>,
-    #[serde(default)]
-    publish: Vec<BasicConfigPublish>,
-    #[serde(default)]
-    skip_clone: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-struct BasicConfigPublish {
-    from_output: String,
-    series: String,
-    name: String,
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -844,216 +665,35 @@ pub(crate) async fn run(
          * Create a series of tasks to configure the build environment
          * before handing control to the user program.
          */
-        let mut tasks = Vec::new();
+        let mut tb = buildomat_jobsh::variety::basic::TasksBuilder::default();
+        tb.use_github_token(true);
+        tb.script(&script);
 
         /*
-         * Set up a non-root user with which to run the build job, with a work
-         * area at "/work".  The user will have the right to escalate to root
-         * privileges via pfexec(1).
+         * We pass several GitHub-specific environment variables to tasks in the
+         * job:
          */
-        tasks.push(buildomat_client::types::TaskSubmit {
-            name: "setup".into(),
-            env: Default::default(),
-            env_clear: false,
-            gid: None,
-            uid: None,
-            workdir: None,
-            script: include_str!("../../scripts/variety/basic/setup.sh").into(),
-        });
-
-        /*
-         * Create the base environment for tasks that will run as
-         * the non-root build user:
-         */
-        let mut buildenv = HashMap::new();
-        buildenv.insert("HOME".into(), "/home/build".into());
-        buildenv.insert("USER".into(), "build".into());
-        buildenv.insert("LOGNAME".into(), "build".into());
-        buildenv.insert(
-            "PATH".into(),
-            "/home/build/.cargo/bin:\
-            /usr/bin:/bin:/usr/sbin:/sbin:/opt/ooce/bin:/opt/ooce/sbin"
-                .into(),
-        );
-        buildenv.insert(
-            "GITHUB_REPOSITORY".to_string(),
-            format!("{}/{}", repo.owner, repo.name),
-        );
-        buildenv.insert("GITHUB_SHA".to_string(), cs.head_sha.to_string());
+        tb.env("GITHUB_REPOSITORY", &format!("{}/{}", repo.owner, repo.name));
+        tb.env("GITHUB_SHA", &cs.head_sha);
         if let Some(branch) = cs.head_branch.as_deref() {
-            buildenv.insert("GITHUB_BRANCH".to_string(), branch.to_string());
-            buildenv.insert(
-                "GITHUB_REF".to_string(),
-                format!("refs/heads/{}", branch),
-            );
+            tb.env("GITHUB_BRANCH", branch);
+            tb.env("GITHUB_REF", &format!("refs/heads/{}", branch));
         }
 
-        /*
-         * If a Rust toolchain is requested, install it using rustup.
-         */
-        let toolchain = match c.rust_toolchain.as_ref() {
-            Some(StringOrBool::String(s)) => Some(RustToolchain {
-                channel: s.to_string(),
-                profile: "default".into(),
-            }),
-            Some(StringOrBool::Bool(true)) => {
-                /*
-                 * We need to read and parse the "rust-toolchain.toml" file from
-                 * the repository for the commit under test:
-                 */
-                match load_rust_toolchain_from_repo(
-                    app,
-                    &gh,
-                    &repo,
-                    &cs.head_sha.to_string(),
-                )
-                .await
-                {
-                    Ok(rtc) => Some(rtc),
-                    Err(e) => {
-                        p.complete = true;
-                        p.error = Some(e.to_string());
-                        cr.set_private(p)?;
-                        cr.flushed = false;
-                        db.update_check_run(cr)?;
-                        return Ok(false);
-                    }
-                }
-            }
-            None | Some(StringOrBool::Bool(false)) => None,
-        };
+        let app0 = app.clone();
+        let repo0 = repo.clone();
+        let sha = cs.head_sha.to_string();
+        tb.with_file_loader(Box::new(move |name: &str| {
+            let app = app0.clone();
+            let name = name.to_string();
+            let gh = gh.clone();
+            let repo = repo0.clone();
+            let sha = sha.clone();
 
-        if let Some(toolchain) = toolchain {
-            let mut buildenv = buildenv.clone();
-            buildenv.insert("TC_CHANNEL".into(), toolchain.channel);
-            buildenv.insert("TC_PROFILE".into(), toolchain.profile);
-            buildenv.insert("RUSTUP_INIT_SKIP_PATH_CHECK".into(), "yes".into());
+            async move { app.load_file(&gh, &repo, &sha, &name).await }.boxed()
+        }));
 
-            tasks.push(buildomat_client::types::TaskSubmit {
-                name: "rust-toolchain".into(),
-                env: buildenv,
-                env_clear: false,
-                gid: Some(12345),
-                uid: Some(12345),
-                workdir: Some("/home/build".into()),
-                script: "\
-                    #!/bin/bash\n\
-                    set -o errexit\n\
-                    set -o pipefail\n\
-                    set -o xtrace\n\
-                    printf ' * toolchain channel = \"%s\"\n' \"$TC_CHANNEL\"\n\
-                    printf ' * toolchain profile = \"%s\"\n' \"$TC_PROFILE\"\n\
-                    curl --proto '=https' --tlsv1.2 -sSf \
-                        https://sh.rustup.rs | /bin/bash -s - \
-                        -y --no-modify-path \
-                        --default-toolchain \"$TC_CHANNEL\" \
-                        --profile \"$TC_PROFILE\"\n\
-                    rustc --version\n\
-                    "
-                .into(),
-            });
-        }
-
-        /*
-         * Write the temporary access token which gives brief read-only access
-         * to only this (potentially private) repository into the ~/.netrc file.
-         * When git tries to access GitHub via HTTPS it does so using curl,
-         * which knows to look in this file for credentials.  This way, the
-         * token need not appear in the build environment or any commands that
-         * are run.
-         *
-         * We also provide an entry for "api.github.com" in case the job needs
-         * to use curl to access the GitHub API.
-         */
-        tasks.push(buildomat_client::types::TaskSubmit {
-            name: "authentication".into(),
-            env: buildenv.clone(),
-            env_clear: false,
-            gid: Some(12345),
-            uid: Some(12345),
-            workdir: Some("/home/build".into()),
-            script: "\
-                #!/bin/bash\n\
-                \n\
-                set -o errexit\n\
-                set -o pipefail\n\
-                \n\
-                GITHUB_TOKEN=$(bmat store get GITHUB_TOKEN)\n\
-                \n\
-                cat >$HOME/.netrc <<EOF\n\
-                machine github.com\n\
-                login x-access-token\n\
-                password $GITHUB_TOKEN\n\
-                \n\
-                machine api.github.com\n\
-                login x-access-token\n\
-                password $GITHUB_TOKEN\n\
-                \n\
-                EOF\n\
-                "
-            .into(),
-        });
-
-        /*
-         * By default, we assume that the target provides toolchains and other
-         * development tools like git.  While this makes sense for most jobs, in
-         * some cases we intend to build artefacts in one job, then run those
-         * binaries in a separated, limited environment where it is not
-         * appropriate to try to clone the repository again.  If "skip_clone" is
-         * set, we will not clone the repository.
-         */
-        if !c.skip_clone {
-            tasks.push(buildomat_client::types::TaskSubmit {
-                name: "clone repository".into(),
-                env: buildenv.clone(),
-                env_clear: false,
-                gid: Some(12345),
-                uid: Some(12345),
-                workdir: Some("/home/build".into()),
-                script: "\
-                    #!/bin/bash\n\
-                    set -o errexit\n\
-                    set -o pipefail\n\
-                    set -o xtrace\n\
-                    mkdir -p \"/work/$GITHUB_REPOSITORY\"\n\
-                    git clone \"https://github.com/$GITHUB_REPOSITORY\" \
-                        \"/work/$GITHUB_REPOSITORY\"\n\
-                    cd \"/work/$GITHUB_REPOSITORY\"\n\
-                    git fetch origin \"$GITHUB_SHA\"\n\
-                    if [[ -n $GITHUB_BRANCH ]]; then\n\
-                        current=$(git branch --show-current)\n\
-                        if [[ $current != $GITHUB_BRANCH ]]; then\n\
-                            git branch -f \"$GITHUB_BRANCH\" \"$GITHUB_SHA\"\n\
-                            git checkout -f \"$GITHUB_BRANCH\"\n\
-                        fi\n\
-                    fi\n\
-                    git reset --hard \"$GITHUB_SHA\"\n\
-                    "
-                .into(),
-            });
-        }
-
-        buildenv.insert("CI".to_string(), "true".to_string());
-
-        let workdir = if !c.skip_clone {
-            format!("/work/{}/{}", repo.owner, repo.name)
-        } else {
-            /*
-             * If we skipped the clone, just use the top-level work area as the
-             * working directory for the job.
-             */
-            "/work".into()
-        };
-
-        tasks.push(buildomat_client::types::TaskSubmit {
-            name: "build".into(),
-            env: buildenv,
-            env_clear: false,
-            gid: Some(12345),
-            uid: Some(12345),
-            workdir: Some(workdir),
-            script,
-        });
+        let tasks = tb.build(&c).await?;
 
         /*
          * Attach tags that allow us to more easily map the buildomat job back
@@ -1419,9 +1059,9 @@ pub(crate) async fn live(
     app: &Arc<App>,
     cs: &CheckSuite,
     cr: &CheckRun,
-    minseq: Option<u32>,
-    sse: ServerSentEvents,
-) -> Result<bool> {
+    last_event_id: Option<String>,
+    query_minseq: Option<u32>,
+) -> Result<Option<Response<Body>>> {
     let p: BasicPrivate = cr.get_private()?;
     let id = if let Some(id) = &p.buildomat_id {
         id.to_string()
@@ -1429,40 +1069,18 @@ pub(crate) async fn live(
         /*
          * If there is no buildomat job for this run, return a not found error.
          */
-        return Ok(false);
+        return Ok(None);
     };
 
-    let bme = app.buildomat(&app.db.load_repository(cs.repo)?).extra();
-
-    tokio::task::spawn(async move {
-        let mut rx = bme.watch_job(&id, minseq.unwrap_or(0));
-        while let Some(eos) = rx.recv().await {
-            match eos {
-                Ok(EventOrState::State(_)) => (),
-                Ok(EventOrState::Event(ev)) => {
-                    if !sse
-                        .build_event()
-                        .id(&format!("seq-{}", ev.seq))
-                        .event("row")
-                        .data(&serde_json::to_string(&ev.event_row())?)
-                        .send()
-                        .await
-                    {
-                        return Ok(());
-                    }
-                }
-                Ok(EventOrState::Done) => {
-                    sse.build_event().event("end").data("-").send().await;
-                    return Ok(());
-                }
-                Err(_) => return Ok(()),
-            }
-        }
-
-        Ok::<(), anyhow::Error>(())
-    });
-
-    Ok(true)
+    Ok(Some(
+        output_sse(
+            &app.buildomat(&app.db.load_repository(cs.repo)?),
+            id,
+            last_event_id,
+            query_minseq,
+        )
+        .await?,
+    ))
 }
 
 pub(crate) async fn details(
@@ -1571,141 +1189,13 @@ pub(crate) async fn details(
         }
 
         out += "<h3>Output:</h3>\n";
-        out += "<table id=\"table_output\">\n";
-
-        let mut last = None;
-
-        out += "<tr>\n";
-        out += "<td class=\"num\"><span class=\"header\">SEQ</span></td>\n";
-        out += "<td><span class=\"header\">GLOBAL TIME</span></td>\n";
-        if local_time {
-            out += "<td><span class=\"header\">LOCAL TIME</span></td>\n";
-        }
-        out += "<td><span class=\"header\">DETAILS</span></td>\n";
-        out += "</tr>\n";
-
-        /*
-         * Job event streams have no definite limit in length.  Because we are
-         * assembling this page in memory, we don't want to load and render too
-         * many records.
-         */
-        let mut events = Vec::with_capacity(10_000);
-        let mut payload_size = 0;
-        let mut minseq = 0;
-        const PAYLOAD_SIZE_MAX: usize = 15 * 1024 * 1024;
-        let truncated = 'outer: loop {
-            let page = bm
-                .job_events_get()
-                .job(jid)
-                .minseq(minseq)
-                .send()
-                .await?
-                .into_inner();
-            if page.is_empty() {
-                /*
-                 * We reached the (current) end of the event stream.  Note that
-                 * if the job is still executing there may be more records
-                 * later.
-                 */
-                break false;
-            }
-
-            for ev in page {
-                minseq = ev.seq + 1;
-                payload_size += ev.payload.as_bytes().len();
-                events.push(ev);
-
-                if payload_size > PAYLOAD_SIZE_MAX {
-                    break 'outer true;
-                }
-            }
-        };
-
-        for ev in events {
-            /*
-             * The rendering logic here is shared with the live version, so we
-             * use the same pre-formatted object to build the table output:
-             */
-            let evr = ev.event_row();
-
-            /*
-             * If the task has changed, render a full-width blank row in the
-             * table:
-             */
-            if evr.task != last {
-                let cols = evr
-                    .fields
-                    .iter()
-                    .filter(|f| !f.local_time || local_time)
-                    .count();
-
-                out += &format!("<tr><td colspan=\"{cols}\">&nbsp;</td></tr>");
-            }
-            last = evr.task;
-
-            out += &format!("<tr class=\"{}\">\n", evr.css_class);
-
-            for f in evr.fields.iter() {
-                if f.local_time && !local_time {
-                    /*
-                     * Skip the local time column if the user has not requested
-                     * it.
-                     */
-                    continue;
-                }
-
-                out += &if let Some(id) = &f.anchor {
-                    format!(
-                        "<td class=\"{cls}\">\
-                            <a id=\"{id}\"></a>\
-                            <a class=\"{cls}link\" href=\"#{id}\">{value}</a>\
-                        </td>",
-                        cls = &f.css_class,
-                        value = &f.value,
-                    )
-                } else {
-                    format!(
-                        "<td><span class=\"{cls}\">{value}</span></td>",
-                        cls = &f.css_class,
-                        value = &f.value,
-                    )
-                };
-            }
-
-            out += "</tr>";
-        }
-        out += "\n</table>\n";
-
-        if truncated {
-            /*
-             * For now, at least report truncation.  In the future perhaps we
-             * will do something pedestrian, like a "Next page" link, or
-             * something fancy, like use Javascript to do infinite scroll.
-             */
-            out += &format!(
-                "<br><b>NOTE:</b> This job exceeds {PAYLOAD_SIZE_MAX} bytes \
-                of text output, and this page has been truncated!  The full \
-                log is still available through the buildomat API."
-            );
-        }
-
-        let complete = job.state == "completed" || job.state == "failed";
-        out += "<script>\n";
-        if complete {
-            /*
-             * Provide an empty function so that the "onload" property we put in
-             * <body> earlier does not cause an error.
-             */
-            out += "function basic_onload() {}\n";
-        } else {
-            out += &app
-                .templates
-                .load("variety/basic/live.js")?
-                .replace("%LOCAL_TIME%", &local_time.to_string())
-                .replace("%CHECKRUN%", &cr.id.to_string())
-                .replace("%MINSEQ%", &minseq.to_string());
-        }
-        out += "</script>\n";
+        out += &output_table(
+            &bm,
+            &job,
+            local_time,
+            format!("./{}/live", cr.id.to_string()),
+        )
+        .await?;
     }
 
     Ok(out)
@@ -1757,143 +1247,10 @@ pub(crate) async fn cancel(
     Ok(())
 }
 
-struct RustToolchain {
-    channel: String,
-    profile: String,
-}
-
-async fn load_rust_toolchain_from_repo(
-    app: &App,
-    gh: &buildomat_github_client::Client,
-    repo: &Repository,
-    sha: &str,
-) -> Result<RustToolchain> {
-    use rust_toolchain_file::{
-        toml::ToolchainSection, ParseStrategy, Parser, ToolchainFile, Variant,
-    };
-
-    let Some(f) = app.load_file(gh, repo, sha, "rust-toolchain.toml").await?
-    else {
-        bail!(
-            "Your project must have a \"rust-toolchain.toml\" file if you \
-            wish to use \"rust_toolchain = true\".",
-        );
-    };
-
-    match Parser::new(&f, ParseStrategy::Only(Variant::Toml)).parse() {
-        Ok(ToolchainFile::Toml(toml)) => match toml.toolchain() {
-            ToolchainSection::Path(_) => {
-                bail!(
-                    "Use of \"path\" in \"rust-toolchain.toml\" file is not \
-                    supported with \"rust_toolchain = true\".",
-                );
-            }
-            ToolchainSection::Spec(spec) => {
-                let channel = match spec.channel() {
-                    Some(c) => c.name().to_string(),
-                    None => {
-                        bail!(
-                            "You must specify \"channel\" in \
-                            \"rust-toolchain.toml\" file when using
-                            \"rust_toolchain = true\".",
-                        );
-                    }
-                };
-
-                let profile = match spec.profile() {
-                    Some(p) => p.name().to_string(),
-                    None => "default".to_string(),
-                };
-
-                Ok(RustToolchain { channel, profile })
-            }
-        },
-        Ok(ToolchainFile::Legacy(_)) => {
-            bail!(
-                "You must use a TOML formatted \"rust-toolchain.toml\" file \
-                with \"rust_toolchain = true\".",
-            );
-        }
-        Err(e) => bail!("invalid \"rust-toolchain.toml\" file: {e}"),
-    }
-}
-
 #[cfg(test)]
 pub mod test {
     use super::*;
     use buildomat_github_testdata::*;
-
-    #[test]
-    fn test_encode_payload() {
-        let data = &[
-            ("Hello, world!", "Hello, world!"),
-            /*
-             * HTML escapes:
-             */
-            (
-                "2 & 3 < 4 > 5 / 6 ' 7 \" 8",
-                "2 &amp; 3 &lt; 4 &gt; 5 / 6 &#39; 7 &quot; 8",
-            ),
-            /*
-             * ANSI color codes:
-             */
-            (
-                /*
-                 * Basic 16-color example; also tests a bright color (96).
-                 * (ansi-to-html 0.2.1 claims not to support bright colors, but
-                 * it actually does.)
-                 */
-                "\x1b[31mHello, world!\x1b[0m \x1b[96mAnother message\x1b[0m",
-                "<span style='color:var(--ansi-red,#a00)'>Hello, world!</span> \
-                <span style='color:var(--ansi-bright-cyan,#5ff)'>\
-                Another message</span>",
-            ),
-            (
-                /*
-                 * Truecolor, bold, italic, underline, and also with escapes.
-                 * The second code ("another") does not have a reset, but we
-                 * want to ensure that we generate closing HTML tags anyway.
-                 */
-                "\x1b[38;2;255;0;0;1;3;4mTest message\x1b[0m and &/' \
-                \x1b[38;2;0;255;0;1;3;4manother",
-                "<span style='color:#ff0000'><b><i><u>Test message</u></i></b>\
-                </span> and &amp;/&#39; <span style='color:#00ff00'><b><i>\
-                <u>another</u></i></b></span>",
-            ),
-            (
-                /*
-                 * Invalid ANSI code "xx"; should be HTML-escaped but the
-                 * invalid ANSI code should remain as-is.  (The second ANSI code
-                 * is valid, and ansi-to-html should handle it.)
-                 */
-                "\x1b[xx;2;255;0;0;1;3;4mTest message\x1b[0m and &/' \
-                \x1b[38;2;0;255;0;1;3;4manother",
-                "\u{1b}[xx;2;255;0;0;1;3;4mTest message and &amp;/&#39; <span \
-                style='color:#00ff00'><b><i><u>another</u></i></b></span>",
-            ),
-            (
-                /*
-                 * Invalid ANSI code "9000"; should be HTML-escaped but the
-                 * invalid ANSI code should remain as-is.  (The second ANSI code
-                 * is valid, but ansi-to-html's current behavior is to error out
-                 * in this case.  This can probably be improved.)
-                 */
-                "\x1b[9000;2;255;0;0;1;3;4mTest message\x1b[0m and &/' \
-                \x1b[38;2;0;255;0;1;3;4manother",
-                "\u{1b}[9000;2;255;0;0;1;3;4mTest message\u{1b}[0m and \
-                &amp;/&#x27; \u{1b}[38;2;0;255;0;1;3;4manother",
-            )
-        ];
-
-        for (input, expected) in data {
-            let output = encode_payload(input);
-            assert_eq!(
-                output, *expected,
-                "output != expected: input: {:?}",
-                input
-            );
-        }
-    }
 
     #[test]
     fn basic_parse_basic() -> Result<()> {

@@ -1,19 +1,18 @@
 [package]
-name = "buildomat-github-server"
+name = "buildomat-jobsh"
 version = "0.0.0"
 edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-buildomat-bunyan = { path = "../../bunyan" }
-buildomat-client = { path = "../../client" }
-buildomat-common = { path = "../../common" }
-buildomat-download = { path = "../../download" }
-buildomat-github-client = { path = "../client" }
-buildomat-github-database = { path = "../database" }
-buildomat-github-hooktypes = { path = "../hooktypes" }
-buildomat-jobsh = { path = "../../jobsh" }
-buildomat-sse = { path = "../../sse" }
+buildomat-bunyan = { path = "../bunyan" }
+buildomat-client = { path = "../client" }
+buildomat-common = { path = "../common" }
+buildomat-download = { path = "../download" }
+#buildomat-github-client = { path = "../client" }
+#buildomat-github-database = { path = "../database" }
+#buildomat-github-hooktypes = { path = "../hooktypes" }
+buildomat-sse = { path = "../sse" }
 
 ansi-to-html = { workspace = true }
 anyhow = { workspace = true }
@@ -39,6 +38,3 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 toml = { workspace = true }
 usdt = { workspace = true }
-
-[dev-dependencies]
-buildomat-github-testdata = { path = "../testdata" }
