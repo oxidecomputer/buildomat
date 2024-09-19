@@ -187,6 +187,14 @@ pub struct JobFileDepend {
     pub config: serde_json::Value,
 }
 
+impl From<buildomat_jobsh::jobfile::JobFileDepend> for JobFileDepend {
+    fn from(value: buildomat_jobsh::jobfile::JobFileDepend) -> Self {
+        let buildomat_jobsh::jobfile::JobFileDepend { job, config } = value;
+
+        Self { job, config }
+    }
+}
+
 pub struct CheckRunDependency(JobFileDepend);
 
 impl CheckRunDependency {

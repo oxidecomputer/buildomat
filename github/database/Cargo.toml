@@ -11,6 +11,7 @@ doctest = false
 buildomat-common = { path = "../../common" }
 buildomat-database = { path = "../../database" }
 buildomat-github-hooktypes = { path = "../hooktypes" }
+buildomat-jobsh = { path = "../../jobsh" }
 
 anyhow = { workspace = true }
 chrono = { workspace = true }
