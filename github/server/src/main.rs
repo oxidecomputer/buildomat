@@ -110,6 +110,7 @@ impl App {
 
         let permissions = Some(AppPermissions {
             contents: Some(Pages::Read),
+            actions: Some(Pages::Read),
             ..Default::default()
         });
 
