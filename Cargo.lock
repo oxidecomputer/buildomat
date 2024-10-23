@@ -761,6 +761,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "buildomat-factory-hubris"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "buildomat-client",
+ "buildomat-common",
+ "buildomat-database",
+ "buildomat-types",
+ "chrono",
+ "getopts",
+ "libc",
+ "rand",
+ "rusty_ulid",
+ "schemars",
+ "sea-query",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "slog",
+ "slog-term",
+ "smf",
+ "strum",
+ "tokio",
+ "toml",
+ "usdt",
+]
+
+[[package]]
 name = "buildomat-factory-lab"
 version = "0.0.0"
 dependencies = [
