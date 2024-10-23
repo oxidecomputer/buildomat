@@ -8,6 +8,7 @@ members = [
 	"database",
 	"download",
 	"factory/aws",
+	"factory/hubris",
 	"factory/lab",
 	"factory/propolis",
 	"github/client",
