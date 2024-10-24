@@ -39,9 +39,64 @@ mod upload;
 use control::protocol::{FactoryInfo, Payload};
 use exec::ExitDetails;
 
-const CONFIG_PATH: &str = "/opt/buildomat/etc/agent.json";
-const JOB_PATH: &str = "/opt/buildomat/etc/job.json";
-const AGENT: &str = "/opt/buildomat/lib/agent";
+enum Root {
+    Global,
+    PerUser(PathBuf),
+}
+
+impl Root {
+    fn etc(&self) -> PathBuf {
+        match self {
+            Root::Global => "/opt/buildomat/etc".into(),
+            Root::PerUser(top) => top.join("etc"),
+        }
+    }
+
+    fn lib(&self) -> PathBuf {
+        match self {
+            Root::Global => "/opt/buildomat/lib".into(),
+            Root::PerUser(top) => top.join("lib"),
+        }
+    }
+
+    fn usrbin(&self) -> PathBuf {
+        match self {
+            Root::Global => "/usr/bin".into(),
+            Root::PerUser(top) => top.join("bin"),
+        }
+    }
+
+    pub fn config_path(&self) -> PathBuf {
+        self.etc().join("agent.json")
+    }
+
+    pub fn job_path(&self) -> PathBuf {
+        self.etc().join("job.json")
+    }
+
+    pub fn agent(&self) -> PathBuf {
+        self.lib().join("agent")
+    }
+
+    pub fn control_program(&self) -> PathBuf {
+        self.usrbin().join(CONTROL_PROGRAM)
+    }
+
+    pub fn should_install_service(&self) -> bool {
+        match self {
+            Root::Global => true,
+            Root::PerUser(_) => false,
+        }
+    }
+
+    pub fn unprivileged(&self) -> bool {
+        match self {
+            Root::Global => false,
+            Root::PerUser(_) => true,
+        }
+    }
+}
+
 const INPUT_PATH: &str = "/input";
 const CONTROL_PROGRAM: &str = "bmat";
 const SHADOW: &str = "/etc/shadow";
@@ -64,6 +119,8 @@ struct ConfigFile {
     baseurl: String,
     bootstrap: String,
     token: String,
+    #[serde(default)]
+    unprivileged: bool,
 }
 
 impl ConfigFile {
@@ -81,7 +138,13 @@ impl ConfigFile {
         let (worker_tx, rx) = mpsc::channel(256);
         tokio::task::spawn(append_worker_worker(client.clone(), rx));
 
-        ClientWrap { client, job: None, tx: None, worker_tx }
+        ClientWrap {
+            client,
+            job: None,
+            tx: None,
+            worker_tx,
+            unprivileged: self.unprivileged,
+        }
     }
 }
 
@@ -272,6 +335,7 @@ pub(crate) struct ClientWrap {
     job: Option<Arc<WorkerPingJob>>,
     tx: Option<mpsc::Sender<AppendJobEntry>>,
     worker_tx: mpsc::Sender<AppendWorkerEntry>,
+    unprivileged: bool,
 }
 
 impl ClientWrap {
@@ -636,12 +700,14 @@ impl ClientWrap {
         cmd.env("LANG", "en_US.UTF-8");
         cmd.env("LC_ALL", "en_US.UTF-8");
 
-        /*
-         * Run the diagnostic script as root:
-         */
         cmd.current_dir("/");
-        cmd.uid(0);
-        cmd.gid(0);
+        if !self.unprivileged {
+            /*
+             * Run the diagnostic script as root:
+             */
+            cmd.uid(0);
+            cmd.gid(0);
+        }
 
         match exec::run_diagnostic(cmd, name) {
             Ok(c) => Some(c),
@@ -1008,8 +1074,17 @@ enum Stage {
 async fn cmd_install(mut l: Level<()>) -> Result<()> {
     l.usage_args(Some("BASEURL BOOTSTRAP_TOKEN"));
     l.optopt("N", "", "set nodename of machine", "NODENAME");
+    l.optopt("U", "", "run unprivileged using this root directory", "DIR");
 
     let a = args!(l);
+
+    let root = if let Some(dir) = a.opts().opt_str("U") {
+        Root::PerUser(dir.into())
+    } else {
+        Root::Global
+    };
+    let config_path = root.config_path();
+    let agent_path = root.agent();
 
     if a.args().len() < 2 {
         bad_args!(l, "specify base URL and bootstrap token value");
@@ -1031,31 +1106,39 @@ async fn cmd_install(mut l: Level<()>) -> Result<()> {
     /*
      * Write /opt/buildomat/etc/agent.json with this configuration.
      */
-    make_dirs_for(CONFIG_PATH)?;
-    rmfile(CONFIG_PATH)?;
-    let cf = ConfigFile { baseurl, bootstrap, token: genkey(64) };
-    store(CONFIG_PATH, &cf)?;
+    if root.should_install_service() || !config_path.exists() {
+        make_dirs_for(&config_path)?;
+        rmfile(&config_path)?;
+        let cf = ConfigFile {
+            baseurl,
+            bootstrap,
+            token: genkey(64),
+            unprivileged: root.unprivileged(),
+        };
+        store(&config_path, &cf)?;
+    }
 
     /*
      * Copy the agent binary into a permanent home.
      */
     let exe = env::current_exe()?;
-    make_dirs_for(AGENT)?;
-    rmfile(AGENT)?;
-    std::fs::copy(&exe, AGENT)?;
-    make_executable(AGENT)?;
+    make_dirs_for(&agent_path)?;
+    rmfile(&agent_path)?;
+    std::fs::copy(&exe, &agent_path)?;
+    make_executable(&agent_path)?;
 
     /*
      * Install the agent binary with the control program name in a location in
      * the default PATH so that job programs can find it.
      */
-    let cprog = format!("/usr/bin/{CONTROL_PROGRAM}");
+    let cprog = root.control_program();
+    make_dirs_for(&cprog)?;
     rmfile(&cprog)?;
     std::fs::copy(&exe, &cprog)?;
     make_executable(&cprog)?;
 
     #[cfg(target_os = "illumos")]
-    {
+    if root.should_install_service() {
         /*
          * Copy SMF method script and manifest into place.
          */
@@ -1100,6 +1183,16 @@ async fn cmd_install(mut l: Level<()>) -> Result<()> {
             Ok(o) => bail!("svccfg import failure: {:?}", o),
             Err(e) => bail!("could not execute svccfg import: {:?}", e),
         }
+    } else {
+        /*
+         * If we are running unprivileged, fork a child to run the agent
+         * immediately rather than using SMF.
+         */
+        let _child = Command::new(agent_path)
+            .arg("run")
+            .arg("-U")
+            .arg(a.opts().opt_str("U").unwrap())
+            .spawn()?;
     }
 
     #[cfg(target_os = "linux")]
@@ -1162,9 +1255,18 @@ async fn cmd_install(mut l: Level<()>) -> Result<()> {
 }
 
 async fn cmd_run(mut l: Level<()>) -> Result<()> {
-    no_args!(l);
+    l.optopt("U", "", "run unprivileged using this root directory", "DIR");
 
-    let cf = load::<_, ConfigFile>(CONFIG_PATH)?;
+    let a = args!(l);
+
+    let root = if let Some(dir) = a.opts().opt_str("U") {
+        Root::PerUser(dir.into())
+    } else {
+        Root::Global
+    };
+    let job_path = root.job_path();
+
+    let cf = load::<_, ConfigFile>(&root.config_path())?;
 
     println!("agent starting, using {}", cf.baseurl);
     let mut cw = cf.make_client();
@@ -1196,7 +1298,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
     let mut pingfreq = tokio::time::interval(Duration::from_secs(5));
     pingfreq.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-    let mut control = control::server::listen()?;
+    let mut control = control::server::listen(root.unprivileged())?;
     let mut creq: Option<control::server::Request> = None;
     let mut bgprocs = exec::BackgroundProcesses::new();
 
@@ -1217,7 +1319,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
      * any evidence that we've done this before, we must report it to the
      * central server and do nothing else.
      */
-    if PathBuf::from(JOB_PATH).try_exists()? {
+    if PathBuf::from(&job_path).try_exists()? {
         println!("ERROR: found previously assigned job; reporting failure");
 
         /*
@@ -1231,6 +1333,8 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
          */
         stage = Stage::Broken;
     }
+
+    println!("ok, job does not exist yet");
 
     let mut do_ping = true;
     loop {
@@ -1280,6 +1384,8 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
         }
 
         if do_ping {
+            println!("doing ping");
+
             match cw.client.worker_ping().send().await {
                 Err(e) => {
                     println!("PING ERROR: {e}");
@@ -1287,6 +1393,8 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                 }
                 Ok(p) => {
                     let p = p.into_inner();
+
+                    println!("ping result: {p:?}");
 
                     if p.poweroff {
                         /*
@@ -1354,7 +1462,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                                     .create_new(true)
                                     .create(false)
                                     .write(true)
-                                    .open(JOB_PATH)?;
+                                    .open(&job_path)?;
                                 jf.write_all(&diag)?;
                                 jf.flush()?;
                                 jf.sync_all()?;
@@ -1577,9 +1685,18 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                      * set a few specific environment variables.
                      * XXX HOME/USER/LOGNAME should probably respect "uid"
                      */
-                    cmd.env("HOME", "/root");
-                    cmd.env("USER", "root");
-                    cmd.env("LOGNAME", "root");
+                    if root.unprivileged() {
+                        /*
+                         * XXX
+                         */
+                        cmd.env("HOME", "/home/build");
+                        cmd.env("USER", "build");
+                        cmd.env("LOGNAME", "build");
+                    } else {
+                        cmd.env("HOME", "/root");
+                        cmd.env("USER", "root");
+                        cmd.env("LOGNAME", "root");
+                    }
                     cmd.env("TZ", "UTC");
                     cmd.env(
                         "PATH",
@@ -1605,8 +1722,13 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                  * account or with a different working directory.
                  */
                 cmd.current_dir(&t.workdir);
-                cmd.uid(t.uid);
-                cmd.gid(t.gid);
+                if !root.unprivileged() {
+                    /*
+                     * Only privileged workers can change user on the fly.
+                     */
+                    cmd.uid(t.uid);
+                    cmd.gid(t.gid);
+                }
 
                 match exec::run(cmd) {
                     Ok(c) => {
