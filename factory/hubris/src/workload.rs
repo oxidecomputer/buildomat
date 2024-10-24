@@ -4,6 +4,10 @@
 
 use std::{
     collections::HashSet,
+    ffi::CString,
+    fs::set_permissions,
+    os::unix::fs::PermissionsExt,
+    path::PathBuf,
     process::Command,
     sync::Arc,
     time::{Duration, Instant},
@@ -154,6 +158,7 @@ const BUILD_USER: &str = "build";
  */
 const BUILD_USER_DATASET: &str = "rpool/home/build";
 const WORK_DATASET: &str = "rpool/work";
+const INPUT_DATASET: &str = "rpool/input";
 
 fn kill_all(log: &Logger, user: &str) -> Result<()> {
     let u = crate::unix::get_passwd_by_name(user)?
@@ -237,12 +242,45 @@ fn zfs_destroy(dataset: &str) -> Result<()> {
 fn dataset_destroy(_log: &Logger, _user: &str) -> Result<()> {
     zfs_destroy(BUILD_USER_DATASET)?;
     zfs_destroy(WORK_DATASET)?;
+    zfs_destroy(INPUT_DATASET)?;
+
     Ok(())
 }
 
-fn dataset_create(_log: &Logger, _user: &str) -> Result<()> {
+fn dataset_create(_log: &Logger, user: &str) -> Result<()> {
+    let u = crate::unix::get_passwd_by_name(user)?
+        .ok_or_else(|| anyhow!("could not locate user {user:?}"))?;
+    let home = u.dir.as_deref().ok_or_else(|| {
+        anyhow!("could not locate home directory for {user:?}")
+    })?;
+
     zfs_create(BUILD_USER_DATASET, None)?;
     zfs_create(WORK_DATASET, Some("/work"))?;
+    zfs_create(INPUT_DATASET, Some("/input"))?;
+
+    for dir in [home, "/work", "/input"] {
+        let f = PathBuf::from(dir);
+
+        let md = f.metadata()?;
+        if md.is_symlink() || !md.is_dir() {
+            bail!("{dir} is not a directory?!");
+        }
+
+        let cstr = CString::new(dir).unwrap();
+
+        if unsafe { libc::chown(cstr.as_ptr(), u.uid, u.gid) } != 0 {
+            let e = std::io::Error::last_os_error();
+
+            bail!("chown {dir:?}: {e}");
+        }
+
+        if unsafe { libc::chmod(cstr.as_ptr(), 0o755) } != 0 {
+            let e = std::io::Error::last_os_error();
+
+            bail!("chmod {dir:?}: {e}");
+        }
+    }
+
     Ok(())
 }
 
@@ -301,6 +339,31 @@ async fn instance_worker_one(
             let fmri = smfi.fmri()?;
             info!(log, "created SMF instance {fmri}");
 
+            let pg = if let Some(pg) = smfi.get_pg("buildomat")? {
+                pg
+            } else {
+                smfi.add_pg("buildomat", "application")?
+            };
+
+            let tx = pg.transaction()?;
+            tx.start()?;
+            tx.property_ensure(
+                "url",
+                smf::scf_type_t::SCF_TYPE_ASTRING,
+                &c.config.general.baseurl,
+            )?;
+            tx.property_ensure(
+                "strap",
+                smf::scf_type_t::SCF_TYPE_ASTRING,
+                &i.bootstrap,
+            )?;
+            match tx.commit()? {
+                smf::CommitResult::Success => (),
+                smf::CommitResult::OutOfDate => {
+                    bail!("out of date?!");
+                }
+            }
+
             if smfi.get_running_snapshot().is_err() {
                 /*
                  * XXX workaround for SMF bullshit
@@ -334,6 +397,22 @@ async fn instance_worker_one(
                 trans @ (Some(_), Some(_)) => {
                     warn!(log, "in transition... {trans:?}");
                     Ok(DoNext::Sleep)
+                }
+                (Some(smf::State::Uninitialized), None) => {
+                    /*
+                     * This occurs briefly prior to svc.startd(8) picking up the
+                     * new instance.
+                     */
+                    Ok(DoNext::Sleep)
+                }
+                (Some(smf::State::Maintenance), None) => {
+                    /*
+                     * This is a terminal failure state that means the worker is
+                     * not running anymore.
+                     */
+                    warn!(log, "service in maintenance; giving up!");
+                    c.db.instance_new_state(&id, InstanceState::Destroying)?;
+                    Ok(DoNext::Immediate)
                 }
                 (Some(smf::State::Online), None) => {
                     /*

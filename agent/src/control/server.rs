@@ -15,10 +15,7 @@ use tokio::{
     },
 };
 
-use super::{
-    protocol::{Decoder, Message, Payload},
-    SOCKET_PATH,
-};
+use super::protocol::{Decoder, Message, Payload};
 
 #[derive(Debug)]
 pub struct Request {
@@ -45,20 +42,29 @@ impl Request {
     }
 }
 
-pub fn listen() -> Result<Receiver<Request>> {
+pub fn listen(unprivileged: bool) -> Result<Receiver<Request>> {
+    let sockpath = if unprivileged {
+        /*
+         * XXX
+         */
+        format!("{}/.buildomat/sock", std::env::var("HOME")?)
+    } else {
+        super::SOCKET_PATH.to_string()
+    };
+
     /*
      * Create the UNIX socket that the control program will use to contact the
      * agent.
      */
-    std::fs::remove_file(SOCKET_PATH).ok();
-    let ul = UnixListener::bind(SOCKET_PATH)?;
+    std::fs::remove_file(&sockpath).ok();
+    let ul = UnixListener::bind(&sockpath)?;
 
     /*
      * Allow everyone to connect:
      */
-    let mut perm = std::fs::metadata(SOCKET_PATH)?.permissions();
+    let mut perm = std::fs::metadata(&sockpath)?.permissions();
     perm.set_mode(0o777);
-    std::fs::set_permissions(SOCKET_PATH, perm)?;
+    std::fs::set_permissions(&sockpath, perm)?;
 
     /*
      * Create channel to hand requests back to the main loop.
