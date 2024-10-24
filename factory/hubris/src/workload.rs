@@ -2,7 +2,12 @@
  * Copyright 2024 Oxide Computer Company
  */
 
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{
+    collections::HashSet,
+    process::Command,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use crate::{db::types::*, Central};
 use anyhow::{anyhow, bail, Result};
@@ -114,11 +119,8 @@ async fn instance_worker(c: Arc<Central>, id: InstanceId) {
 
     info!(log, "instance worker starting");
 
-    //let mut mon: Option<crate::svc::Monitor> = None;
-    //let mut ser: Option<crate::serial::SerialForZone> = None;
-
     loop {
-        match instance_worker_one(&log, &c, &id).await {
+        match instance_worker_one(&log, &c, &id, BUILD_USER).await {
             Ok(DoNext::Immediate) => continue,
             Ok(DoNext::Sleep) => (),
             Ok(DoNext::Shutdown) => {
@@ -140,10 +142,115 @@ enum DoNext {
     Shutdown,
 }
 
+/*
+ * XXX This user is created manually outside the management of the process right
+ * now.
+ */
+const BUILD_USER: &str = "build";
+
+/*
+ * XXX These datasets are created and destroyed to ensure data does not persist
+ * between runs.
+ */
+const BUILD_USER_DATASET: &str = "rpool/home/build";
+const WORK_DATASET: &str = "rpool/work";
+
+fn kill_all(log: &Logger, user: &str) -> Result<()> {
+    let u = crate::unix::get_passwd_by_name(user)?
+        .ok_or_else(|| anyhow!("could not locate user {user:?}"))?;
+
+    let id = crate::unix::SigSendId::UserId(u.uid);
+    if crate::unix::sigsend_maybe(id, libc::SIGKILL)? {
+        info!(log, "killed processes for user {user:?} (uid {})", u.uid);
+
+        /*
+         * There are a number of reasons that processes might linger for a
+         * little while in the table after we terminate them.  Wait for a bit to
+         * make sure they're all gone:
+         */
+        let start = Instant::now();
+        while Instant::now().saturating_duration_since(start).as_secs() < 10 {
+            /*
+             * Try with the 0 argument, which can be used to confirm that no
+             * processes exist.
+             */
+            if !crate::unix::sigsend_maybe(id, 0)? {
+                return Ok(());
+            }
+
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        bail!("processes for user {user:?} (uid {}) still exist?", u.uid);
+    } else {
+        info!(log, "no processes found for user {user:?} (uid {})", u.uid);
+    }
+
+    Ok(())
+}
+
+fn scrub_tmp(log: &Logger, _user: &str) -> Result<()> {
+    /*
+     * XXX
+     */
+    warn!(log, "really should scrub /tmp and /var/tmp ...");
+    Ok(())
+}
+
+fn zfs_create(dataset: &str, mountpoint: Option<&str>) -> Result<()> {
+    let mut cmd = Command::new("/sbin/zfs");
+    cmd.env_clear();
+    cmd.arg("create");
+    if let Some(mp) = mountpoint {
+        cmd.arg("-o");
+        cmd.arg(format!("mountpoint={mp}"));
+    }
+    cmd.arg(dataset);
+
+    let out = cmd.output()?;
+
+    if !out.status.success() {
+        bail!("zfs create {dataset} failed: {}", out.info());
+    }
+
+    Ok(())
+}
+
+fn zfs_destroy(dataset: &str) -> Result<()> {
+    let mut cmd = Command::new("/sbin/zfs");
+    cmd.env_clear();
+    cmd.arg("destroy");
+    cmd.arg(dataset);
+
+    let out = cmd.output()?;
+
+    if !out.status.success() {
+        let e = String::from_utf8_lossy(&out.stderr);
+        if !e.contains("dataset does not exist") {
+            bail!("zfs destroy {dataset} failed: {}", out.info());
+        }
+    }
+
+    Ok(())
+}
+
+fn dataset_destroy(_log: &Logger, _user: &str) -> Result<()> {
+    zfs_destroy(BUILD_USER_DATASET)?;
+    zfs_destroy(WORK_DATASET)?;
+    Ok(())
+}
+
+fn dataset_create(_log: &Logger, _user: &str) -> Result<()> {
+    zfs_create(BUILD_USER_DATASET, None)?;
+    zfs_create(WORK_DATASET, Some("/work"))?;
+    Ok(())
+}
+
 async fn instance_worker_one(
     log: &Logger,
     c: &Central,
     id: &InstanceId,
+    build_user: &str,
 ) -> Result<DoNext> {
     let i = c.db.instance_get(id)?;
 
@@ -159,29 +266,36 @@ async fn instance_worker_one(
         );
     };
 
+    let svcname = i.id().service_instance_name();
+    let mut scf = smf::Scf::new()?;
+    let loc = scf.scope_local()?;
+    let svc = loc
+        .get_service("site/buildomat/hubris-agent")?
+        .ok_or_else(|| anyhow!("could not locate service {SERVICE:?}"))?;
+
     match i.state {
         InstanceState::Unconfigured => {
-            let mut scf = smf::Scf::new()?;
-            let loc = scf.scope_local()?;
-            let svc =
-                loc.get_service("site/buildomat/hubris-agent")?.ok_or_else(
-                    || anyhow!("could not locate service {SERVICE:?}"),
-                )?;
+            /*
+             * Before we get started, attempt to make sure there are no
+             * lingering processes or files owned by the build user.
+             */
+            kill_all(log, build_user)?;
+            dataset_destroy(log, build_user)?;
+            scrub_tmp(log, build_user)?;
 
             /*
-             * XXX we need to create the home dataset for the build user
+             * Create the /home/build and /work datasets for the build user:
              */
+            dataset_create(log, build_user)?;
 
             /*
              * Create the SMF service instance...
              */
-            let name = i.id().service_instance_name();
-
-            let smfi = if let Some(smfi) = svc.get_instance(&name)? {
-                info!(log, "SMF instance {name:?} existed already");
+            let smfi = if let Some(smfi) = svc.get_instance(&svcname)? {
+                info!(log, "SMF instance {svcname:?} existed already");
                 smfi
             } else {
-                svc.add_instance(&name)?
+                svc.add_instance(&svcname)?
             };
 
             let fmri = smfi.fmri()?;
@@ -201,26 +315,77 @@ async fn instance_worker_one(
             Ok(DoNext::Immediate)
         }
         InstanceState::Configured => {
-            /*
-             * XXX we need to monitor the SMF service to make sure it is OK...
-             */
-            bail!("nyi"),
+            let mut scf = smf::Scf::new()?;
+            let loc = scf.scope_local()?;
+            let svc =
+                loc.get_service("site/buildomat/hubris-agent")?.ok_or_else(
+                    || anyhow!("could not locate service {SERVICE:?}"),
+                )?;
+
+            let smfi = svc.get_instance(&svcname)?.ok_or_else(|| {
+                anyhow!("could not locate SMF instance {svcname:?}")
+            })?;
+
+            match smfi.states().map_err(|e| anyhow!("states: {e}"))? {
+                (None, None) => {
+                    warn!(log, "no states at all?!");
+                    Ok(DoNext::Sleep)
+                }
+                trans @ (Some(_), Some(_)) => {
+                    warn!(log, "in transition... {trans:?}");
+                    Ok(DoNext::Sleep)
+                }
+                (Some(smf::State::Online), None) => {
+                    /*
+                     * Service is still OK.
+                     */
+                    Ok(DoNext::Sleep)
+                }
+                other => bail!("odd service state? {other:?}"),
+            }
         }
         InstanceState::Destroying => {
             /*
-             * XXX we need to tear down the SMF service...
+             * Tear down the SMF service instance:
              */
+            if let Some(smfi) = svc.get_instance(&svcname)? {
+                match smfi.states()? {
+                    (
+                        Some(smf::State::Disabled | smf::State::Maintenance),
+                        None,
+                    ) => {
+                        /*
+                         * This is a terminal state and we can delete the
+                         * service instance.
+                         */
+                    }
+                    other => {
+                        /*
+                         * Try to disable the service.
+                         */
+                        warn!(log, "SMF state: {other:?} --> disable!");
+                        smfi.disable(true)?;
+                        return Ok(DoNext::Sleep);
+                    }
+                }
+            } else {
+                info!(log, "service instance {svcname:?} already deleted");
+            };
 
             /*
              * XXX we need to ensure all processes owned by the builder
              * uid are killed...  see: sigsend(2) / sigsendset(2)
              */
+            kill_all(log, build_user)?;
+            dataset_destroy(log, build_user)?;
+            scrub_tmp(log, build_user)?;
 
-            /*
-             * XXX we need to remove the home directory dataset...
-             */
-            bail!("nyi"),
+            c.db.instance_new_state(&id, InstanceState::Destroyed)?;
+            Ok(DoNext::Immediate)
         }
-        InstanceState::Destroyed => bail!("nyi"),
+        InstanceState::Destroyed => {
+            info!(log, "service instance {svcname:?} is completely destroyed");
+            Ok(DoNext::Shutdown)
+        }
     }
 }
