@@ -284,6 +284,36 @@ fn dataset_create(_log: &Logger, user: &str) -> Result<()> {
     Ok(())
 }
 
+fn make_device_available(
+    _log: &Logger,
+    user: &str,
+    dev: &crate::usb::UsbDevice,
+) -> Result<()> {
+    let u = crate::unix::get_passwd_by_name(user)?
+        .ok_or_else(|| anyhow!("could not locate user {user:?}"))?;
+    let home = u.dir.as_deref().ok_or_else(|| {
+        anyhow!("could not locate home directory for {user:?}")
+    })?;
+
+    for l in dev.links.iter() {
+        let cstr = CString::new(l.clone()).unwrap();
+
+        if unsafe { libc::chown(cstr.as_ptr(), u.uid, u.gid) } != 0 {
+            let e = std::io::Error::last_os_error();
+
+            bail!("chown {l:?}: {e}");
+        }
+
+        if unsafe { libc::chmod(cstr.as_ptr(), 0o755) } != 0 {
+            let e = std::io::Error::last_os_error();
+
+            bail!("chmod {l:?}: {e}");
+        }
+    }
+
+    Ok(())
+}
+
 async fn instance_worker_one(
     log: &Logger,
     c: &Central,
@@ -320,6 +350,14 @@ async fn instance_worker_one(
             kill_all(log, build_user)?;
             dataset_destroy(log, build_user)?;
             scrub_tmp(log, build_user)?;
+
+            /*
+             * XXX Make sure we have an MCU-Link available.
+             */
+            let mculink =
+                c.usb.mculink().ok_or_else(|| anyhow!("no MCU-Link found?"))?;
+            make_device_available(log, build_user, &mculink)?;
+            info!(log, "making USB device available: {mculink:?}");
 
             /*
              * Create the /home/build and /work datasets for the build user:

@@ -12,8 +12,9 @@ use slog::{info, o, Logger};
 mod config;
 mod db;
 mod factory;
-mod workload;
 mod unix;
+mod usb;
+mod workload;
 //mod net;
 //mod nocloud;
 //mod propolis;
@@ -28,6 +29,7 @@ struct Central {
     client: buildomat_client::Client,
     config: config::ConfigFile,
     db: db::Database,
+    usb: usb::Usb,
 }
 
 /*
@@ -42,6 +44,7 @@ async fn main() -> Result<()> {
 
     opts.optopt("f", "", "configuration file", "CONFIG");
     opts.optopt("d", "", "database file", "FILE");
+    opts.optflag("u", "", "XXX USB");
 
     let p = match opts.parse(std::env::args().skip(1)) {
         Ok(p) => p,
@@ -53,6 +56,22 @@ async fn main() -> Result<()> {
     };
 
     let log = make_log("factory-hubris");
+
+    let usb = usb::Usb::new()?;
+    if p.opt_present("u") {
+        let mut curgen = 0;
+        loop {
+            let newgen = usb.gen();
+            if newgen != curgen {
+                println!("gen {newgen}");
+                usb.info()?;
+                println!();
+                curgen = newgen;
+            }
+
+            std::thread::sleep(Duration::from_secs(1));
+        }
+    }
 
     let config: config::ConfigFile = if let Some(f) = p.opt_str("f").as_deref()
     {
@@ -87,7 +106,7 @@ async fn main() -> Result<()> {
         });
     }));
 
-    let c0 = Arc::new(Central { log, config, client, db });
+    let c0 = Arc::new(Central { log, config, client, db, usb });
 
     let c = Arc::clone(&c0);
     let t_workload = tokio::task::spawn(async move {

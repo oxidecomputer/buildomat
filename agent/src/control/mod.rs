@@ -2,7 +2,7 @@
  * Copyright 2024 Oxide Computer Company
  */
 
-use std::{io::Read, ops::Range, time::Duration};
+use std::{io::Read, ops::Range, path::PathBuf, time::Duration};
 
 use anyhow::{bail, Result};
 use bytes::BytesMut;
@@ -18,7 +18,16 @@ use protocol::{Decoder, FactoryInfo, Message, Payload};
 pub(crate) mod protocol;
 pub(crate) mod server;
 
-pub const SOCKET_PATH: &str = "/var/run/buildomat.sock";
+fn socket_path(unprivileged: bool) -> Result<PathBuf> {
+    Ok(if unprivileged {
+        /*
+         * XXX This could probably be better:
+         */
+        format!("{}/.buildomat/sock", std::env::var("HOME")?).into()
+    } else {
+        "/var/run/buildomat.sock".into()
+    })
+}
 
 struct Stuff {
     us: Option<UnixStream>,
@@ -28,7 +37,26 @@ struct Stuff {
 
 impl Stuff {
     async fn connect(&mut self) -> Result<()> {
-        self.us = Some(UnixStream::connect(SOCKET_PATH).await?);
+        /*
+         * Try to guess at whether we're privileged or not.
+         */
+        let sockpath = if let Ok(sock) = socket_path(true) {
+            if sock.exists() {
+                /*
+                 * If the unprivileged socket exists, we'll try to use it.
+                 */
+                sock
+            } else {
+                /*
+                 * Otherwise, fall back to the global socket:
+                 */
+                socket_path(false)?
+            }
+        } else {
+            socket_path(false)?
+        };
+
+        self.us = Some(UnixStream::connect(sockpath).await?);
         self.dec = Some(Decoder::new());
         Ok(())
     }

@@ -43,14 +43,7 @@ impl Request {
 }
 
 pub fn listen(unprivileged: bool) -> Result<Receiver<Request>> {
-    let sockpath = if unprivileged {
-        /*
-         * XXX
-         */
-        format!("{}/.buildomat/sock", std::env::var("HOME")?)
-    } else {
-        super::SOCKET_PATH.to_string()
-    };
+    let sockpath = super::socket_path(unprivileged)?;
 
     /*
      * Create the UNIX socket that the control program will use to contact the

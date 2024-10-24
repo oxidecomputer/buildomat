@@ -1334,8 +1334,6 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
         stage = Stage::Broken;
     }
 
-    println!("ok, job does not exist yet");
-
     let mut do_ping = true;
     loop {
         if let Some(md) = &metadata {
@@ -1384,8 +1382,6 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
         }
 
         if do_ping {
-            println!("doing ping");
-
             match cw.client.worker_ping().send().await {
                 Err(e) => {
                     println!("PING ERROR: {e}");
@@ -1393,8 +1389,6 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                 }
                 Ok(p) => {
                     let p = p.into_inner();
-
-                    println!("ping result: {p:?}");
 
                     if p.poweroff {
                         /*
