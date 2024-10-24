@@ -13,6 +13,7 @@ mod config;
 mod db;
 mod factory;
 mod workload;
+mod unix;
 //mod net;
 //mod nocloud;
 //mod propolis;
