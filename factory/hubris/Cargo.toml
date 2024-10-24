@@ -12,6 +12,7 @@ buildomat-types = { path = "../../types" }
 
 anyhow = { workspace = true }
 chrono = { workspace = true }
+devinfo = { workspace = true }
 getopts = { workspace = true }
 libc = { workspace = true }
 rand = { workspace = true }
