@@ -3,7 +3,9 @@
  */
 
 use anyhow::{anyhow, bail, Context, Result};
-use buildomat_github_database::types::{CheckRunVariety, CheckSuiteId};
+use buildomat_github_database::types::{
+    CheckRunId, CheckRunVariety, CheckSuiteId,
+};
 use buildomat_github_database::Database;
 use buildomat_github_hooktypes as hooktypes;
 use chrono::prelude::*;
@@ -17,6 +19,39 @@ use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 const SHORT_SHA_LEN: usize = 16;
+
+trait FlagsExt {
+    fn add_flags(&mut self, name: &'static str) -> Flags;
+}
+
+impl FlagsExt for Row {
+    #[must_use]
+    fn add_flags(&mut self, name: &'static str) -> Flags {
+        Flags { row: self, name, out: String::new() }
+    }
+}
+
+struct Flags<'a> {
+    row: &'a mut Row,
+    name: &'static str,
+    out: String,
+}
+
+impl<'a> Flags<'a> {
+    #[must_use]
+    fn flag(mut self, c: char, b: bool) -> Self {
+        if b {
+            self.out.push(c);
+        } else {
+            self.out.push('-');
+        }
+        self
+    }
+
+    fn build(self) {
+        self.row.add_str(self.name, &self.out);
+    }
+}
 
 #[derive(Default)]
 struct Stuff {
@@ -322,10 +357,6 @@ async fn do_repository(mut l: Level<Stuff>) -> Result<()> {
     sel!(l).run().await
 }
 
-async fn do_check_run_list(_l: Level<Stuff>) -> Result<()> {
-    bail!("not yet implemented");
-}
-
 async fn do_check_suite_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("id", 26, true);
     l.add_column("ghid", 10, true);
@@ -347,6 +378,44 @@ async fn do_check_suite_list(mut l: Level<Stuff>) -> Result<()> {
         r.add_str("ssha", &suite.head_sha[0..SHORT_SHA_LEN]);
         r.add_str("sha", suite.head_sha);
         r.add_str("branch", suite.head_branch.as_deref().unwrap_or("-"));
+
+        t.add_row(r);
+    }
+
+    print!("{}", t.output()?);
+    Ok(())
+}
+
+async fn do_check_suite_runs(mut l: Level<Stuff>) -> Result<()> {
+    l.add_column("id", 26, true);
+    l.add_column("flags", 5, true);
+    l.add_column("variety", 10, true);
+    l.add_column("name", 30, true);
+    l.add_column("active", 6, false);
+    l.add_column("flushed", 7, false);
+
+    l.usage_args(Some("CHECKSUITE"));
+
+    let a = args!(l);
+    if a.args().len() != 1 {
+        bad_args!(l, "specify a buildomat check suite ULID");
+    }
+
+    let csid = CheckSuiteId::from_str(&a.args()[0])?;
+
+    let mut t = a.table();
+
+    for run in l.context().db().list_check_runs_for_suite(csid)? {
+        let mut r = Row::default();
+        r.add_str("id", &run.id.to_string());
+        r.add_flags("flags")
+            .flag('A', run.active)
+            .flag('F', run.flushed)
+            .build();
+        r.add_str("active", if run.active { "yes" } else { "no" });
+        r.add_str("flushed", if run.flushed { "yes" } else { "no" });
+        r.add_str("variety", &run.variety.to_string());
+        r.add_str("name", &run.name);
 
         t.add_row(r);
     }
@@ -452,6 +521,22 @@ async fn do_check_run_find(mut l: Level<Stuff>) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+async fn do_check_run_dump(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("CHECKRUN"));
+
+    let a = args!(l);
+    if a.args().len() != 1 {
+        bad_args!(l, "specify a buildomat check run ULID");
+    }
+
+    let csid = CheckRunId::from_str(&a.args()[0])?;
+
+    let cr = l.context().db().load_check_run(csid)?;
+
+    println!("check run: {cr:#?}");
     Ok(())
 }
 
@@ -567,6 +652,11 @@ async fn do_check_suite(mut l: Level<Stuff>) -> Result<()> {
     )?;
     l.cmd("dump", "dump a particular check suite", cmd!(do_check_suite_dump))?;
     l.cmd(
+        "runs",
+        "list check runs for a check suite",
+        cmd!(do_check_suite_runs),
+    )?;
+    l.cmd(
         "duplicates",
         "look for commits that had more than one check suite",
         cmd!(do_duplicates),
@@ -576,8 +666,8 @@ async fn do_check_suite(mut l: Level<Stuff>) -> Result<()> {
 }
 
 async fn do_check_run(mut l: Level<Stuff>) -> Result<()> {
-    l.cmda("list", "ls", "list check runs", cmd!(do_check_run_list))?;
     l.cmd("find", "locate a particular check run", cmd!(do_check_run_find))?;
+    l.cmd("dump", "dump a particular check run", cmd!(do_check_run_dump))?;
 
     sel!(l).run().await
 }
