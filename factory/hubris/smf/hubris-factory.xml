@@ -1,0 +1,33 @@
+<?xml version='1.0'?>
+<!DOCTYPE service_bundle SYSTEM '/usr/share/lib/xml/dtd/service_bundle.dtd.1'>
+<service_bundle type='manifest' name='export'>
+    <service name='site/buildomat/hubris-factory' type='service' version='0'>
+	    <create_default_instance enabled='false' />
+        <dependency name='multi-user' grouping='require_all'
+          restart_on='none' type='service'>
+            <service_fmri value='svc:/milestone/multi-user'/>
+        </dependency>
+
+        <exec_method name='start' type='method' timeout_seconds='60'
+		exec='/opt/buildomat/hubris/lib/buildomat-factory-hubris -f /opt/buildomat/hubris/etc/config.toml -d /opt/buildomat/hubris/var/db.sqlite3' />
+
+        <exec_method name='stop' type='method' timeout_seconds='60'
+          exec=':kill'/>
+
+        <property_group name='startd' type='framework'>
+            <propval name='duration' type='astring' value='child'/>
+        </property_group>
+
+        <stability value='Unstable'/>
+
+        <template>
+            <common_name>
+                <loctext xml:lang='C'>buildomat hubris factory</loctext>
+            </common_name>
+            <description>
+                <loctext xml:lang='C'>buildomat hubris factory</loctext>
+            </description>
+        </template>
+
+    </service>
+</service_bundle>

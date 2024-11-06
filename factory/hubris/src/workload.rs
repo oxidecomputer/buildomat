@@ -18,7 +18,6 @@ use anyhow::{anyhow, bail, Result};
 use buildomat_common::OutputExt;
 use slog::{debug, error, info, o, warn, Logger};
 
-const FMRI: &str = "svc:/site/buildomat/hubris-agent:default";
 const SERVICE: &str = "site/buildomat/hubris-agent";
 
 pub(crate) async fn workload_worker(c: Arc<Central>) -> Result<()> {
@@ -56,7 +55,7 @@ async fn workload_worker_one(
      * service bundle.
      */
     let svc = loc
-        .get_service("site/buildomat/hubris-agent")?
+        .get_service(SERVICE)?
         .ok_or_else(|| anyhow!("could not locate service {SERVICE:?}"))?;
 
     /*
@@ -338,7 +337,7 @@ async fn instance_worker_one(
     let mut scf = smf::Scf::new()?;
     let loc = scf.scope_local()?;
     let svc = loc
-        .get_service("site/buildomat/hubris-agent")?
+        .get_service(SERVICE)?
         .ok_or_else(|| anyhow!("could not locate service {SERVICE:?}"))?;
 
     match i.state {
@@ -352,7 +351,30 @@ async fn instance_worker_one(
             scrub_tmp(log, build_user)?;
 
             /*
-             * XXX Make sure we have an MCU-Link available.
+             * XXX We need to confirm that power control is available for the
+             * things that we intend to control here, and that the devices under
+             * test begin in the OFF state.
+             */
+
+            /*
+             * XXX Make sure we have hardware devices available.
+             *
+             * We need configuration here; looms, like in manufacturing,
+             * to be able to specify a "gimlet", "sidecar", and "psc" target.
+             *
+             * We should select a loom here (which would include a list of
+             * vid/pid/serial pairs for dongles) and commit to it for the
+             * duration of this "instance".
+             *
+             * We should power up each device in sequence and ensure they are
+             * flashed with stock images, confirm on some level that they are
+             * working, and then power them back off.
+             *
+             * We need to be able to generate a humility environment file here
+             * as part of the hand-off to the job.
+             *
+             * XXX Really this should actually happen before we've even promised
+             * to start the job -- this should be part of the "slot" definition.
              */
             let mculink =
                 c.usb.mculink().ok_or_else(|| anyhow!("no MCU-Link found?"))?;
@@ -418,10 +440,9 @@ async fn instance_worker_one(
         InstanceState::Configured => {
             let mut scf = smf::Scf::new()?;
             let loc = scf.scope_local()?;
-            let svc =
-                loc.get_service("site/buildomat/hubris-agent")?.ok_or_else(
-                    || anyhow!("could not locate service {SERVICE:?}"),
-                )?;
+            let svc = loc.get_service(SERVICE)?.ok_or_else(|| {
+                anyhow!("could not locate service {SERVICE:?}")
+            })?;
 
             let smfi = svc.get_instance(&svcname)?.ok_or_else(|| {
                 anyhow!("could not locate SMF instance {svcname:?}")
@@ -475,12 +496,14 @@ async fn instance_worker_one(
                          * This is a terminal state and we can delete the
                          * service instance.
                          */
+                        info!(log, "deleting SMF service");
+                        smfi.delete()?;
                     }
                     other => {
                         /*
                          * Try to disable the service.
                          */
-                        warn!(log, "SMF state: {other:?} --> disable!");
+                        info!(log, "disabling SMF service");
                         smfi.disable(true)?;
                         return Ok(DoNext::Sleep);
                     }
@@ -490,12 +513,23 @@ async fn instance_worker_one(
             };
 
             /*
-             * XXX we need to ensure all processes owned by the builder
-             * uid are killed...  see: sigsend(2) / sigsendset(2)
+             * While we have disabled the service, it is possible that some
+             * processes could have been created outside the contract.  Ensure
+             * all processes for the build user are terminated and then remove
+             * any files left behind.
              */
             kill_all(log, build_user)?;
             dataset_destroy(log, build_user)?;
             scrub_tmp(log, build_user)?;
+
+            /*
+             * XXX We need to confirm that we are able to shut off the power for
+             * the devices under test here.
+             */
+
+            /*
+             * XXX Change ownership of any USB devices back to root
+             */
 
             c.db.instance_new_state(&id, InstanceState::Destroyed)?;
             Ok(DoNext::Immediate)

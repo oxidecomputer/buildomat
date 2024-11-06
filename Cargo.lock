@@ -779,7 +779,6 @@ dependencies = [
  "sea-query",
  "serde",
  "serde_json",
- "serde_yaml",
  "slog",
  "slog-term",
  "smf",
@@ -2123,8 +2122,9 @@ dependencies = [
 
 [[package]]
 name = "libscf-sys"
-version = "1.0.0"
-source = "git+https://github.com/illumos/libscf-sys.git#bb0b82c32cff5eee65efc4f214924c3daf7edc93"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12f02d0eda38e8cc453c5ec5d49945545d8d9eb0e59cb2ce4152ba6518f373e7"
 dependencies = [
  "libc",
  "num-derive",
@@ -3544,7 +3544,7 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 [[package]]
 name = "smf"
 version = "0.10.0"
-source = "git+https://github.com/illumos/smf-rs.git#f14ff3517648206baa4b42ef522d2114ed5bcb48"
+source = "git+https://github.com/illumos/smf-rs.git#72389b5161d2cca1f0e239b337af68bf31f191f4"
 dependencies = [
  "libc",
  "libscf-sys",
