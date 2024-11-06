@@ -15,6 +15,7 @@ mod factory;
 mod unix;
 mod usb;
 mod workload;
+mod humility;
 //mod net;
 //mod nocloud;
 //mod propolis;

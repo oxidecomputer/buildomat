@@ -216,6 +216,10 @@ async fn factory_task_one(log: &Logger, c: &Arc<Central>) -> Result<()> {
     let res = c
         .client
         .factory_lease()
+        /*
+         * XXX The supported target list should come from the slot manager, not
+         * just the configuration.
+         */
         .body_map(|b| b.supported_targets(c.config.targets()))
         .send()
         .await?
