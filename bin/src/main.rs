@@ -1549,18 +1549,51 @@ async fn do_worker_hold(mut l: Level<Stuff>) -> Result<()> {
 }
 
 async fn do_worker_release(mut l: Level<Stuff>) -> Result<()> {
-    l.usage_args(Some("WORKER..."));
+    l.usage_args(Some("all|WORKER..."));
+
+    l.optflag("v", "verbose", "print details about profile");
 
     let a = args!(l);
-    if a.args().is_empty() {
-        bad_args!(l, "specify a worker to release");
-    }
+    let c = l.context();
 
-    for arg in a.args() {
-        if let Err(e) =
-            l.context().admin().worker_hold_release().worker(arg).send().await
+    let verbose = a.opts().opt_present("v");
+    let to_release = if a.args().is_empty() {
+        bad_args!(l, "specify a worker to release");
+    } else if a.args().iter().any(|w| w == "all") {
+        if a.args().len() != 1 {
+            bad_args!(l, "\"all\" must be the only argument");
+        }
+
+        /*
+         * Get a list of held workers to release.
+         */
+        let mut workers = c.admin().workers_list().active(true).stream();
+        let mut to_release = Vec::new();
+        while let Some(w) = workers.try_next().await? {
+            if w.deleted || w.hold.is_none() {
+                continue;
+            }
+
+            to_release.push(w.id);
+        }
+
+        if verbose {
+            println!("found {} held workers to release", to_release.len());
+        }
+
+        to_release
+    } else {
+        a.args().to_vec()
+    };
+
+    for id in &to_release {
+        if verbose {
+            println!("releasing worker {id}");
+        }
+
+        if let Err(e) = c.admin().worker_hold_release().worker(id).send().await
         {
-            bail!("ERROR: releasing hold on {arg}: {e:?}");
+            bail!("ERROR: releasing hold on {id}: {e:?}");
         }
     }
 
