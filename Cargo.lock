@@ -990,6 +990,7 @@ dependencies = [
 name = "buildomat-types"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "schemars",
  "serde",
  "serde_json",

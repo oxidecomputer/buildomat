@@ -61,12 +61,31 @@ async fn factory_task_one(log: &Logger, c: &Arc<Central>) -> Result<()> {
                         log,
                         "associating instance {id} with worker {}", w.id,
                     );
+
+                    /*
+                     * We need to be able to load the target configuration in
+                     * order to get any potential per-target diagnostic
+                     * configuration.
+                     */
+                    let Some(targ) = c.config.target.get(&i.target) else {
+                        error!(
+                            log,
+                            "instance {id} for worker {} has target {} which \
+                            no longer exists?",
+                            w.id,
+                            i.target,
+                        );
+                        continue;
+                    };
+                    let md = c.metadata(targ)?;
+
                     c.client
                         .factory_worker_associate()
                         .worker(&w.id)
                         .body_map(|b| {
                             b.private(id.to_string())
                                 .ip(Some(t.ip().to_string()))
+                                .metadata(Some(md))
                         })
                         .send()
                         .await?;
@@ -240,7 +259,7 @@ async fn factory_task_one(log: &Logger, c: &Arc<Central>) -> Result<()> {
     /*
      * Locate target-specific configuration.
      */
-    if !c.config.target.contains_key(&lease.target) {
+    let Some(targ) = c.config.target.get(&lease.target) else {
         error!(log, "server wants target we do not support: {lease:?}");
         return Ok(());
     };
@@ -269,11 +288,14 @@ async fn factory_task_one(log: &Logger, c: &Arc<Central>) -> Result<()> {
     /*
      * Record the instance ID against the worker for which it was created:
      */
+    let md = c.metadata(targ)?;
     c.client
         .factory_worker_associate()
         .worker(&w.id)
         .body_map(|b| {
-            b.private(instance_id.to_string()).ip(Some(t.ip().to_string()))
+            b.private(instance_id.to_string())
+                .ip(Some(t.ip().to_string()))
+                .metadata(Some(md))
         })
         .send()
         .await?;

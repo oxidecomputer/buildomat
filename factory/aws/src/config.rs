@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 
+use buildomat_types::config::ConfigFileDiag;
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
@@ -13,6 +14,8 @@ pub(crate) struct ConfigFile {
     pub general: ConfigFileGeneral,
     pub factory: ConfigFileFactory,
     pub target: HashMap<String, ConfigFileAwsTarget>,
+    #[serde(default)]
+    pub diag: ConfigFileDiag,
 }
 
 #[derive(Deserialize, Debug)]
@@ -33,8 +36,8 @@ pub(crate) struct ConfigFileAwsTarget {
     pub instance_type: String,
     pub root_size_gb: i32,
     pub ami: String,
-    pub post_job_diagnostic_script: Option<String>,
-    pub pre_job_diagnostic_script: Option<String>,
+    #[serde(default)]
+    pub diag: ConfigFileDiag,
 }
 
 #[derive(Deserialize, Debug)]
@@ -49,9 +52,6 @@ pub(crate) struct ConfigFileAws {
     pub key: String,
     pub security_group: String,
     pub limit_total: usize,
-    pub root_password_hash: Option<String>,
-    pub root_authorized_keys: Option<String>,
-    pub dump_to_rpool: Option<u32>,
 }
 
 impl ConfigFileAws {

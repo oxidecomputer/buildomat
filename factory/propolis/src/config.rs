@@ -5,6 +5,7 @@
 use std::{collections::HashMap, net::Ipv4Addr, path::PathBuf};
 
 use anyhow::{bail, Result};
+use buildomat_types::config::ConfigFileDiag;
 use serde::Deserialize;
 
 use crate::db::types::InstanceId;
@@ -20,6 +21,9 @@ pub(crate) struct ConfigFile {
     pub slots: u32,
     pub software_dir: String,
     pub nodename: String,
+
+    #[serde(default)]
+    pub diag: ConfigFileDiag,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -58,6 +62,9 @@ pub(crate) struct ConfigFileSlotTemplate {
 pub(crate) struct ConfigFileTarget {
     pub image_path: Option<String>,
     pub image_zvol: Option<String>,
+
+    #[serde(default)]
+    pub diag: ConfigFileDiag,
 }
 
 impl ConfigFileTarget {

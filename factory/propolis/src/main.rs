@@ -6,6 +6,7 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::{bail, Context, Result};
 use buildomat_common::*;
+use buildomat_types::metadata;
 use getopts::Options;
 use slog::{info, o, Logger};
 
@@ -27,6 +28,19 @@ struct Central {
     config: config::ConfigFile,
     db: db::Database,
     serial: serial::Serial,
+}
+
+impl Central {
+    fn metadata(
+        &self,
+        t: &config::ConfigFileTarget,
+    ) -> Result<metadata::FactoryMetadata> {
+        /*
+         * Allow the per-target diagnostic configuration to override the base
+         * diagnostic configuration.
+         */
+        Ok(self.config.diag.apply_overrides(&t.diag)?.build()?)
+    }
 }
 
 /*

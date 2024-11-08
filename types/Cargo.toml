@@ -8,6 +8,7 @@ license = "MPL-2.0"
 doctest = false
 
 [dependencies]
+anyhow = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

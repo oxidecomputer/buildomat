@@ -299,13 +299,16 @@ async fn aws_worker_one(
                             i.id,
                             w.id
                         );
+                        let md = c.metadata(t).map_err(|e| {
+                            anyhow!("building worker metadata: {e}")
+                        })?;
                         c.client
                             .factory_worker_associate()
                             .worker(&w.id)
                             .body_map(|body| {
                                 body.private(&i.id)
                                     .ip(i.ip.clone())
-                                    .metadata(Some(c.metadata(t)))
+                                    .metadata(Some(md))
                             })
                             .send()
                             .await?;
@@ -540,6 +543,10 @@ async fn aws_worker_one(
             break;
         };
 
+        let md = c
+            .metadata(t)
+            .map_err(|e| anyhow!("building worker metadata: {e}"))?;
+
         let w = c
             .client
             .factory_worker_create()
@@ -562,9 +569,7 @@ async fn aws_worker_one(
         c.client
             .factory_worker_associate()
             .worker(&w.id)
-            .body_map(|body| {
-                body.private(&i.id).ip(i.ip).metadata(Some(c.metadata(t)))
-            })
+            .body_map(|body| body.private(&i.id).ip(i.ip).metadata(Some(md)))
             .send()
             .await?;
     }
