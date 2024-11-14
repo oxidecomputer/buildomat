@@ -14,6 +14,7 @@ pub struct FactoryMetadataV1 {
     pub dump_to_rpool: Option<u32>,
     pub pre_job_diagnostic_script: Option<String>,
     pub post_job_diagnostic_script: Option<String>,
+    pub rpool_disable_sync: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, Eq, PartialEq)]
@@ -71,6 +72,17 @@ impl FactoryMetadata {
     pub fn post_job_diagnostic_script(&self) -> Option<&str> {
         match self {
             FactoryMetadata::V1(md) => md.post_job_diagnostic_script.as_deref(),
+        }
+    }
+
+    /**
+     * Should the agent set "sync=disabled" on the root ZFS pool?  We expect
+     * this to be useful in most cases, so we default to yes if the factory
+     * configuration does not override.
+     */
+    pub fn rpool_disable_sync(&self) -> bool {
+        match self {
+            FactoryMetadata::V1(md) => md.rpool_disable_sync.unwrap_or(true),
         }
     }
 }

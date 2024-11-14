@@ -891,6 +891,22 @@ fn zfs_get(dataset: &str, prop: &str) -> Result<String> {
     Ok(l[0].to_string())
 }
 
+fn zfs_set(dataset: &str, prop: &str, value: &str) -> Result<()> {
+    let out = Command::new("/sbin/zfs")
+        .arg("set")
+        .arg(format!("{prop}={value}"))
+        .arg(dataset)
+        .env_clear()
+        .current_dir("/")
+        .output()?;
+
+    if !out.status.success() {
+        bail!("zfs set {prop:?}={value:?} {dataset:?}: {}", out.info());
+    }
+
+    Ok(())
+}
+
 fn zfs_create_volume(dataset: &str, size_mb: u32) -> Result<()> {
     let out = Command::new("/sbin/zfs")
         .arg("create")
@@ -945,6 +961,33 @@ fn ensure_dump_device(mbsz: u32) -> Result<()> {
     }
 
     println!("dump device was configured!");
+    Ok(())
+}
+
+#[cfg(target_os = "illumos")]
+fn rpool_disable_sync() -> Result<()> {
+    if !zfs_exists("rpool")? {
+        /*
+         * If the system does not have a root pool, there is no point trying to
+         * disable sync.  Note that technically a system could boot from a pool
+         * with any name, not just "rpool"; in practice the images we use on
+         * buildomat systems all use "rpool" today.
+         */
+        println!("skipping sync disable as system has no rpool");
+    } else {
+        zfs_set("rpool", "sync", "disabled")?;
+
+        println!("sync was disabled on rpool!");
+    }
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "illumos"))]
+fn rpool_disable_sync() -> Result<()> {
+    /*
+     * Sure, whatever you say!
+     */
     Ok(())
 }
 
@@ -1163,6 +1206,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
     let mut dump_device_configured = false;
     let mut post_diag_script: Option<String> = None;
     let mut pre_diag_done = false;
+    let mut sync_disabled = false;
 
     /*
      * Check for a file containing a description of the job we are running.  If
@@ -1223,6 +1267,14 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
 
                     dump_device_configured = true;
                 }
+            }
+
+            if !sync_disabled && md.rpool_disable_sync() {
+                if let Err(e) = rpool_disable_sync() {
+                    println!("ERROR: disabling sync on rpool: {e}");
+                }
+
+                sync_disabled = true;
             }
         }
 

@@ -72,7 +72,7 @@ impl Central {
          * Allow the per-target diagnostic configuration to override the base
          * diagnostic configuration.
          */
-        Ok(self.config.diag.apply_overrides(&t.diag)?.build()?)
+        Ok(self.config.diag.apply_overrides(&t.diag).build()?)
     }
 }
 

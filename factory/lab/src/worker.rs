@@ -290,6 +290,12 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
                                         dump_to_rpool: None,
                                         post_job_diagnostic_script: None,
                                         pre_job_diagnostic_script: None,
+                                        /*
+                                         * The lab worker currently boots
+                                         * chiefly UFS ramdisks and does not
+                                         * provide a ZFS pool backed by a disk.
+                                         */
+                                        rpool_disable_sync: Some(false),
                                     },
                                 )))
                         })
