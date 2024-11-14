@@ -685,10 +685,30 @@ impl Database {
             "".to_string()
         };
 
+        /*
+         * Report the assignment in a message that appears in the job event
+         * stream.  Try to include some details about the worker; e.g., the name
+         * of the factory that created it and the factory-private identifier for
+         * the backing resource.
+         */
+        let mut extra = Vec::new();
+        if let Some(fid) = w.factory {
+            let f = self.i_factory(h, fid)?;
+            extra.push(format!("factory {}", f.name));
+        }
+        if let Some(fp) = w.factory_private.as_deref() {
+            extra.push(fp.to_string());
+        }
+        let extra = if extra.is_empty() {
+            "".to_string()
+        } else {
+            format!(" [{}]", extra.join(", "))
+        };
+
         let seq = self.i_job_control_event_insert(
             h,
             j.id,
-            &format!("job assigned to worker {}{}", w.id, wait),
+            &format!("job assigned to worker {}{extra}{wait}", w.id),
         )?;
 
         self.i_job_notify(h, &j, seq, false, true);
@@ -2659,6 +2679,10 @@ impl Database {
     }
 
     pub fn factory(&self, id: FactoryId) -> DBResult<Factory> {
+        self.sql.tx(|h| self.i_factory(h, id))
+    }
+
+    fn i_factory(&self, h: &mut Handle, id: FactoryId) -> DBResult<Factory> {
         if id == Worker::legacy_default_factory_id() {
             /*
              * Factory records for workers that were created prior to the
@@ -2678,7 +2702,7 @@ impl Database {
             });
         }
 
-        self.sql.tx(|h| h.get_row(Factory::find(id)))
+        h.get_row(Factory::find(id))
     }
 
     pub fn factory_auth(&self, token: &str) -> DBResult<Factory> {
