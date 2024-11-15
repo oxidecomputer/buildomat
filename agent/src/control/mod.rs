@@ -13,7 +13,7 @@ use tokio::{
     net::UnixStream,
 };
 
-use protocol::{Decoder, Message, Payload};
+use protocol::{Decoder, FactoryInfo, Message, Payload};
 
 pub(crate) mod protocol;
 pub(crate) mod server;
@@ -79,6 +79,7 @@ pub async fn main() -> Result<()> {
     l.cmd("store", "access the job store", cmd!(cmd_store))?;
     l.cmd("address", "manage IP addresses for this job", cmd!(cmd_address))?;
     l.cmd("process", "manage background processes", cmd!(cmd_process))?;
+    l.cmd("factory", "factory information for this worker", cmd!(cmd_factory))?;
     l.hcmd("eng", "for working on and testing buildomat", cmd!(cmd_eng))?;
 
     sel!(l).run().await
@@ -490,4 +491,90 @@ async fn cmd_process_start(mut l: Level<Stuff>) -> Result<()> {
             bail!("could not talk to the agent: {e}");
         }
     }
+}
+
+async fn factory_info(s: &mut Stuff) -> Result<FactoryInfo> {
+    let mout =
+        Message { id: s.ids.next().unwrap(), payload: Payload::FactoryInfo };
+
+    match s.send_and_recv(&mout).await {
+        Ok(min) => {
+            match min.payload {
+                Payload::Error(e) => {
+                    /*
+                     * This request is purely local to the agent, so an
+                     * error is not something we should retry indefinitely.
+                     */
+                    bail!("could not get factory info: {e}");
+                }
+                Payload::FactoryInfoResult(fi) => Ok(fi),
+                other => bail!("unexpected response: {other:?}"),
+            }
+        }
+        Err(e) => {
+            /*
+             * Requests to the agent are relatively simple and over a UNIX
+             * socket; they should not fail.  This implies something has
+             * gone seriously wrong and it is unlikely that it will be fixed
+             * without intervention.  Don't retry.
+             */
+            bail!("could not talk to the agent: {e}");
+        }
+    }
+}
+
+async fn cmd_factory(mut l: Level<Stuff>) -> Result<()> {
+    l.context_mut().connect().await?;
+
+    l.cmd(
+        "name",
+        "print the name of the factory that produced this worker",
+        cmd!(cmd_factory_name),
+    )?;
+    l.cmd(
+        "id",
+        "print the unique ID of the factory that produced this worker",
+        cmd!(cmd_factory_id),
+    )?;
+    l.cmd(
+        "private",
+        "print the factory-specific identifier for the underlying resource",
+        cmd!(cmd_factory_private),
+    )?;
+
+    sel!(l).run().await
+}
+
+async fn cmd_factory_id(mut l: Level<Stuff>) -> Result<()> {
+    no_args!(l);
+
+    let fi = factory_info(l.context_mut()).await?;
+
+    println!("{}", fi.id);
+
+    Ok(())
+}
+
+async fn cmd_factory_name(mut l: Level<Stuff>) -> Result<()> {
+    no_args!(l);
+
+    let fi = factory_info(l.context_mut()).await?;
+
+    println!("{}", fi.name);
+
+    Ok(())
+}
+
+async fn cmd_factory_private(mut l: Level<Stuff>) -> Result<()> {
+    no_args!(l);
+
+    let fi = factory_info(l.context_mut()).await?;
+
+    let Some(fp) = &fi.private else {
+        bail!("factory private info not available");
+    };
+
+    println!("{fp}");
+
+    Ok(())
 }

@@ -119,10 +119,18 @@ pub(crate) struct WorkerPingJob {
 }
 
 #[derive(Serialize, JsonSchema)]
+pub(crate) struct WorkerPingFactoryInfo {
+    id: String,
+    name: String,
+    private: Option<String>,
+}
+
+#[derive(Serialize, JsonSchema)]
 pub(crate) struct WorkerPingResult {
     poweroff: bool,
     job: Option<WorkerPingJob>,
     factory_metadata: Option<metadata::FactoryMetadata>,
+    factory_info: Option<WorkerPingFactoryInfo>,
 }
 
 #[endpoint {
@@ -142,6 +150,8 @@ pub(crate) async fn worker_ping(
     c.db.worker_ping(w.id).or_500()?;
 
     let factory_metadata = w.factory_metadata().or_500()?;
+
+    let factory = c.db.factory(w.factory()).or_500()?;
 
     let job = if w.wait_for_flush {
         /*
@@ -217,7 +227,16 @@ pub(crate) async fn worker_ping(
         w.recycle || w.deleted
     };
 
-    let res = WorkerPingResult { poweroff, job, factory_metadata };
+    let res = WorkerPingResult {
+        poweroff,
+        job,
+        factory_metadata,
+        factory_info: Some(WorkerPingFactoryInfo {
+            id: factory.id.to_string(),
+            name: factory.name,
+            private: w.factory_private.clone(),
+        }),
+    };
 
     Ok(HttpResponseOk(res))
 }

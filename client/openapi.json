@@ -2767,6 +2767,10 @@
                 "nullable": true,
                 "type": "string"
               },
+              "rpool_disable_sync": {
+                "nullable": true,
+                "type": "boolean"
+              },
               "v": {
                 "type": "string",
                 "enum": [
@@ -3929,6 +3933,25 @@
           "value"
         ]
       },
+      "WorkerPingFactoryInfo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "private": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
       "WorkerPingInput": {
         "type": "object",
         "properties": {
@@ -4006,6 +4029,14 @@
       "WorkerPingResult": {
         "type": "object",
         "properties": {
+          "factory_info": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkerPingFactoryInfo"
+              }
+            ]
+          },
           "factory_metadata": {
             "nullable": true,
             "allOf": [

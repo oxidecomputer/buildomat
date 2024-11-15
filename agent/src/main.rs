@@ -36,7 +36,7 @@ mod exec;
 mod shadow;
 mod upload;
 
-use control::protocol::Payload;
+use control::protocol::{FactoryInfo, Payload};
 use exec::ExitDetails;
 
 const CONFIG_PATH: &str = "/opt/buildomat/etc/agent.json";
@@ -1201,6 +1201,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
     let mut bgprocs = exec::BackgroundProcesses::new();
 
     let mut metadata: Option<metadata::FactoryMetadata> = None;
+    let mut factory: Option<WorkerPingFactoryInfo> = None;
     let mut set_root_password = false;
     let mut set_root_keys = false;
     let mut dump_device_configured = false;
@@ -1293,6 +1294,10 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                          */
                         sleep_ms(1000).await;
                         continue;
+                    }
+
+                    if let Some(fi) = &p.factory_info {
+                        factory = Some(fi.clone());
                     }
 
                     if let Some(md) = &p.factory_metadata {
@@ -1429,6 +1434,17 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                     match bgprocs.start(name, cmd, args, env, pwd, *uid, *gid) {
                         Ok(_) => Payload::Ack,
                         Err(e) => Payload::Error(e.to_string()),
+                    }
+                }
+                Payload::FactoryInfo => {
+                    if let Some(f) = &factory {
+                        Payload::FactoryInfoResult(FactoryInfo {
+                            id: f.id.to_string(),
+                            name: f.name.to_string(),
+                            private: f.private.clone(),
+                        })
+                    } else {
+                        Payload::Error("factory info not available".into())
                     }
                 }
                 _ => Payload::Error("unexpected message type".to_string()),

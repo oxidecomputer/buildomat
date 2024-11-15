@@ -10,6 +10,13 @@ use bytes::{Buf, BufMut, BytesMut};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct FactoryInfo {
+    pub id: String,
+    pub name: String,
+    pub private: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct StoreEntry {
     pub name: String,
     pub value: String,
@@ -38,6 +45,9 @@ pub enum Payload {
         uid: u32,
         gid: u32,
     },
+
+    FactoryInfo,
+    FactoryInfoResult(FactoryInfo),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

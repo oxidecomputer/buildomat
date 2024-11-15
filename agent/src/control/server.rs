@@ -204,7 +204,8 @@ async fn handle_client_turn(
                 Payload::StoreGet(..)
                 | Payload::StorePut(..)
                 | Payload::MetadataAddresses
-                | Payload::ProcessStart { .. } => {
+                | Payload::ProcessStart { .. }
+                | Payload::FactoryInfo => {
                     /*
                      * These are requests from the control program.  Pass them
                      * on to the main loop.
