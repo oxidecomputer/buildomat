@@ -8,8 +8,9 @@ use anyhow::{bail, Result};
 use buildomat_client::{types::TaskSubmit, ClientExt, EventOrState};
 use buildomat_common::*;
 use buildomat_sse::ServerSentEvents;
+use dropshot::Body;
 use futures::future::BoxFuture;
-use hyper::{Body, Response};
+use hyper::Response;
 use serde::{Deserialize, Serialize};
 
 use crate::JobEventEx;

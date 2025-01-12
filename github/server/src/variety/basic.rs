@@ -9,8 +9,11 @@ use buildomat_common::*;
 use buildomat_github_database::{types::*, Database};
 use buildomat_jobsh::variety::basic::{output_sse, output_table, BasicConfig};
 use chrono::SecondsFormat;
-use futures::{FutureExt, StreamExt};
-use hyper::{Body, Response};
+use dropshot::Body;
+use futures::{FutureExt, StreamExt, TryStreamExt};
+use http_body_util::StreamBody;
+use hyper::body::Frame;
+use hyper::Response;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use slog::{debug, error, info, o, trace, warn, Logger};
@@ -936,7 +939,7 @@ pub(crate) async fn artefact(
     output: &str,
     name: &str,
     format: Option<&str>,
-) -> Result<Option<hyper::Response<hyper::Body>>> {
+) -> Result<Option<hyper::Response<Body>>> {
     let p: BasicPrivate = cr.get_private()?;
 
     let bunyan = match format {
@@ -1039,7 +1042,9 @@ pub(crate) async fn artefact(
                     .status(hyper::StatusCode::OK)
                     .header(hyper::header::CONTENT_TYPE, "text/html")
                     .header(hyper::header::CONTENT_LENGTH, md.len())
-                    .body(hyper::Body::wrap_stream(stream))?,
+                    .body(Body::wrap(StreamBody::new(
+                        stream.map_ok(|b| Frame::data(b)),
+                    )))?,
             ));
         }
 
@@ -1048,7 +1053,9 @@ pub(crate) async fn artefact(
                 .status(hyper::StatusCode::OK)
                 .header(hyper::header::CONTENT_TYPE, ct)
                 .header(hyper::header::CONTENT_LENGTH, cl)
-                .body(hyper::Body::wrap_stream(backend.into_inner_stream()))?,
+                .body(Body::wrap(StreamBody::new(
+                    backend.into_inner_stream().map_ok(|b| Frame::data(b)),
+                )))?,
         ));
     }
 

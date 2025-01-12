@@ -2,17 +2,19 @@ use std::{result::Result as SResult, time::Duration};
 
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
+use dropshot::Body;
 use http::{
     header::{CACHE_CONTROL, CONTENT_TYPE},
     Response, StatusCode,
 };
-use hyper::Body;
+use http_body_util::StreamBody;
+use hyper::body::Frame;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 pub struct ServerSentEvents {
     tx: mpsc::Sender<String>,
-    brx: Option<mpsc::Receiver<SResult<Bytes, std::io::Error>>>,
+    brx: Option<mpsc::Receiver<SResult<Frame<Bytes>, std::io::Error>>>,
 }
 
 const PING_INTERVAL_SECONDS: u64 = 5;
@@ -20,7 +22,8 @@ const SEND_TIMEOUT: u64 = 15;
 
 impl Default for ServerSentEvents {
     fn default() -> Self {
-        let (btx, brx) = mpsc::channel::<SResult<Bytes, std::io::Error>>(1);
+        let (btx, brx) =
+            mpsc::channel::<SResult<Frame<Bytes>, std::io::Error>>(1);
         let (tx, mut rx) = mpsc::channel::<String>(64);
 
         /*
@@ -47,10 +50,13 @@ impl Default for ServerSentEvents {
                     },
                 };
 
-                let output = match act {
-                    Act::Ping => ": nothing happens\n".into(),
-                    Act::Send(ev) => ev.into(),
-                };
+                let output = Frame::data(
+                    match act {
+                        Act::Ping => ": nothing happens\n".as_bytes().to_vec(),
+                        Act::Send(ev) => ev.into_bytes(),
+                    }
+                    .into(),
+                );
 
                 match btx
                     .send_timeout(Ok(output), Duration::from_secs(SEND_TIMEOUT))
@@ -98,11 +104,11 @@ impl ServerSentEvents {
              * No client or proxy should cache these responses:
              */
             .header(CACHE_CONTROL, "no-store")
-            .body(Body::wrap_stream(ReceiverStream::new(
+            .body(Body::wrap(StreamBody::new(ReceiverStream::new(
                 self.brx.take().ok_or_else(|| {
                     anyhow!("body already created for stream")
                 })?,
-            )))?)
+            ))))?)
     }
 
     pub fn build_event(&self) -> EventBuilder {

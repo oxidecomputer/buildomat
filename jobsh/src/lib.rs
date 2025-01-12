@@ -116,24 +116,22 @@ fn encode_payload(payload: &str) -> Cow<'_, str> {
      * completed.  Other systems like GitHub Actions (as checked on 2024-09-03)
      * don't handle multiline color either, so it's fine to punt on that.
      */
-    ansi_to_html::convert_with_opts(
-        payload,
-        &ansi_to_html::Opts::default()
-            .four_bit_var_prefix(Some("ansi-".to_string())),
-    )
-    .map_or_else(
-        |_| {
-            /*
-             * Invalid ANSI code: only escape HTML in case the conversion to
-             * ANSI fails.  To maintain consistency we use the same logic as
-             * ansi-to-html: do not escape "/".  (There are other differences,
-             * such as ansi-to-html using decimal escapes while html_escape uses
-             * hex, but those are immaterial.)
-             */
-            html_escape::encode_quoted_attribute(payload)
-        },
-        Cow::Owned,
-    )
+    ansi_to_html::Converter::new()
+        .four_bit_var_prefix(Some("ansi-".to_string()))
+        .convert(payload)
+        .map_or_else(
+            |_| {
+                /*
+                 * Invalid ANSI code: only escape HTML in case the conversion to
+                 * ANSI fails.  To maintain consistency we use the same logic as
+                 * ansi-to-html: do not escape "/".  (There are other
+                 * differences, such as ansi-to-html using decimal escapes while
+                 * html_escape uses hex, but those are immaterial.)
+                 */
+                html_escape::encode_quoted_attribute(payload)
+            },
+            Cow::Owned,
+        )
 }
 
 #[derive(Debug, Serialize)]

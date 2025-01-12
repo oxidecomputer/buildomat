@@ -18,11 +18,12 @@ use aws_sdk_s3::primitives::ByteStream;
 use buildomat_common::*;
 use buildomat_download::unruin_content_length;
 use dropshot::{
-    endpoint, ApiDescription, ConfigDropshot, HttpError, HttpServerStarter,
-    Query as TypedQuery, RequestContext, RequestInfo,
+    endpoint, ApiDescription, Body, ClientErrorStatusCode, ConfigDropshot,
+    HttpError, HttpServerStarter, Query as TypedQuery, RequestContext,
+    RequestInfo,
 };
 use getopts::Options;
-use hyper::{header::AUTHORIZATION, Body, Response, StatusCode};
+use hyper::{header::AUTHORIZATION, Response};
 use rusty_ulid::Ulid;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -73,7 +74,7 @@ impl<T> MakeInternalError<T> for buildomat_database::DBResult<T> {
             match e {
                 DatabaseError::Conflict(msg) => HttpError::for_client_error(
                     Some("conflict".to_string()),
-                    StatusCode::CONFLICT,
+                    ClientErrorStatusCode::CONFLICT,
                     msg,
                 ),
                 _ => {
@@ -128,7 +129,7 @@ struct Central {
 pub(crate) fn unauth_response<T>() -> SResult<T, HttpError> {
     Err(HttpError::for_client_error(
         None,
-        StatusCode::UNAUTHORIZED,
+        ClientErrorStatusCode::UNAUTHORIZED,
         "not authorised".into(),
     ))
 }
@@ -718,7 +719,7 @@ impl Central {
         } else {
             Err(HttpError::for_client_error(
                 None,
-                StatusCode::FORBIDDEN,
+                ClientErrorStatusCode::FORBIDDEN,
                 "not your job".into(),
             ))
         }
@@ -1023,7 +1024,7 @@ async fn main() -> Result<()> {
     if let Some(s) = p.opt_str("S") {
         let mut f =
             std::fs::OpenOptions::new().create_new(true).write(true).open(s)?;
-        ad.openapi("Buildomat", "1.0").write(&mut f)?;
+        ad.openapi("Buildomat", semver::Version::new(1, 0, 0)).write(&mut f)?;
         return Ok(());
     }
 
@@ -1116,7 +1117,7 @@ async fn main() -> Result<()> {
     let server = HttpServerStarter::new(
         #[allow(clippy::needless_update)]
         &ConfigDropshot {
-            request_body_max_bytes: 10 * 1024 * 1024,
+            default_request_body_max_bytes: 10 * 1024 * 1024,
             bind_address,
             log_headers: vec!["X-Forwarded-For".into()],
             ..Default::default()

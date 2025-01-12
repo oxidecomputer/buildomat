@@ -6,7 +6,9 @@ edition = "2021"
 [dependencies]
 anyhow = { workspace = true }
 bytes = { workspace = true }
+dropshot = { workspace = true }
 http = { workspace = true }
+http-body-util = { workspace = true }
 hyper = { workspace = true }
 slog = { workspace = true }
 tokio = { workspace = true }

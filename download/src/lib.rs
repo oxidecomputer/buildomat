@@ -5,9 +5,12 @@
 use anyhow::Result;
 use bytes::Bytes;
 
+use dropshot::Body;
+use http_body_util::StreamBody;
 use hyper::{
+    body::Frame,
     header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE},
-    Body, Response, StatusCode,
+    Response, StatusCode,
 };
 
 use tokio::sync::mpsc;
@@ -24,7 +27,7 @@ fn bad_range_response(file_size: u64) -> Response<Body> {
         .status(StatusCode::RANGE_NOT_SATISFIABLE)
         .header(ACCEPT_RANGES, "bytes")
         .header(CONTENT_RANGE, format!("bytes */{file_size}"))
-        .body(hyper::Body::empty())
+        .body(Body::wrap(http_body_util::Empty::new()))
         .unwrap()
 }
 
@@ -37,7 +40,7 @@ fn make_get_response<E>(
     crange: Option<SingleRange>,
     file_length: u64,
     content_type: Option<&str>,
-    rx: mpsc::Receiver<std::result::Result<Bytes, E>>,
+    rx: mpsc::Receiver<std::result::Result<Frame<Bytes>, E>>,
 ) -> Result<Response<Body>>
 where
     E: Into<Box<(dyn std::error::Error + Send + Sync + 'static)>>
@@ -46,7 +49,9 @@ where
         + 'static,
 {
     Ok(make_response_common(crange, file_length, content_type)?.body(
-        Body::wrap_stream(tokio_stream::wrappers::ReceiverStream::new(rx)),
+        Body::wrap(StreamBody::new(
+            tokio_stream::wrappers::ReceiverStream::new(rx),
+        )),
     )?)
 }
 
@@ -61,7 +66,7 @@ fn make_head_response(
     content_type: Option<&str>,
 ) -> Result<Response<Body>> {
     Ok(make_response_common(crange, file_length, content_type)?
-        .body(Body::empty())?)
+        .body(Body::wrap(http_body_util::Empty::new()))?)
 }
 
 fn make_response_common(

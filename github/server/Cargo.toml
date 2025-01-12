@@ -23,6 +23,7 @@ dropshot = { workspace = true }
 futures = { workspace = true }
 hmac-sha256 = { workspace = true }
 html-escape = { workspace = true }
+http-body-util = { workspace = true }
 hyper = { workspace = true }
 pem = { workspace = true }
 reqwest = { workspace = true }

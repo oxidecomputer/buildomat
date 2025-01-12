@@ -20,7 +20,7 @@ impl JobOwns for db::Worker {
 
         Err(HttpError::for_client_error(
             None,
-            StatusCode::FORBIDDEN,
+            ClientErrorStatusCode::FORBIDDEN,
             "not your job".into(),
         ))
     }
@@ -563,7 +563,7 @@ pub(crate) async fn worker_job_complete(
         error!(log, "worker {} cannot complete job {}: {e}", w.id, j.id);
         return Err(HttpError::for_client_error(
             None,
-            StatusCode::CONFLICT,
+            ClientErrorStatusCode::CONFLICT,
             format!("cannot complete job: {e}"),
         ));
     }
@@ -676,7 +676,7 @@ pub(crate) async fn worker_job_add_output(
     if add.size > max {
         return Err(HttpError::for_client_error(
             None,
-            StatusCode::BAD_REQUEST,
+            ClientErrorStatusCode::BAD_REQUEST,
             format!(
                 "output file size {} bigger than allowed maximum {max} bytes",
                 add.size,
@@ -728,7 +728,7 @@ pub(crate) async fn worker_job_add_output(
             );
             Err(HttpError::for_client_error(
                 Some("invalid".to_string()),
-                StatusCode::BAD_REQUEST,
+                ClientErrorStatusCode::BAD_REQUEST,
                 format!("{}", e),
             ))
         }
@@ -764,7 +764,7 @@ pub(crate) async fn worker_job_add_output_sync(
     let addsize = if add.size < 0 || add.size > 1024 * 1024 * 1024 {
         return Err(HttpError::for_client_error(
             Some("invalid".to_string()),
-            StatusCode::BAD_REQUEST,
+            ClientErrorStatusCode::BAD_REQUEST,
             format!("size {} must be between 0 and 1073741824", add.size),
         ));
     } else {
@@ -795,7 +795,7 @@ pub(crate) async fn worker_job_add_output_sync(
             );
             return Err(HttpError::for_client_error(
                 Some("invalid".to_string()),
-                StatusCode::BAD_REQUEST,
+                ClientErrorStatusCode::BAD_REQUEST,
                 format!("{:?}", e),
             ));
         }

@@ -13,6 +13,7 @@ aws-sdk-s3 = { workspace = true }
 bytes = { workspace = true }
 dropshot = { workspace = true }
 futures = { workspace = true }
+http-body-util = { workspace = true }
 http-range = { workspace = true }
 hyper = { workspace = true }
 reqwest = { workspace = true }

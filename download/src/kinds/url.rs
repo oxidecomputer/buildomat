@@ -6,10 +6,12 @@ use super::sublude::*;
 
 use anyhow::{anyhow, bail, Result};
 
+use dropshot::Body;
 use futures::TryStreamExt;
 use hyper::{
+    body::Frame,
     header::{CONTENT_LENGTH, CONTENT_RANGE, RANGE},
-    Body, Response, StatusCode,
+    Response, StatusCode,
 };
 use slog::{o, Logger};
 use tokio::sync::mpsc;
@@ -200,7 +202,7 @@ pub async fn stream_from_url(
                      * Pass the read bytes onto the client.
                      */
                     sw.add_bytes(data.len());
-                    if tx.send(Ok(data)).await.is_err() {
+                    if tx.send(Ok(Frame::data(data))).await.is_err() {
                         sw.fail(&log, "interrupted on client side").ok();
                         return;
                     }

@@ -63,7 +63,7 @@ pub(crate) async fn public_file_common(
     } else {
         return Err(HttpError::for_client_error(
             None,
-            StatusCode::NOT_FOUND,
+            ClientErrorStatusCode::NOT_FOUND,
             "published file not found".into(),
         ));
     };
@@ -76,7 +76,7 @@ pub(crate) async fn public_file_common(
     } else {
         return Err(HttpError::for_client_error(
             None,
-            StatusCode::NOT_FOUND,
+            ClientErrorStatusCode::NOT_FOUND,
             "published file not found".into(),
         ));
     };

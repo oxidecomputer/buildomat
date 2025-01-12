@@ -10,7 +10,7 @@ use buildomat_github_database::types::*;
 use buildomat_sse::HeaderMapEx;
 use chrono::prelude::*;
 use dropshot::{
-    endpoint, ConfigDropshot, HttpError, HttpResponseOk, RequestContext,
+    endpoint, Body, ConfigDropshot, HttpError, HttpResponseOk, RequestContext,
 };
 use futures::TryStreamExt;
 use schemars::JsonSchema;
@@ -47,9 +47,7 @@ fn interr<T>(log: &slog::Logger, msg: &str) -> SResult<T, dropshot::HttpError> {
 /**
  * Return a 404 error HTML page for a browser user.
  */
-fn html_404(
-    head_only: bool,
-) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+fn html_404(head_only: bool) -> SResult<hyper::Response<Body>, HttpError> {
     let body = include_bytes!("../../../www/notfound.html").as_slice();
 
     let res = hyper::Response::builder()
@@ -58,9 +56,9 @@ fn html_404(
         .header(hyper::header::CONTENT_LENGTH, body.len());
 
     Ok(if head_only {
-        res.body(hyper::Body::empty())?
+        res.body(Body::empty())?
     } else {
-        res.body(body.into())?
+        res.body(body.to_vec().into())?
     })
 }
 
@@ -71,7 +69,7 @@ fn html_404(
 fn html_500(
     req_id: &str,
     head_only: bool,
-) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+) -> SResult<hyper::Response<Body>, HttpError> {
     let body = include_str!("../../../www/error.html")
         .replace(
             "<!-- %EXTRA% -->",
@@ -88,7 +86,7 @@ fn html_500(
         .header(hyper::header::CONTENT_LENGTH, body.len());
 
     Ok(if head_only {
-        res.body(hyper::Body::empty())?
+        res.body(Body::empty())?
     } else {
         res.body(body.into())?
     })
@@ -201,7 +199,7 @@ async fn artefact(
     rc: RequestContext<Arc<App>>,
     path: dropshot::Path<ArtefactPath>,
     query: dropshot::Query<ArtefactQuery>,
-) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+) -> SResult<hyper::Response<Body>, HttpError> {
     let app = rc.context();
     let path = path.into_inner();
     let query = query.into_inner();
@@ -284,7 +282,7 @@ async fn details(
     rc: RequestContext<Arc<App>>,
     path: dropshot::Path<DetailsPath>,
     query: dropshot::Query<DetailsQuery>,
-) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+) -> SResult<hyper::Response<Body>, HttpError> {
     let app = rc.context();
     let path = path.into_inner();
 
@@ -360,7 +358,7 @@ async fn details(
         .status(hyper::StatusCode::OK)
         .header(hyper::header::CONTENT_TYPE, "text/html; charset=utf-8")
         .header(hyper::header::CONTENT_LENGTH, out.as_bytes().len())
-        .body(hyper::Body::from(out))?)
+        .body(Body::from(out))?)
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -376,7 +374,7 @@ async fn details_live(
     rc: RequestContext<Arc<App>>,
     path: dropshot::Path<DetailsPath>,
     query: dropshot::Query<DetailsLiveQuery>,
-) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+) -> SResult<hyper::Response<Body>, HttpError> {
     let app = rc.context();
     let path = path.into_inner();
     let query = query.into_inner();
@@ -518,7 +516,7 @@ async fn webhook(
 }]
 async fn status(
     rc: RequestContext<Arc<App>>,
-) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+) -> SResult<hyper::Response<Body>, HttpError> {
     match status_impl(&rc).await {
         Ok(res) => Ok(res),
         Err(e) => {
@@ -530,7 +528,7 @@ async fn status(
 
 async fn status_impl(
     rc: &RequestContext<Arc<App>>,
-) -> Result<hyper::Response<hyper::Body>> {
+) -> Result<hyper::Response<Body>> {
     let app = rc.context();
     let b = app.buildomat_admin();
 
@@ -832,7 +830,7 @@ async fn status_impl(
         .status(hyper::StatusCode::OK)
         .header(hyper::header::CONTENT_TYPE, "text/html; charset=utf-8")
         .header(hyper::header::CONTENT_LENGTH, out.as_bytes().len())
-        .body(hyper::Body::from(out))?)
+        .body(Body::from(out))?)
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -851,7 +849,7 @@ struct PublishedFilePath {
 async fn published_file_head(
     rc: RequestContext<Arc<App>>,
     path: dropshot::Path<PublishedFilePath>,
-) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+) -> SResult<hyper::Response<Body>, HttpError> {
     published_file_common(rc, path, true).await
 }
 
@@ -862,7 +860,7 @@ async fn published_file_head(
 async fn published_file(
     rc: RequestContext<Arc<App>>,
     path: dropshot::Path<PublishedFilePath>,
-) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+) -> SResult<hyper::Response<Body>, HttpError> {
     published_file_common(rc, path, false).await
 }
 
@@ -870,7 +868,7 @@ async fn published_file_common(
     rc: RequestContext<Arc<App>>,
     path: dropshot::Path<PublishedFilePath>,
     head_only: bool,
-) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+) -> SResult<hyper::Response<Body>, HttpError> {
     let app = rc.context();
     let path = path.into_inner();
     let pr = rc.range();
@@ -953,7 +951,7 @@ struct BranchToCommitPath {
 async fn branch_to_commit(
     rc: RequestContext<Arc<App>>,
     path: dropshot::Path<BranchToCommitPath>,
-) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+) -> SResult<hyper::Response<Body>, HttpError> {
     let log = &rc.log;
     let app = rc.context();
     let path = path.into_inner();
@@ -1035,7 +1033,7 @@ struct StaticPath {
 async fn static_file(
     _rc: RequestContext<Arc<App>>,
     path: dropshot::Path<StaticPath>,
-) -> SResult<hyper::Response<hyper::Body>, HttpError> {
+) -> SResult<hyper::Response<Body>, HttpError> {
     let path = path.into_inner();
 
     let (code, ctype, bytes) = match path.name.as_str() {
@@ -1083,7 +1081,7 @@ async fn static_file(
         .status(code)
         .header(hyper::header::CONTENT_TYPE, ctype)
         .header(hyper::header::CONTENT_LENGTH, bytes.len())
-        .body(bytes.into())?)
+        .body(bytes.to_vec().into())?)
 }
 
 pub(crate) async fn server(
@@ -1092,7 +1090,7 @@ pub(crate) async fn server(
 ) -> Result<()> {
     let cd = ConfigDropshot {
         bind_address,
-        request_body_max_bytes: 1024 * 1024,
+        default_request_body_max_bytes: 1024 * 1024,
         log_headers: vec!["X-Forwarded-For".into()],
         ..Default::default()
     };

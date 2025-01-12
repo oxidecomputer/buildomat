@@ -325,12 +325,14 @@ macro_rules! sqlite_ulid_new_type {
             }
 
             pub fn datetime(&self) -> chrono::DateTime<chrono::Utc> {
-                self.0.datetime()
+                chrono::DateTime::from_timestamp_millis(
+                    self.0.timestamp().try_into().unwrap()
+                ).unwrap()
             }
 
             pub fn age(&self) -> std::time::Duration {
                 chrono::Utc::now()
-                    .signed_duration_since(self.0.datetime())
+                    .signed_duration_since(self.datetime())
                     .to_std()
                     .unwrap_or_else(|_| std::time::Duration::from_secs(0))
             }
