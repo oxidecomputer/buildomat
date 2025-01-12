@@ -9,8 +9,10 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 
 use buildomat_download::RequestContextEx;
-use dropshot::{HttpError, Path as TypedPath, Query as TypedQuery};
-use hyper::StatusCode;
+use dropshot::{
+    Body, ClientErrorStatusCode, HttpError, Path as TypedPath,
+    Query as TypedQuery,
+};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use slog::info;
@@ -121,7 +123,7 @@ impl<T> MakeInternalError<T> for buildomat_database::DBResult<T> {
             match e {
                 DatabaseError::Conflict(msg) => HttpError::for_client_error(
                     Some("conflict".to_string()),
-                    StatusCode::CONFLICT,
+                    ClientErrorStatusCode::CONFLICT,
                     msg,
                 ),
                 _ => {
@@ -152,7 +154,7 @@ impl CentralExt for Central {
         } else {
             Err(dropshot::HttpError::for_client_error(
                 None,
-                StatusCode::BAD_REQUEST,
+                ClientErrorStatusCode::BAD_REQUEST,
                 "invalid host".to_string(),
             ))
         }
@@ -164,7 +166,7 @@ impl CentralExt for Central {
         } else {
             Err(dropshot::HttpError::for_client_error(
                 None,
-                StatusCode::BAD_REQUEST,
+                ClientErrorStatusCode::BAD_REQUEST,
                 "host has invalid target".to_string(),
             ))
         }
@@ -195,7 +197,7 @@ struct HostFilePath {
 async fn os_file(
     ctx: dropshot::RequestContext<Arc<Central>>,
     path: TypedPath<HostFilePath>,
-) -> HResult<hyper::Response<hyper::Body>> {
+) -> HResult<hyper::Response<Body>> {
     let c = ctx.context();
     let path = path.into_inner();
     let pr = ctx.range();
@@ -259,7 +261,7 @@ async fn signal(
     ctx: dropshot::RequestContext<Arc<Central>>,
     query: TypedQuery<KeyQuery>,
     path: TypedPath<IpxePath>,
-) -> HResult<hyper::Response<hyper::Body>> {
+) -> HResult<hyper::Response<Body>> {
     let c = ctx.context();
     let path = path.into_inner();
     let query = query.into_inner();
@@ -311,7 +313,7 @@ async fn signal(
 async fn postboot_script(
     ctx: dropshot::RequestContext<Arc<Central>>,
     path: TypedPath<IpxePath>,
-) -> HResult<hyper::Response<hyper::Body>> {
+) -> HResult<hyper::Response<Body>> {
     let c = ctx.context();
     let path = path.into_inner();
 
@@ -359,7 +361,7 @@ async fn postboot_script(
 async fn ipxe_script(
     ctx: dropshot::RequestContext<Arc<Central>>,
     path: TypedPath<IpxePath>,
-) -> HResult<hyper::Response<hyper::Body>> {
+) -> HResult<hyper::Response<Body>> {
     let c = ctx.context();
     let path = path.into_inner();
 
@@ -400,7 +402,7 @@ pub fn dump_api<P: AsRef<Path>>(p: P) -> Result<()> {
     let ad = make_api()?;
     let mut f =
         std::fs::OpenOptions::new().create_new(true).write(true).open(p)?;
-    ad.openapi("Minder", "1.0").write(&mut f)?;
+    ad.openapi("Minder", semver::Version::new(1, 0, 0)).write(&mut f)?;
     Ok(())
 }
 

@@ -423,7 +423,7 @@ pub(crate) async fn job_output_signed_url(
     if b.expiry_seconds > 3600 {
         return Err(HttpError::for_client_error(
             None,
-            StatusCode::BAD_REQUEST,
+            ClientErrorStatusCode::BAD_REQUEST,
             "URLs can last at most one hour (3600 seconds)".into(),
         ));
     }
@@ -482,7 +482,7 @@ impl JobOutputPublish {
         } else {
             Err(HttpError::for_client_error(
                 None,
-                StatusCode::BAD_REQUEST,
+                ClientErrorStatusCode::BAD_REQUEST,
                 "invalid published file ID".into(),
             ))
         }
@@ -945,7 +945,7 @@ fn parse_output_rule(input: &str) -> DSResult<db::CreateOutputRule> {
                 other => {
                     return Err(HttpError::for_client_error(
                         None,
-                        StatusCode::BAD_REQUEST,
+                        ClientErrorStatusCode::BAD_REQUEST,
                         format!("wanted sigil/absolute path, not {:?}", other),
                     ));
                 }
@@ -962,7 +962,7 @@ fn parse_output_rule(input: &str) -> DSResult<db::CreateOutputRule> {
                 other => {
                     return Err(HttpError::for_client_error(
                         None,
-                        StatusCode::BAD_REQUEST,
+                        ClientErrorStatusCode::BAD_REQUEST,
                         format!("{:?} unexpected in output rule", other),
                     ));
                 }
@@ -979,7 +979,7 @@ fn parse_output_rule(input: &str) -> DSResult<db::CreateOutputRule> {
                 other => {
                     return Err(HttpError::for_client_error(
                         None,
-                        StatusCode::BAD_REQUEST,
+                        ClientErrorStatusCode::BAD_REQUEST,
                         format!("{:?} unexpected in output rule", other),
                     ));
                 }
@@ -992,7 +992,7 @@ fn parse_output_rule(input: &str) -> DSResult<db::CreateOutputRule> {
                 other => {
                     return Err(HttpError::for_client_error(
                         None,
-                        StatusCode::BAD_REQUEST,
+                        ClientErrorStatusCode::BAD_REQUEST,
                         format!("wanted '/', not {:?}, in output rule", other),
                     ));
                 }
@@ -1004,7 +1004,7 @@ fn parse_output_rule(input: &str) -> DSResult<db::CreateOutputRule> {
     if !rule.starts_with('/') {
         return Err(HttpError::for_client_error(
             None,
-            StatusCode::BAD_REQUEST,
+            ClientErrorStatusCode::BAD_REQUEST,
             "output rule pattern must be absolute path".to_string(),
         ));
     }
@@ -1057,7 +1057,7 @@ pub(crate) async fn job_submit(
     if new_job.tasks.len() > 100 {
         return Err(HttpError::for_client_error(
             None,
-            StatusCode::BAD_REQUEST,
+            ClientErrorStatusCode::BAD_REQUEST,
             "too many tasks".into(),
         ));
     }
@@ -1065,7 +1065,7 @@ pub(crate) async fn job_submit(
     if new_job.inputs.len() > 25 {
         return Err(HttpError::for_client_error(
             None,
-            StatusCode::BAD_REQUEST,
+            ClientErrorStatusCode::BAD_REQUEST,
             "too many inputs".into(),
         ));
     }
@@ -1073,7 +1073,7 @@ pub(crate) async fn job_submit(
     if new_job.tags.len() > 100 {
         return Err(HttpError::for_client_error(
             None,
-            StatusCode::BAD_REQUEST,
+            ClientErrorStatusCode::BAD_REQUEST,
             "too many tags".into(),
         ));
     }
@@ -1083,7 +1083,7 @@ pub(crate) async fn job_submit(
     {
         return Err(HttpError::for_client_error(
             None,
-            StatusCode::BAD_REQUEST,
+            ClientErrorStatusCode::BAD_REQUEST,
             "total size of all tags is larger than 128KB".into(),
         ));
     }
@@ -1105,7 +1105,7 @@ pub(crate) async fn job_submit(
         {
             return Err(HttpError::for_client_error(
                 None,
-                StatusCode::BAD_REQUEST,
+                ClientErrorStatusCode::BAD_REQUEST,
                 "tag names must be [0-9a-z._-]+".into(),
             ));
         }
@@ -1121,7 +1121,7 @@ pub(crate) async fn job_submit(
             info!(log, "could not resolve target name {:?}", new_job.target);
             return Err(HttpError::for_client_error(
                 None,
-                StatusCode::BAD_REQUEST,
+                ClientErrorStatusCode::BAD_REQUEST,
                 format!("could not resolve target name {:?}", new_job.target),
             ));
         }
@@ -1143,7 +1143,7 @@ pub(crate) async fn job_submit(
             );
             return Err(HttpError::for_client_error(
                 None,
-                StatusCode::FORBIDDEN,
+                ClientErrorStatusCode::FORBIDDEN,
                 "you are not allowed to use that target".into(),
             ));
         }
@@ -1219,7 +1219,7 @@ pub(crate) async fn job_upload_chunk(
     if !job.waiting {
         return Err(HttpError::for_client_error(
             None,
-            StatusCode::CONFLICT,
+            ClientErrorStatusCode::CONFLICT,
             "cannot upload chunks for job that is not waiting".into(),
         ));
     }
@@ -1271,7 +1271,7 @@ pub(crate) async fn job_add_input(
     if add.name.contains('/') {
         return Err(HttpError::for_client_error(
             None,
-            StatusCode::BAD_REQUEST,
+            ClientErrorStatusCode::BAD_REQUEST,
             "name must not be a path".into(),
         ));
     }
@@ -1280,7 +1280,7 @@ pub(crate) async fn job_add_input(
     if add.size > max {
         return Err(HttpError::for_client_error(
             None,
-            StatusCode::BAD_REQUEST,
+            ClientErrorStatusCode::BAD_REQUEST,
             format!(
                 "input file size {} bigger than allowed maximum {max} bytes",
                 add.size,
@@ -1310,7 +1310,7 @@ pub(crate) async fn job_add_input(
     if !job.waiting && !c.files.commit_file_exists(job.id, commit_id) {
         return Err(HttpError::for_client_error(
             None,
-            StatusCode::CONFLICT,
+            ClientErrorStatusCode::CONFLICT,
             "cannot add inputs to a job that is not waiting".into(),
         ));
     }
@@ -1359,7 +1359,7 @@ pub(crate) async fn job_add_input(
             );
             Err(HttpError::for_client_error(
                 Some("invalid".to_string()),
-                StatusCode::BAD_REQUEST,
+                ClientErrorStatusCode::BAD_REQUEST,
                 format!("{}", e),
             ))
         }
@@ -1393,7 +1393,7 @@ pub(crate) async fn job_add_input_sync(
     if !job.waiting {
         return Err(HttpError::for_client_error(
             None,
-            StatusCode::CONFLICT,
+            ClientErrorStatusCode::CONFLICT,
             "cannot add inputs to a job that is not waiting".into(),
         ));
     }
@@ -1407,7 +1407,7 @@ pub(crate) async fn job_add_input_sync(
     let addsize = if add.size < 0 || add.size > 1024 * 1024 * 1024 {
         return Err(HttpError::for_client_error(
             Some("invalid".to_string()),
-            StatusCode::BAD_REQUEST,
+            ClientErrorStatusCode::BAD_REQUEST,
             format!("size {} must be between 0 and 1073741824", add.size),
         ));
     } else {
@@ -1416,7 +1416,7 @@ pub(crate) async fn job_add_input_sync(
     if add.name.contains('/') {
         return Err(HttpError::for_client_error(
             None,
-            StatusCode::BAD_REQUEST,
+            ClientErrorStatusCode::BAD_REQUEST,
             "name must not be a path".into(),
         ));
     }
@@ -1442,7 +1442,7 @@ pub(crate) async fn job_add_input_sync(
             );
             return Err(HttpError::for_client_error(
                 Some("invalid".to_string()),
-                StatusCode::BAD_REQUEST,
+                ClientErrorStatusCode::BAD_REQUEST,
                 format!("{:?}", e),
             ));
         }
@@ -1474,7 +1474,7 @@ pub(crate) async fn job_cancel(
     if job.complete {
         return Err(HttpError::for_client_error(
             None,
-            StatusCode::CONFLICT,
+            ClientErrorStatusCode::CONFLICT,
             "cannot cancel a job that is already complete".into(),
         ));
     }
@@ -1511,7 +1511,7 @@ pub(crate) async fn job_store_put(
     if job.complete {
         return Err(HttpError::for_client_error(
             None,
-            StatusCode::CONFLICT,
+            ClientErrorStatusCode::CONFLICT,
             "cannot update the store for a job that is already complete".into(),
         ));
     }

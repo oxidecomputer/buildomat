@@ -9,7 +9,8 @@ use std::os::unix::fs::FileExt;
 
 use anyhow::Result;
 use bytes::BytesMut;
-use hyper::{Body, Response};
+use dropshot::Body;
+use hyper::{body::Frame, Response};
 use slog::{o, Logger};
 use tokio::sync::mpsc;
 
@@ -128,7 +129,7 @@ pub async fn stream_from_file(
                      */
                     let buf = buf.freeze();
                     sw.add_bytes(buf.len());
-                    if tx.send(Ok(buf)).await.is_err() {
+                    if tx.send(Ok(Frame::data(buf))).await.is_err() {
                         sw.fail(&log, "interrupted on client side").ok();
                         return;
                     }

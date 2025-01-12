@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
+use hyper::body::Frame;
 use slog::{error, info, Logger};
 
 pub struct Stopwatch {
@@ -51,7 +52,7 @@ impl Stopwatch {
         );
     }
 
-    pub fn fail(self, log: &Logger, how: &str) -> Result<Bytes> {
+    pub fn fail(self, log: &Logger, how: &str) -> Result<Frame<Bytes>> {
         let (dur, rate_mb) = self.complete_common();
         let msg = format!("download failed: {}: {}", self.info, how);
 

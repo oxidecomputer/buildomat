@@ -24,7 +24,7 @@ impl WorkerOwns for db::Factory {
 
         Err(HttpError::for_client_error(
             None,
-            StatusCode::FORBIDDEN,
+            ClientErrorStatusCode::FORBIDDEN,
             "not your worker".into(),
         ))
     }
