@@ -43,6 +43,12 @@ basic_row(ev)
 	 */
 	LAST_EVENT = ev;
 
+	/*
+	 * Before we adjust the screen, determine whether we were already
+	 * looking at the base of the log output:
+	 */
+	let was_at_base = at_base();
+
 	try {
 		/*
 		 * The server is sending us an EventRow object:
@@ -128,9 +134,9 @@ basic_row(ev)
 	 */
 	LAST_NEW_RECORD = tr;
 
-	if (at_base()) {
+	if (was_at_base) {
 		/*
-		 * If we're at the base already, continue to scroll down when
+		 * If we were at the base already, continue to scroll down when
 		 * new log records arrive.
 		 */
 		basic_show_new();
@@ -159,7 +165,7 @@ function
 basic_show_new()
 {
 	if (LAST_NEW_RECORD !== null) {
-		LAST_NEW_RECORD.scrollIntoView(false);
+		LAST_NEW_RECORD.scrollIntoView({ block: "start" });
 	}
 
 	basic_new_records();
@@ -172,15 +178,28 @@ basic_show_new()
 function
 at_base()
 {
-	var sy = window.scrollY;
-	var ih = window.innerHeight;
-	var bsh = document.body.scrollHeight;
-	if (typeof (sy) !== "number" || typeof (ih) !== "number" ||
-	    typeof (bsh) !== "number") {
+	if (LAST_NEW_RECORD === null) {
 		return (false);
 	}
 
-	return ((sy + ih) + 25 >= bsh);
+	var bcr = LAST_NEW_RECORD.getBoundingClientRect();
+
+	var bcrb = bcr.bottom;
+	var bcrh = bcr.height;
+	var ih = window.innerHeight;
+	if (typeof (bcrb) !== "number" || typeof (bcrh) !== "number" ||
+	    typeof (ih) !== "number") {
+		return (false);
+	}
+
+	/*
+	 * If the most recently appended element is within the window, we
+	 * assume we're essentially scrolled to the bottom of the output.  We
+	 * use a fudge factor of 1.5 output lines, to try and work around the
+	 * fact that browsers are inscrutable nightmare cathedrals that fight
+	 * against developers and users alike.
+	 */
+	return (bcrb <= (ih + bcrh * 1.5));
 }
 
 /*
@@ -244,7 +263,7 @@ basic_new_records()
 	if (at_base() || !NEW_RECORDS) {
 		/*
 		 * If we're at the base of the page, we'll scroll live for new
-		 * records that show up and the button should disappear. We
+		 * records that show up and the button should disappear.  We
 		 * also shouldn't show the button if there are, as yet, no new
 		 * records.
 		 */
