@@ -1,3 +1,7 @@
+/*
+ * Copyright 2025 Oxide Computer Company
+ */
+
 use std::cmp::Ordering;
 use std::io::{Seek, Write};
 use std::path::PathBuf;
@@ -171,6 +175,30 @@ fn build_linux_agent() -> Result<()> {
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status()?;
+
+    println!("downloading built agent...");
+
+    Command::new("buildomat")
+        .arg("job")
+        .arg("copy")
+        .arg(&jid)
+        .arg("/out/buildomat-agent-linux.gz")
+        .arg("./buildomat-agent-linux.gz")
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()?;
+
+    println!("unpacking agent...");
+
+    Command::new("gunzip")
+        .arg("./buildomat-agent-linux.gz")
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()?;
+
+    println!("ok");
 
     Ok(())
 }
