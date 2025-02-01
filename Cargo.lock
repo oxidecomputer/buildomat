@@ -635,6 +635,7 @@ dependencies = [
  "rusty_ulid",
  "serde",
  "serde_json",
+ "slog",
  "tokio",
 ]
 

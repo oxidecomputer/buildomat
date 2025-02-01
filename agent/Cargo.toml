@@ -24,6 +24,7 @@ libc = { workspace = true }
 rusty_ulid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+slog = { workspace = true }
 tokio = { workspace = true }
 #
 # I believe it is necessary to pull this in here, so that we can demand the

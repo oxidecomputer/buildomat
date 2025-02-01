@@ -21,6 +21,7 @@ use futures::StreamExt;
 use hiercmd::prelude::*;
 use rusty_ulid::Ulid;
 use serde::{Deserialize, Serialize};
+use slog::{crit, error, info, o, Logger};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -38,6 +39,10 @@ mod upload;
 
 use control::protocol::{FactoryInfo, Payload};
 use exec::ExitDetails;
+
+struct Agent {
+    log: Logger,
+}
 
 const CONFIG_PATH: &str = "/opt/buildomat/etc/agent.json";
 const JOB_PATH: &str = "/opt/buildomat/etc/job.json";
@@ -67,7 +72,7 @@ struct ConfigFile {
 }
 
 impl ConfigFile {
-    fn make_client(&self) -> ClientWrap {
+    fn make_client(&self, log: Logger) -> ClientWrap {
         let client = buildomat_client::ClientBuilder::new(&self.baseurl)
             .bearer_token(&self.token)
             .build()
@@ -79,9 +84,13 @@ impl ConfigFile {
          * of a job.
          */
         let (worker_tx, rx) = mpsc::channel(256);
-        tokio::task::spawn(append_worker_worker(client.clone(), rx));
+        tokio::task::spawn(append_worker_worker(
+            log.new(o!("component" => "append_worker")),
+            client.clone(),
+            rx,
+        ));
 
-        ClientWrap { client, job: None, tx: None, worker_tx }
+        ClientWrap { log, client, job: None, tx: None, worker_tx }
     }
 }
 
@@ -108,6 +117,7 @@ enum AppendJobEntry {
 }
 
 async fn append_job_worker(
+    log: Logger,
     client: buildomat_client::Client,
     job: String,
     mut rx: mpsc::Receiver<AppendJobEntry>,
@@ -183,7 +193,7 @@ async fn append_job_worker(
             {
                 Ok(_) => break,
                 Err(e) => {
-                    println!("ERROR: append job: {:?}", e);
+                    error!(log, "append job: {e:?}");
                     sleep_ms(1000).await;
                 }
             }
@@ -197,6 +207,7 @@ enum AppendWorkerEntry {
 }
 
 async fn append_worker_worker(
+    log: Logger,
     client: buildomat_client::Client,
     mut rx: mpsc::Receiver<AppendWorkerEntry>,
 ) {
@@ -258,7 +269,7 @@ async fn append_worker_worker(
             match client.worker_append().body(events.clone()).send().await {
                 Ok(_) => break,
                 Err(e) => {
-                    println!("ERROR: append worker: {:?}", e);
+                    error!(log, "append worker: {:?}", e);
                     sleep_ms(1000).await;
                 }
             }
@@ -268,6 +279,7 @@ async fn append_worker_worker(
 
 #[derive(Clone)]
 pub(crate) struct ClientWrap {
+    log: Logger,
     client: buildomat_client::Client,
     job: Option<Arc<WorkerPingJob>>,
     tx: Option<mpsc::Sender<AppendJobEntry>>,
@@ -287,7 +299,12 @@ impl ClientWrap {
         let (tx, rx) = mpsc::channel(256);
         self.tx = Some(tx);
 
-        tokio::task::spawn(append_job_worker(self.client.clone(), job_id, rx));
+        tokio::task::spawn(append_job_worker(
+            self.log.new(o!("component" => "append_job")),
+            self.client.clone(),
+            job_id,
+            rx,
+        ));
     }
 
     async fn append_worker_msg(&self, name: &str, msg: &str) {
@@ -365,7 +382,7 @@ impl ClientWrap {
             {
                 Ok(_) => return,
                 Err(e) => {
-                    println!("ERROR: complete: {:?}", e);
+                    error!(self.log, "task complete: {e:?}");
                     sleep_ms(1000).await;
                 }
             }
@@ -390,7 +407,7 @@ impl ClientWrap {
             {
                 Ok(_) => return,
                 Err(e) => {
-                    println!("ERROR: complete: {:?}", e);
+                    error!(self.log, "job complete: {e:?}");
                     sleep_ms(1000).await;
                 }
             }
@@ -402,7 +419,7 @@ impl ClientWrap {
             match self.client.worker_diagnostics_enable().send().await {
                 Ok(_) => return,
                 Err(e) => {
-                    println!("ERROR: diagnostics enable: {:?}", e);
+                    error!(self.log, "diagnostics enable: {e:?}");
                     sleep_ms(1000).await;
                 }
             }
@@ -426,7 +443,7 @@ impl ClientWrap {
             {
                 Ok(_) => return,
                 Err(e) => {
-                    println!("ERROR: diagnostics complete: {:?}", e);
+                    error!(self.log, "diagnostics complete: {e:?}");
                     sleep_ms(1000).await;
                 }
             }
@@ -444,7 +461,7 @@ impl ClientWrap {
             {
                 Ok(_) => return,
                 Err(e) => {
-                    println!("ERROR: reporting failure: {:?}", e);
+                    error!(self.log, "report failure: {e:?}");
                     sleep_ms(1000).await;
                 }
             }
@@ -465,7 +482,7 @@ impl ClientWrap {
                     return uc.into_inner().id;
                 }
                 Err(e) => {
-                    println!("ERROR: chunk upload: {:?}", e);
+                    error!(self.log, "chunk upload: {e:?}");
                     sleep_ms(1000).await;
                 }
             }
@@ -507,14 +524,14 @@ impl ClientWrap {
                     }
 
                     if let Some(e) = &waor.error {
-                        println!("ERROR: output file error: {:?}", e);
+                        error!(self.log, "output file error: {e:?}");
                         return Some(e.to_string());
                     } else {
                         return None;
                     }
                 }
                 Err(e) => {
-                    println!("ERROR: add output: {:?}", e);
+                    error!(self.log, "add output: {e:?}");
                     sleep_ms(1000).await;
                 }
             }
@@ -537,7 +554,7 @@ impl ClientWrap {
                     let mut f = match tokio::fs::File::create(path).await {
                         Ok(f) => f,
                         Err(e) => {
-                            println!("ERROR: input: {:?}", e);
+                            error!(self.log, "input: {e:?}");
                             sleep_ms(1000).await;
                             continue 'outer;
                         }
@@ -548,13 +565,13 @@ impl ClientWrap {
                             Ok(None) => return,
                             Ok(Some(mut ch)) => {
                                 if let Err(e) = f.write_all_buf(&mut ch).await {
-                                    println!("ERROR: input: {:?}", e);
+                                    error!(self.log, "input: {e:?}");
                                     sleep_ms(1000).await;
                                     continue 'outer;
                                 }
                             }
                             Err(e) => {
-                                println!("ERROR: input: {:?}", e);
+                                error!(self.log, "input: {e:?}");
                                 sleep_ms(1000).await;
                                 continue 'outer;
                             }
@@ -562,7 +579,7 @@ impl ClientWrap {
                     }
                 }
                 Err(e) => {
-                    println!("ERROR: input: {:?}", e);
+                    error!(self.log, "input: {e:?}");
                     sleep_ms(1000).await;
                 }
             }
@@ -582,7 +599,7 @@ impl ClientWrap {
                     return wq.into_inner();
                 }
                 Err(e) => {
-                    println!("ERROR: asking for quota: {:?}", e);
+                    error!(self.log, "asking for quota: {e:?}");
                     sleep_ms(1000).await;
                 }
             }
@@ -611,7 +628,7 @@ impl ClientWrap {
         let s = match write_script(script) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("ERROR: writing {name}-job diagnostic script: {e}");
+                error!(self.log, "writing {name}-job diagnostic script: {e}");
                 return None;
             }
         };
@@ -755,7 +772,7 @@ fn write_script(script: &str) -> Result<PathBuf> {
     Ok(targ)
 }
 
-fn set_root_password_hash(hash: &str) -> Result<()> {
+fn set_root_password_hash(log: &Logger, hash: &str) -> Result<()> {
     /*
      * Install the provided root password hash into shadow(5) so that console
      * logins are possible.
@@ -764,11 +781,11 @@ fn set_root_password_hash(hash: &str) -> Result<()> {
     f.password_set("root", hash)?;
     f.write(SHADOW)?;
 
-    println!("root password hash was set!");
+    info!(log, "root password hash was set!");
     Ok(())
 }
 
-fn set_root_authorized_keys(keys: &str) -> Result<()> {
+fn set_root_authorized_keys(_log: &Logger, keys: &str) -> Result<()> {
     /*
      * Install the provided root "authorized_keys" file.  Note that the
      * permissions are important, in order for sshd to actually use the file.
@@ -923,7 +940,7 @@ fn zfs_create_volume(dataset: &str, size_mb: u32) -> Result<()> {
     Ok(())
 }
 
-fn ensure_dump_device(mbsz: u32) -> Result<()> {
+fn ensure_dump_device(log: &Logger, mbsz: u32) -> Result<()> {
     /*
      * First, make sure the "rpool/dump" zvol exists.
      */
@@ -960,12 +977,12 @@ fn ensure_dump_device(mbsz: u32) -> Result<()> {
         bail!("bootadm update-archive: {}", out.info());
     }
 
-    println!("dump device was configured!");
+    info!(log, "dump device was configured!");
     Ok(())
 }
 
 #[cfg(target_os = "illumos")]
-fn rpool_disable_sync() -> Result<()> {
+fn rpool_disable_sync(log: &Logger) -> Result<()> {
     if !zfs_exists("rpool")? {
         /*
          * If the system does not have a root pool, there is no point trying to
@@ -973,18 +990,18 @@ fn rpool_disable_sync() -> Result<()> {
          * with any name, not just "rpool"; in practice the images we use on
          * buildomat systems all use "rpool" today.
          */
-        println!("skipping sync disable as system has no rpool");
+        info!(log, "skipping sync disable as system has no rpool");
     } else {
         zfs_set("rpool", "sync", "disabled")?;
 
-        println!("sync was disabled on rpool!");
+        info!(log, "sync was disabled on rpool!");
     }
 
     Ok(())
 }
 
 #[cfg(not(target_os = "illumos"))]
-fn rpool_disable_sync() -> Result<()> {
+fn rpool_disable_sync(_log: &Logger) -> Result<()> {
     /*
      * Sure, whatever you say!
      */
@@ -1005,11 +1022,12 @@ enum Stage {
     Broken,
 }
 
-async fn cmd_install(mut l: Level<()>) -> Result<()> {
+async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
     l.usage_args(Some("BASEURL BOOTSTRAP_TOKEN"));
     l.optopt("N", "", "set nodename of machine", "NODENAME");
 
     let a = args!(l);
+    let log = l.context().log.clone();
 
     if a.args().len() < 2 {
         bad_args!(l, "specify base URL and bootstrap token value");
@@ -1024,7 +1042,7 @@ async fn cmd_install(mut l: Level<()>) -> Result<()> {
 
     if let Some(nodename) = a.opts().opt_str("N") {
         if let Err(e) = set_nodename(&nodename) {
-            eprintln!("ERROR: setting nodename: {e}");
+            error!(log, "setting nodename: {e}");
         }
     }
 
@@ -1161,13 +1179,14 @@ async fn cmd_install(mut l: Level<()>) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_run(mut l: Level<()>) -> Result<()> {
+async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
     no_args!(l);
 
     let cf = load::<_, ConfigFile>(CONFIG_PATH)?;
+    let log = l.context().log.clone();
 
-    println!("agent starting, using {}", cf.baseurl);
-    let mut cw = cf.make_client();
+    info!(log, "agent starting"; "baseurl" => &cf.baseurl);
+    let mut cw = cf.make_client(log.clone());
 
     let res = loop {
         let res = cw
@@ -1179,14 +1198,14 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
 
         match res {
             Ok(res) => break res,
-            Err(e) => println!("ERROR: bootstrap: {:?}", e),
+            Err(e) => error!(log, "bootstrap: {e:?}"),
         }
 
         sleep_ms(1000).await;
     };
 
     let wid = res.into_inner().id;
-    println!("bootstrapped as worker {}", wid);
+    info!(log, "bootstrapped as worker {wid}");
 
     let mut tasks: VecDeque<WorkerPingTask> = VecDeque::new();
     let mut stage = Stage::Ready;
@@ -1218,7 +1237,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
      * central server and do nothing else.
      */
     if PathBuf::from(JOB_PATH).try_exists()? {
-        println!("ERROR: found previously assigned job; reporting failure");
+        error!(log, "found previously assigned job; reporting failure");
 
         /*
          * Report this condition to the server:
@@ -1237,8 +1256,8 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
         if let Some(md) = &metadata {
             if !set_root_password {
                 if let Some(rph) = md.root_password_hash() {
-                    if let Err(e) = set_root_password_hash(rph) {
-                        println!("ERROR: setting root password: {e}");
+                    if let Err(e) = set_root_password_hash(&log, rph) {
+                        error!(log, "setting root password: {e}");
                     }
 
                     /*
@@ -1252,8 +1271,8 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
 
             if !set_root_keys {
                 if let Some(rak) = md.root_authorized_keys() {
-                    if let Err(e) = set_root_authorized_keys(rak) {
-                        println!("ERROR: setting root SSH keys: {e}");
+                    if let Err(e) = set_root_authorized_keys(&log, rak) {
+                        error!(log, "setting root SSH keys: {e}");
                     }
 
                     set_root_keys = true;
@@ -1262,8 +1281,8 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
 
             if !dump_device_configured {
                 if let Some(mbsz) = md.dump_to_rpool() {
-                    if let Err(e) = ensure_dump_device(mbsz) {
-                        println!("ERROR: ensuring dump device: {e}");
+                    if let Err(e) = ensure_dump_device(&log, mbsz) {
+                        error!(log, "ensuring dump device: {e}");
                     }
 
                     dump_device_configured = true;
@@ -1271,8 +1290,8 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
             }
 
             if !sync_disabled && md.rpool_disable_sync() {
-                if let Err(e) = rpool_disable_sync() {
-                    println!("ERROR: disabling sync on rpool: {e}");
+                if let Err(e) = rpool_disable_sync(&log) {
+                    error!(log, "disabling sync on rpool: {e}");
                 }
 
                 sync_disabled = true;
@@ -1282,7 +1301,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
         if do_ping {
             match cw.client.worker_ping().send().await {
                 Err(e) => {
-                    println!("PING ERROR: {e}");
+                    error!(log, "ping error: {e}");
                     sleep_ms(1000).await;
                 }
                 Ok(p) => {
@@ -1337,7 +1356,8 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                              * Adopt the job, which may contain several tasks to
                              * execute in sequence.
                              */
-                            println!(
+                            info!(
+                                log,
                                 "adopted job {} with {} tasks",
                                 j.id,
                                 j.tasks.len()
@@ -1502,7 +1522,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                          * worker as broken prior to accepting a job from
                          * the server.
                          */
-                        println!("ERROR: pre-diagnostics failed; aborting");
+                        error!(log, "pre-diagnostics failed; aborting");
                         cw.report_failure(Some(
                             "pre-job diagnostics reported a fault",
                         ))
@@ -1510,13 +1530,13 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                         stage = Stage::Broken;
                     }
                     Some(exec::Activity::Complete) => {
-                        println!("pre-job diagnostics complete");
+                        info!(log, "pre-job diagnostics complete");
                         stage = Stage::Ready;
                     }
                     None => {
                         cw.append_worker_msg("pre", "channel disconnected")
                             .await;
-                        println!("ERROR: pre-diagnostics failed; aborting");
+                        error!(log, "pre-diagnostics failed; aborting");
                         cw.report_failure(None).await;
                         stage = Stage::Broken;
                     }
@@ -1531,7 +1551,7 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                  */
                 let failures = exit_details.iter().any(|ex| ex.failed());
                 if failures {
-                    println!("aborting after failed task");
+                    error!(log, "aborting after failed task");
                 }
 
                 if failures || tasks.is_empty() {
@@ -1539,7 +1559,11 @@ async fn cmd_run(mut l: Level<()>) -> Result<()> {
                      * There are no more tasks to complete, so move on to
                      * uploading outputs.
                      */
-                    println!("no more tasks for job {}", cw.job_id().unwrap());
+                    info!(
+                        log,
+                        "no more tasks for job {}",
+                        cw.job_id().unwrap(),
+                    );
 
                     stage = Stage::Upload(upload::upload(
                         cw.clone(),
@@ -1855,15 +1879,21 @@ async fn main() -> Result<()> {
         }
         _ => {
             /*
-             * XXX For now, assume that any name other than the name for
-             * the control entrypoint is the regular agent.
+             * Assume that any name other than the name for the control
+             * entrypoint is the regular agent.
              */
-            let mut l = Level::new("buildomat-agent", ());
+            let log = make_log("buildomat-agent");
+            let mut l =
+                Level::new("buildomat-agent", Agent { log: log.clone() });
 
             l.cmd("install", "install the agent", cmd!(cmd_install))?;
             l.cmd("run", "run the agent", cmd!(cmd_run))?;
 
-            sel!(l).run().await
+            let res = sel!(l).run().await;
+            if let Err(e) = &res {
+                crit!(log, "agent failure: {e}");
+            }
+            res
         }
     }
 }
