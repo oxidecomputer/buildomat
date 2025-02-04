@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 use core::mem::size_of;
@@ -981,10 +981,11 @@ fn archive_jobs_sync_work(
         waiting: _,
 
         /*
-         * This field tracks when the job was successfully archived, and thus
-         * cannot appear in the archive itself.
+         * These fields track when the job was successfully archived or purged,
+         * and thus cannot appear in the archive itself.
          */
         time_archived: _,
+        time_purged: _,
 
         /*
          * We use the target_id value we already fetched above, so ignore it
@@ -1001,7 +1002,7 @@ fn archive_jobs_sync_work(
      * This structure should store things that don't grow substantially for
      * longer-running jobs that produce more output.  In particular, we store
      * the job event stream in a different way.  This is important because we
-     * wil need to deserialize this object (at a cost of CPU and memory) in
+     * will need to deserialise this object (at a cost of CPU and memory) in
      * order to answer questions about the job: heavier jobs should not use more
      * resources than lighter jobs.
      */
@@ -1193,6 +1194,89 @@ pub(crate) async fn archive_jobs(log: Logger, c: Arc<Central>) -> Result<()> {
             Ok(true) => continue,
             Ok(false) => (),
             Err(e) => error!(log, "job archive task error: {:?}", e),
+        }
+
+        tokio::time::sleep(delay).await;
+    }
+}
+
+fn purge_jobs_sync_work(
+    log: &Logger,
+    c: &Central,
+) -> Result<Option<db::JobId>> {
+    let (reason, job) = if let Some(job) =
+        c.inner.lock().unwrap().purge_queue.pop_front()
+    {
+        /*
+         * Service explicit requests from the operator to purge a job first.
+         */
+        let job = c.db.job(job)?;
+        if !job.is_archived() {
+            warn!(log, "job {} not archived; cannot purge yet", job.id);
+            return Ok(None);
+        }
+        if job.is_purged() {
+            warn!(log, "job {} was already purged; ignoring request", job.id);
+            return Ok(None);
+        }
+        ("operator request", job)
+    //} else if c.config.job.auto_purge {
+    //    /*
+    //     * Otherwise, if auto-purging is enabled, purge the next as-yet
+    //     * unpurged job.
+    //     */
+    //    if let Some(job) = c.db.job_next_unpurged()? {
+    //        ("automatic", job)
+    //    } else {
+    //        return Ok(None);
+    //    }
+    } else {
+        return Ok(None);
+    };
+
+    assert!(job.complete);
+    assert!(job.time_archived.is_some());
+    assert!(job.time_purged.is_none());
+
+    info!(log, "purging job {} [{reason}]...", job.id);
+
+    /*
+     * Purging a job from the database involves removing the live records. This
+     * should have no impact on access to details about the job, as we will
+     * fetch those details from the archive file once the job has been archived.
+     */
+    c.db.job_purge(job.id)?;
+
+    Ok(Some(job.id))
+}
+
+async fn purge_jobs_one(log: &Logger, c: &Arc<Central>) -> Result<bool> {
+    let start = Instant::now();
+
+    /*
+     * The work to purge a job is synchronous and may take several seconds for
+     * larger jobs.  Avoid holding up other async tasks while we wait:
+     */
+    let id = tokio::task::block_in_place(|| purge_jobs_sync_work(log, c))?;
+
+    if let Some(id) = id {
+        let dur = Instant::now().saturating_duration_since(start);
+        info!(log, "job {id} purged"; "duration_msec" => dur.as_millis());
+    }
+
+    Ok(id.is_some())
+}
+
+pub(crate) async fn purge_jobs(log: Logger, c: Arc<Central>) -> Result<()> {
+    let delay = Duration::from_secs(1);
+
+    info!(log, "start job purge task");
+
+    loop {
+        match purge_jobs_one(&log, &c).await {
+            Ok(true) => continue,
+            Ok(false) => (),
+            Err(e) => error!(log, "job purge task error: {:?}", e),
         }
 
         tokio::time::sleep(delay).await;

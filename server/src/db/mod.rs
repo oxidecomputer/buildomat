@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 use std::collections::HashMap;
@@ -13,8 +13,8 @@ use buildomat_database::{conflict, DBResult, FromRow, Handle, Sqlite};
 use buildomat_types::*;
 use chrono::prelude::*;
 use sea_query::{
-    all, Alias, Asterisk, Cond, Expr, Iden, Keyword, Order, Query, SeaRc,
-    SelectStatement, TableRef,
+    all, Alias, Asterisk, Cond, Expr, Iden, IntoTableRef, Keyword, Order,
+    Query, SeaRc, SelectStatement, TableRef,
 };
 #[allow(unused_imports)]
 use slog::{debug, error, info, warn, Logger};
@@ -1538,6 +1538,7 @@ impl Database {
             worker: None,
             cancelled: false,
             time_archived: None,
+            time_purged: None,
         };
 
         /*
@@ -1618,6 +1619,86 @@ impl Database {
 
             self.i_job_notify(h, &j, 0, false, true);
             Ok(j)
+        })
+    }
+
+    pub fn job_purge(&self, job: JobId) -> DBResult<()> {
+        self.sql.tx_immediate(|h| {
+            let j: Job = h.get_row(Job::find(job))?;
+            if !j.is_archived() {
+                conflict!("job must be archived before being purged");
+            }
+            assert!(j.complete);
+
+            /*
+             * Delete records from ancillary tables that contain data we will
+             * subsequently retrieve from the archive instead of the live
+             * database.
+             *
+             * We are intentionally leaving "job" and "published_file" table
+             * records in place in the database.
+             */
+            let deletes = [
+                (
+                    JobDependDef::Table.into_table_ref(),
+                    Expr::col(JobDependDef::Job),
+                ),
+                (
+                    JobEventDef::Table.into_table_ref(),
+                    Expr::col(JobEventDef::Job),
+                ),
+                (
+                    JobFileDef::Table.into_table_ref(),
+                    Expr::col(JobFileDef::Job),
+                ),
+                (
+                    JobInputDef::Table.into_table_ref(),
+                    Expr::col(JobInputDef::Job),
+                ),
+                (
+                    JobOutputDef::Table.into_table_ref(),
+                    Expr::col(JobOutputDef::Job),
+                ),
+                (
+                    JobOutputRuleDef::Table.into_table_ref(),
+                    Expr::col(JobOutputRuleDef::Job),
+                ),
+                (
+                    JobStoreDef::Table.into_table_ref(),
+                    Expr::col(JobStoreDef::Job),
+                ),
+                (JobTagDef::Table.into_table_ref(), Expr::col(JobTagDef::Job)),
+                (
+                    JobTimeDef::Table.into_table_ref(),
+                    Expr::col(JobTimeDef::Job),
+                ),
+                (TaskDef::Table.into_table_ref(), Expr::col(TaskDef::Job)),
+            ];
+
+            for (tab, col) in deletes {
+                h.exec_delete(
+                    Query::delete()
+                        .from_table(tab)
+                        .and_where(col.eq(job))
+                        .to_owned(),
+                )?;
+            }
+
+            /*
+             * Mark the job as purged in the same transaction that we used to
+             * remove the ancillary records:
+             */
+            let uc = h.exec_update(
+                Query::update()
+                    .table(JobDef::Table)
+                    .and_where(Expr::col(JobDef::Id).eq(job))
+                    .and_where(Expr::col(JobDef::TimePurged).is_null())
+                    .value(JobDef::TimePurged, IsoDate::now())
+                    .to_owned(),
+            )?;
+            assert_eq!(uc, 1);
+
+            Ok(())
         })
     }
 

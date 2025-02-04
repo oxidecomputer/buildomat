@@ -1,8 +1,6 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
-
-use slog::o;
 
 use super::prelude::*;
 
@@ -608,6 +606,8 @@ pub(crate) fn format_job(
         tags,
         cancelled: j.cancelled,
         times,
+        time_archived: j.time_archived.map(|d| d.0),
+        time_purged: j.time_purged.map(|d| d.0),
     }
 }
 
@@ -665,7 +665,7 @@ pub(crate) async fn jobs_get_old(
         marker = Some(page.last().unwrap().id);
 
         for job in page {
-            out.push(super::user::Job::load(log, c, &job).await.or_500()?);
+            out.push(Job::load(log, c, &job).await.or_500()?);
         }
 
         /*
@@ -826,6 +826,8 @@ pub(crate) struct Job {
     cancelled: bool,
     #[serde(default)]
     times: HashMap<String, DateTime<Utc>>,
+    time_archived: Option<DateTime<Utc>>,
+    time_purged: Option<DateTime<Utc>>,
 }
 
 impl Job {

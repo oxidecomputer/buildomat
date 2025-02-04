@@ -332,3 +332,7 @@ ALTER TABLE worker ADD COLUMN
 -- v 55
 ALTER TABLE worker ADD COLUMN
     factory_ip      TEXT;
+
+-- v 56
+ALTER TABLE job ADD COLUMN
+    time_purged     TEXT;
