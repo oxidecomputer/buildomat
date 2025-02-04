@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Buildomat",
-    "version": "1.0"
+    "version": "1.0.0"
   },
   "paths": {
     "/0/admin/factories": {
@@ -209,6 +209,32 @@
     "/0/admin/jobs/{job}/archive": {
       "post": {
         "operationId": "admin_job_archive_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/0/admin/jobs/{job}/purge": {
+      "post": {
+        "operationId": "admin_job_purge_request",
         "parameters": [
           {
             "in": "path",
@@ -2971,6 +2997,16 @@
             "items": {
               "$ref": "#/components/schemas/Task"
             }
+          },
+          "time_archived": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_purged": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
           },
           "times": {
             "default": {},

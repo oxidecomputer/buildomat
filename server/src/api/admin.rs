@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 use super::prelude::*;
@@ -460,6 +460,40 @@ pub(crate) async fn admin_job_archive_request(
 
     info!(log, "admin: requested archive of job {}", job.id);
     c.inner.lock().unwrap().archive_queue.push_back(job.id);
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/admin/jobs/{job}/purge",
+}]
+pub(crate) async fn admin_job_purge_request(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<JobPath>,
+) -> DSResult<HttpResponseUpdatedNoContent> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    c.require_admin(log, &rqctx.request, "job.purge").await?;
+
+    let id = path.into_inner().job.parse::<db::JobId>().or_500()?;
+    let job = c.db.job(id).or_500()?;
+
+    if !job.is_archived() {
+        return Err(HttpError::for_bad_request(
+            None,
+            "job cannot be purge until archived".into(),
+        ));
+    }
+
+    /*
+     * If a job is archived, it should already have been complete previously:
+     */
+    assert!(job.complete);
+
+    info!(log, "admin: requested purge of job {}", job.id);
+    c.inner.lock().unwrap().purge_queue.push_back(job.id);
 
     Ok(HttpResponseUpdatedNoContent())
 }

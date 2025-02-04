@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 #![allow(clippy::many_single_char_names)]
@@ -115,6 +115,7 @@ struct CentralInner {
     hold: bool,
     leases: jobs::Leases,
     archive_queue: VecDeque<JobId>,
+    purge_queue: VecDeque<JobId>,
 }
 
 struct Central {
@@ -955,6 +956,7 @@ async fn main() -> Result<()> {
     ad.register(api::admin::worker_events_get)?;
     ad.register(api::admin::admin_job_get)?;
     ad.register(api::admin::admin_job_archive_request)?;
+    ad.register(api::admin::admin_job_purge_request)?;
     ad.register(api::admin::admin_jobs_get)?;
     ad.register(api::admin::admin_jobs_list)?;
     ad.register(api::admin::factory_create)?;
@@ -1064,6 +1066,7 @@ async fn main() -> Result<()> {
             hold: config.admin.hold,
             leases: Default::default(),
             archive_queue: Default::default(),
+            purge_queue: Default::default(),
         }),
         config,
         datadir,
@@ -1107,6 +1110,14 @@ async fn main() -> Result<()> {
     });
 
     let c0 = Arc::clone(&c);
+    let log0 = log.new(o!("component" => "purge_jobs"));
+    let t_purge_jobs = tokio::task::spawn(async move {
+        archive::jobs::purge_jobs(log0, c0)
+            .await
+            .context("purge jobs task failure")
+    });
+
+    let c0 = Arc::clone(&c);
     let log0 = log.new(o!("component" => "worker_cleanup"));
     let t_workers = tokio::task::spawn(async move {
         workers::worker_cleanup(log0, c0)
@@ -1135,6 +1146,7 @@ async fn main() -> Result<()> {
         _ = t_chunks => bail!("chunk cleanup task stopped early"),
         _ = t_archive_files => bail!("archive files task stopped early"),
         _ = t_archive_jobs => bail!("archive jobs task stopped early"),
+        _ = t_purge_jobs => bail!("purge jobs task stopped early"),
         _ = t_workers => bail!("worker cleanup task stopped early"),
         _ = server_task => bail!("server stopped early"),
     }

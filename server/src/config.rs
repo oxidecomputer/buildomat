@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 use std::path::Path;
@@ -38,6 +38,10 @@ pub struct ConfigFileJob {
     pub max_size_per_file_mb: u64,
     #[serde(default)]
     pub auto_archive: bool,
+    #[serde(default)]
+    pub auto_purge: bool,
+    #[serde(default = "default_purge_delay_msec")]
+    pub purge_delay_msec: u64,
 }
 
 impl ConfigFileJob {
@@ -55,6 +59,15 @@ fn default_max_size_per_file_mb() -> u64 {
      * By default, allow 1GB files to be uploaded:
      */
     1024
+}
+
+fn default_purge_delay_msec() -> u64 {
+    /*
+     * By default, wait half a second after a successful purge before purging
+     * another job.  When there are a lot of jobs to purge, this can help to
+     * keep the system responsive to active jobs.
+     */
+    500
 }
 
 #[derive(Deserialize, Debug, Default)]

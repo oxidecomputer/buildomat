@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 mod prelude {
@@ -20,7 +20,7 @@ mod prelude {
     pub use rusty_ulid::Ulid;
     pub use schemars::JsonSchema;
     pub use serde::{Deserialize, Serialize};
-    pub use slog::{error, info, warn, Logger};
+    pub use slog::{error, info, o, warn, Logger};
     pub use std::collections::HashMap;
     pub use std::str::FromStr;
     pub use std::sync::Arc;

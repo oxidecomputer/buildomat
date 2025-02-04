@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 use super::sublude::*;
@@ -29,6 +29,10 @@ pub struct Job {
      * When was this job successfully uploaded to the object store?
      */
     pub time_archived: Option<IsoDate>,
+    /**
+     * When were the live records for this job removed from the database?
+     */
+    pub time_purged: Option<IsoDate>,
 }
 
 impl FromRow for Job {
@@ -45,6 +49,7 @@ impl FromRow for Job {
             JobDef::TargetId,
             JobDef::Cancelled,
             JobDef::TimeArchived,
+            JobDef::TimePurged,
         ]
         .into_iter()
         .map(|col| {
@@ -66,6 +71,7 @@ impl FromRow for Job {
             target_id: row.get(8)?,
             cancelled: row.get(9)?,
             time_archived: row.get(10)?,
+            time_purged: row.get(11)?,
         })
     }
 }
@@ -95,6 +101,7 @@ impl Job {
                 self.target_id.into(),
                 self.cancelled.into(),
                 self.time_archived.into(),
+                self.time_purged.into(),
             ])
             .to_owned()
     }
@@ -117,5 +124,9 @@ impl Job {
 
     pub fn is_archived(&self) -> bool {
         self.time_archived.is_some()
+    }
+
+    pub fn is_purged(&self) -> bool {
+        self.time_purged.is_some()
     }
 }
