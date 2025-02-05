@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 #![allow(clippy::many_single_char_names)]
@@ -2378,6 +2378,25 @@ async fn do_admin_job_archive(mut l: Level<Stuff>) -> Result<()> {
     Ok(())
 }
 
+async fn do_admin_job_purge(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("JOB..."));
+
+    let a = args!(l);
+    if a.args().is_empty() {
+        bad_args!(l, "specify a job to purge");
+    }
+
+    for arg in a.args() {
+        if let Err(e) =
+            l.context().admin().admin_job_purge_request().job(arg).send().await
+        {
+            bail!("ERROR: purging {}: {:?}", arg, e);
+        }
+    }
+
+    Ok(())
+}
+
 async fn do_admin_job_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("id", WIDTH_ID, true);
     l.add_column("age", WIDTH_AGE, true);
@@ -2507,6 +2526,7 @@ async fn do_admin_job_list(mut l: Level<Stuff>) -> Result<()> {
 async fn do_admin_job(mut l: Level<Stuff>) -> Result<()> {
     l.cmda("list", "ls", "list jobs", cmd!(do_admin_job_list))?;
     l.cmd("archive", "request archive of a job", cmd!(do_admin_job_archive))?;
+    l.cmd("purge", "request purge of a job", cmd!(do_admin_job_purge))?;
     l.cmd("dump", "dump information about jobs", cmd!(do_admin_job_dump))?;
 
     sel!(l).run().await

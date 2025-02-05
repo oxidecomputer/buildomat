@@ -38,6 +38,8 @@ pub struct ConfigFileJob {
     pub max_size_per_file_mb: u64,
     #[serde(default)]
     pub auto_archive: bool,
+    #[serde(default)]
+    pub auto_purge: bool,
 }
 
 impl ConfigFileJob {

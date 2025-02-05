@@ -1866,6 +1866,26 @@ impl Database {
         })
     }
 
+    pub fn job_next_unpurged(&self) -> DBResult<Option<Job>> {
+        /*
+         * Find the oldest archived job that has not yet been purged from the
+         * live database.
+         */
+        self.sql.tx(|h| {
+            h.get_row_opt(
+                Query::select()
+                    .from(JobDef::Table)
+                    .columns(Job::columns())
+                    .order_by(JobDef::Id, Order::Asc)
+                    .and_where(Expr::col(JobDef::Complete).eq(true))
+                    .and_where(Expr::col(JobDef::TimeArchived).is_not_null())
+                    .and_where(Expr::col(JobDef::TimePurged).is_null())
+                    .limit(1)
+                    .to_owned(),
+            )
+        })
+    }
+
     pub fn job_next_unarchived(&self) -> DBResult<Option<Job>> {
         /*
          * Find the oldest completed job that has not yet been archived to long

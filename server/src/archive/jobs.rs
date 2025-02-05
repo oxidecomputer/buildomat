@@ -1220,16 +1220,26 @@ fn purge_jobs_sync_work(
             return Ok(None);
         }
         ("operator request", job)
-    //} else if c.config.job.auto_purge {
-    //    /*
-    //     * Otherwise, if auto-purging is enabled, purge the next as-yet
-    //     * unpurged job.
-    //     */
-    //    if let Some(job) = c.db.job_next_unpurged()? {
-    //        ("automatic", job)
-    //    } else {
-    //        return Ok(None);
-    //    }
+    } else if c.config.job.auto_purge {
+        /*
+         * Otherwise, if auto-purging is enabled, purge the next as-yet
+         * unpurged job.
+         */
+        if let Some(job) = c.db.job_next_unpurged()? {
+            if let Some(time) = job.time_archived {
+                if time.age().as_secs() < 14 * 86400 {
+                    /*
+                     * Only purge once the job has been archived for at least a
+                     * fortnight.
+                     */
+                    return Ok(None);
+                }
+            }
+
+            ("automatic", job)
+        } else {
+            return Ok(None);
+        }
     } else {
         return Ok(None);
     };

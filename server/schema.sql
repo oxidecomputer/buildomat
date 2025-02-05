@@ -336,3 +336,7 @@ ALTER TABLE worker ADD COLUMN
 -- v 56
 ALTER TABLE job ADD COLUMN
     time_purged     TEXT;
+
+-- v 57
+CREATE INDEX job_purging_queue ON job (id, complete, time_archived, time_purged)
+    WHERE complete = true AND time_archived IS NOT NULL AND time_purged IS NULL;
