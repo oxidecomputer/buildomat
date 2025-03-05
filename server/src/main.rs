@@ -40,8 +40,8 @@ mod jobs;
 mod workers;
 
 use db::{
-    AuthUser, Job, JobEvent, JobFileId, JobId, JobOutput, JobOutputAndFile,
-    Worker, WorkerEvent,
+    AuthUser, Job, JobEvent, JobFile, JobFileId, JobId, JobOutput,
+    JobOutputAndFile, Worker, WorkerEvent,
 };
 
 pub(crate) trait MakeInternalError<T> {
@@ -727,21 +727,23 @@ impl Central {
     }
 
     /**
-     * Load a job output record, either from the live database or the
-     * archive.
+     * Load a job output record, either from the live database or the archive.
      */
     async fn load_job_output(
         &self,
         log: &Logger,
         job: &Job,
         output: JobFileId,
-    ) -> Result<JobOutput> {
+    ) -> Result<(JobOutput, JobFile)> {
         if job.is_archived() {
             let aj = self.archive_load(log, job.id).await?;
 
             aj.job_output(output)
         } else {
-            Ok(self.db.job_output(job.id, output)?)
+            Ok((
+                self.db.job_output(job.id, output)?,
+                self.db.job_file(job.id, output)?,
+            ))
         }
     }
 

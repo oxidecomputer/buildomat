@@ -990,6 +990,8 @@ async fn do_job_copy(mut l: Level<Stuff>) -> Result<()> {
 async fn do_job_sign(mut l: Level<Stuff>) -> Result<()> {
     l.usage_args(Some("JOB SRC"));
 
+    l.optflag("x", "", "display extended information about signed URL");
+
     let a = args!(l);
 
     if a.args().len() != 2 {
@@ -998,6 +1000,7 @@ async fn do_job_sign(mut l: Level<Stuff>) -> Result<()> {
 
     let job = a.args()[0].as_str();
     let src = a.args()[1].as_str();
+    let ext = a.opts().opt_present("x");
 
     let c = l.context().user();
     for o in c.job_outputs_get().job(job).send().await?.into_inner() {
@@ -1016,7 +1019,15 @@ async fn do_job_sign(mut l: Level<Stuff>) -> Result<()> {
             .await?
             .into_inner();
 
-        println!("{}", su.url);
+        if ext {
+            let JobOutputSignedUrlResult { available, size, url } = su;
+
+            println!("url:          {url}");
+            println!("size:         {size}");
+            println!("available:    {available}");
+        } else {
+            println!("{}", su.url);
+        }
         return Ok(());
     }
 

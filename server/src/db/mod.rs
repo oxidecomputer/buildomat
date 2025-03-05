@@ -1440,6 +1440,10 @@ impl Database {
         self.sql.tx(|h| self.i_job_outputs(h, job))
     }
 
+    pub fn job_file(&self, job: JobId, file: JobFileId) -> DBResult<JobFile> {
+        self.sql.tx(|h| h.get_row(JobFile::find(job, file)))
+    }
+
     pub fn job_file_opt(
         &self,
         job: JobId,

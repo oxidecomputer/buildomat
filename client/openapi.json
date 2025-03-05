@@ -3232,6 +3232,18 @@
       "JobOutputSignedUrlResult": {
         "type": "object",
         "properties": {
+          "available": {
+            "description": "Has this file been uploaded to the object store yet?",
+            "default": false,
+            "type": "boolean"
+          },
+          "size": {
+            "description": "Size of the file in bytes.",
+            "default": 0,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
           "url": {
             "type": "string"
           }

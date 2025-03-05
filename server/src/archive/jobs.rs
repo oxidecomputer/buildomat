@@ -622,7 +622,10 @@ impl LoadedArchivedJob {
             .collect::<Result<Vec<_>>>()
     }
 
-    pub fn job_output(&self, id: db::JobFileId) -> Result<db::JobOutput> {
+    pub fn job_output(
+        &self,
+        id: db::JobFileId,
+    ) -> Result<(db::JobOutput, db::JobFile)> {
         let job = self.id;
 
         self.job
@@ -630,11 +633,19 @@ impl LoadedArchivedJob {
             .iter()
             .find(|f| f.file.id().ok() == Some(id))
             .map(|f| {
-                Ok(db::JobOutput {
-                    job,
-                    path: f.path.clone(),
-                    id: f.file.id()?,
-                })
+                Ok((
+                    db::JobOutput {
+                        job,
+                        id: f.file.id().unwrap(),
+                        path: f.path.clone(),
+                    },
+                    db::JobFile {
+                        job,
+                        id: f.file.id().unwrap(),
+                        size: db::DataSize(f.file.size),
+                        time_archived: Some(f.file.time_archived()?),
+                    },
+                ))
             })
             .ok_or_else(|| anyhow!("file {id} for job {job} not in archive"))?
     }

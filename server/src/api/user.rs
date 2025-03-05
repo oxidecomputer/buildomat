@@ -361,7 +361,7 @@ pub(crate) async fn job_output_download(
     let owner = c.require_user(log, &rqctx.request).await?;
     let t = c.load_job_for_user(log, &owner, p.job()?).await?;
 
-    let o = c.load_job_output(log, &t, p.output()?).await.or_500()?;
+    let (o, _) = c.load_job_output(log, &t, p.output()?).await.or_500()?;
 
     let info = format!("job {} output {} path {:?}", t.id, o.id, o.path);
     c.file_response(log, info, t.id, o.id, pr, false).await
@@ -385,7 +385,7 @@ pub(crate) async fn job_output_head(
     let owner = c.require_user(log, &rqctx.request).await?;
     let t = c.load_job_for_user(log, &owner, p.job()?).await?;
 
-    let o = c.load_job_output(log, &t, p.output()?).await.or_500()?;
+    let (o, _) = c.load_job_output(log, &t, p.output()?).await.or_500()?;
 
     let info = format!("job {} output {} path {:?}", t.id, o.id, o.path);
     c.file_response(log, info, t.id, o.id, pr, true).await
@@ -401,6 +401,16 @@ pub(crate) struct JobOutputSignedUrl {
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct JobOutputSignedUrlResult {
     url: String,
+    /**
+     * Has this file been uploaded to the object store yet?
+     */
+    #[serde(default)]
+    available: bool,
+    /**
+     * Size of the file in bytes.
+     */
+    #[serde(default)]
+    size: u64,
 }
 
 #[endpoint {
@@ -429,7 +439,7 @@ pub(crate) async fn job_output_signed_url(
     let owner = c.require_user(log, &rqctx.request).await?;
     let t = c.load_job_for_user(log, &owner, p.job()?).await?;
 
-    let o = c.load_job_output(log, &t, p.output()?).await.or_500()?;
+    let (o, f) = c.load_job_output(log, &t, p.output()?).await.or_500()?;
     let psu = c
         .file_presigned_url(
             t.id,
@@ -447,7 +457,11 @@ pub(crate) async fn job_output_signed_url(
         t.id, o.id, o.path, psu.info; "params" => ?b,
     );
 
-    Ok(HttpResponseOk(JobOutputSignedUrlResult { url: psu.url }))
+    Ok(HttpResponseOk(JobOutputSignedUrlResult {
+        url: psu.url,
+        size: f.size.0,
+        available: f.time_archived.is_some(),
+    }))
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -507,7 +521,7 @@ pub(crate) async fn job_output_publish(
     let owner = c.require_user(log, &rqctx.request).await?;
     let t = c.load_job_for_user(log, &owner, p.job()?).await?;
 
-    let o = c.load_job_output(log, &t, p.output()?).await.or_500()?;
+    let (o, _) = c.load_job_output(log, &t, p.output()?).await.or_500()?;
 
     info!(
         log,

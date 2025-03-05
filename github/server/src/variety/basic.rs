@@ -1,11 +1,12 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 use crate::{App, FlushOut, FlushState};
 use anyhow::{bail, Result};
 use buildomat_client::types::{DependSubmit, JobOutput};
 use buildomat_common::*;
+use buildomat_download::PotentialRange;
 use buildomat_github_database::{types::*, Database};
 use buildomat_jobsh::variety::basic::{output_sse, output_table, BasicConfig};
 use chrono::SecondsFormat;
@@ -19,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use slog::{debug, error, info, o, trace, warn, Logger};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 const KILOBYTE: f64 = 1024.0;
@@ -939,6 +941,7 @@ pub(crate) async fn artefact(
     output: &str,
     name: &str,
     format: Option<&str>,
+    pr: Option<PotentialRange>,
 ) -> Result<Option<hyper::Response<Body>>> {
     let p: BasicPrivate = cr.get_private()?;
 
@@ -950,10 +953,6 @@ pub(crate) async fn artefact(
 
     if let Some(id) = &p.buildomat_id {
         let bm = app.buildomat(&app.db.load_repository(cs.repo)?);
-
-        let backend =
-            bm.job_output_download().job(id).output(output).send().await?;
-        let cl = backend.content_length().unwrap();
 
         /*
          * To try and help out the browser in deciding whether to display or
@@ -973,6 +972,10 @@ pub(crate) async fn artefact(
             if ct != "text/plain" {
                 bail!("cannot reformat a file that is not plain text");
             }
+
+            let backend =
+                bm.job_output_download().job(id).output(output).send().await?;
+            let cl = backend.content_length().unwrap();
 
             if cl > MAX_RENDERED_LOG {
                 bail!("file too large for reformat");
@@ -1048,15 +1051,69 @@ pub(crate) async fn artefact(
             ));
         }
 
-        return Ok(Some(
-            hyper::Response::builder()
-                .status(hyper::StatusCode::OK)
-                .header(hyper::header::CONTENT_TYPE, ct)
-                .header(hyper::header::CONTENT_LENGTH, cl)
-                .body(Body::wrap(StreamBody::new(
-                    backend.into_inner_stream().map_ok(|b| Frame::data(b)),
-                )))?,
-        ));
+        /*
+         * To improve efficiency, we can try to fetch the file directly from the
+         * object store instead of forwarding the request through the API
+         * server.
+         */
+        let url = bm
+            .job_output_signed_url()
+            .job(id)
+            .output(output)
+            .body_map(|body| body.content_type(ct.clone()).expiry_seconds(120))
+            .send()
+            .await?;
+        if url.available {
+            let client = reqwest::ClientBuilder::new()
+                .timeout(Duration::from_secs(3600))
+                .tcp_keepalive(Duration::from_secs(60))
+                .connect_timeout(Duration::from_secs(15))
+                .build()?;
+
+            /*
+             * The file is available for streaming directly from the object
+             * store.
+             */
+            match buildomat_download::stream_from_url(
+                &app.log,
+                format!("pre-signed job output: job {id}, output {output}"),
+                &client,
+                url.url.clone(),
+                pr,
+                false,
+                ct,
+                Some(url.size),
+            )
+            .await
+            {
+                Ok(res) => return Ok(res),
+                Err(e) => {
+                    bail!(
+                        "pre-signed job output: \
+                        job {id} output {output}: {e:?}"
+                    );
+                }
+            }
+        } else {
+            /*
+             * Fall back to a regular request through the core API server.
+             * XXX There is currently no good way to pass the range request to
+             * the backend here.
+             */
+            let backend =
+                bm.job_output_download().job(id).output(output).send().await?;
+            let cl = backend.content_length().unwrap();
+
+            return Ok(Some(
+                hyper::Response::builder()
+                    .status(hyper::StatusCode::OK)
+                    .header(hyper::header::CONTENT_TYPE, ct)
+                    .header(hyper::header::CONTENT_LENGTH, cl)
+                    .body(Body::wrap(StreamBody::new(
+                        backend.into_inner_stream().map_ok(|b| Frame::data(b)),
+                    )))?,
+            ));
+        }
     }
 
     Ok(None)

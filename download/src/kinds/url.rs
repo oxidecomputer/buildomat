@@ -35,35 +35,40 @@ pub async fn stream_from_url(
     range: Option<PotentialRange>,
     head_only: bool,
     content_type: String,
+    assume_file_size: Option<u64>,
 ) -> Result<Option<Response<Body>>> {
     let log = log.new(o!("download" => "url"));
     let file_size: u64;
     let (mut body, want_bytes, crange) = if let Some(range) = range {
-        /*
-         * If this is a range request, we first need to determine the total file
-         * size.
-         */
-        let head = client.head(&url).send().await?;
-
-        /*
-         * Beware the content_length() method on the response: on a HEAD request
-         * it is (unhelpfully!) zero, because the body of the request should
-         * ultimately be empty.  Parse the actual Content-Length value
-         * ourselves:
-         */
-        file_size = head
-            .headers()
-            .get(CONTENT_LENGTH)
-            .and_then(|hv| hv.to_str().ok())
-            .and_then(|cl| cl.parse::<u64>().ok())
-            .ok_or_else(|| anyhow!("no content-length in response"))?;
-
-        if head.status() == StatusCode::NOT_FOUND {
+        if let Some(assumed) = assume_file_size {
+            file_size = assumed;
+        } else {
             /*
-             * If the backend returns 404, we want to be able to pass that on to
-             * the client.
+             * If this is a range request, we first need to determine the total
+             * file size.
              */
-            return Ok(None);
+            let head = client.head(&url).send().await?;
+
+            /*
+             * Beware the content_length() method on the response: on a HEAD
+             * request it is (unhelpfully!) zero, because the body of the
+             * request should ultimately be empty.  Parse the actual
+             * Content-Length value ourselves:
+             */
+            file_size = head
+                .headers()
+                .get(CONTENT_LENGTH)
+                .and_then(|hv| hv.to_str().ok())
+                .and_then(|cl| cl.parse::<u64>().ok())
+                .ok_or_else(|| anyhow!("no content-length in response"))?;
+
+            if head.status() == StatusCode::NOT_FOUND {
+                /*
+                 * If the backend returns 404, we want to be able to pass that
+                 * on to the client.
+                 */
+                return Ok(None);
+            }
         }
 
         match range.single_range(file_size) {

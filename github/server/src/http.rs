@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 use anyhow::{anyhow, bail, Result};
@@ -203,6 +203,7 @@ async fn artefact(
     let app = rc.context();
     let path = path.into_inner();
     let query = query.into_inner();
+    let pr = rc.range();
 
     let load = match path.load(&rc) {
         Ok(Some(load)) => load,
@@ -222,6 +223,7 @@ async fn artefact(
                 &path.output,
                 &path.name,
                 query.format.as_deref(),
+                pr,
             )
             .await
         }
@@ -910,6 +912,7 @@ async fn published_file_common(
         pr,
         head_only,
         guess_mime_type(&path.name),
+        None,
     )
     .await
     {
