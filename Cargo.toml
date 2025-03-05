@@ -8,6 +8,7 @@ members = [
 	"database",
 	"download",
 	"factory/aws",
+	"factory/gimlet",
 	"factory/lab",
 	"factory/propolis",
 	"github/client",
@@ -36,6 +37,7 @@ aws-types = "1"
 base64 = "0.22"
 bytes = "1.1"
 chrono = { version = "0.4", features = [ "serde" ] }
+debug_parser = "0.1"
 dirs-next = "2"
 dropshot = { git = "https://github.com/oxidecomputer/dropshot" }
 futures = "0.3"

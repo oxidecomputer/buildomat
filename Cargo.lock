@@ -833,6 +833,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "buildomat-factory-gimlet"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "buildomat-common",
+ "chrono",
+ "debug_parser",
+ "dropshot",
+ "getopts",
+ "hyper 1.6.0",
+ "libc",
+ "rand 0.9.0",
+ "schemars",
+ "sea-query",
+ "semver",
+ "serde",
+ "slog",
+ "slog-term",
+ "strum",
+ "tlvc",
+ "tokio",
+ "toml",
+ "usdt",
+]
+
+[[package]]
 name = "buildomat-factory-lab"
 version = "0.0.0"
 dependencies = [
@@ -1371,6 +1397,16 @@ name = "debug-ignore"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ffe7ed1d93f4553003e20b629abe9085e1e81b1429520f897f8f8860bc6dfc21"
+
+[[package]]
+name = "debug_parser"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71dfd040d21b5787958ac9d5750bb9e51a87999761deb3f096b4e48af9b0633d"
+dependencies = [
+ "html-escape",
+ "nom",
+]
 
 [[package]]
 name = "der"
