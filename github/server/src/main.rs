@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 #![allow(clippy::vec_init_then_push)]
@@ -497,49 +497,47 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                     continue;
                 };
 
-                let pr = if let Some(pr) = &payload.pull_request {
-                    info!(
-                        log,
-                        "del {}: pull request from {}/{} against {}/{}",
-                        del.seq,
-                        &pr.head.repo.owner.login,
-                        &pr.head.repo.name,
-                        &pr.base.repo.owner.login,
-                        &pr.base.repo.name
-                    );
-
-                    if pr.base.repo.id != repo.id {
-                        warn!(
-                            log,
-                            "delivery {}: base repo {} != hook repo {}",
-                            del.seq,
-                            pr.base.repo.id,
-                            repo.id,
-                        );
+                let pr = match payload.pull_request() {
+                    Ok(pr) => pr,
+                    Err(e) => {
+                        error!(log, "delivery {}: {e}", del.seq);
                         app.db.delivery_ack(del.seq, ack)?;
                         continue;
                     }
+                };
 
-                    /*
-                     * Even though we do not technically need it, it may assist
-                     * with debugging to store the mapping from ID to owner/name
-                     * for the foreign repository.
-                     */
-                    app.db.store_repository(
-                        pr.head.repo.id,
-                        &pr.head.repo.owner.login,
-                        &pr.head.repo.name,
-                    )?;
+                info!(
+                    log,
+                    "del {}: pull request from {}/{} against {}/{}",
+                    del.seq,
+                    &pr.head.repo().owner.login,
+                    &pr.head.repo().name,
+                    &pr.base.repo().owner.login,
+                    &pr.base.repo().name
+                );
 
-                    pr
-                } else {
-                    error!(
+                if pr.base.repo().id != repo.id {
+                    warn!(
                         log,
-                        "delivery {} missing pull request information", del.seq
+                        "delivery {}: base repo {} != hook repo {}",
+                        del.seq,
+                        pr.base.repo().id,
+                        repo.id,
                     );
                     app.db.delivery_ack(del.seq, ack)?;
                     continue;
-                };
+                }
+
+                /*
+                 * Even though we do not technically need it, it may assist
+                 * with debugging to store the mapping from ID to owner/name
+                 * for the foreign repository.
+                 */
+                app.db.store_repository(
+                    pr.head.repo().id,
+                    &pr.head.repo().owner.login,
+                    &pr.head.repo().name,
+                )?;
 
                 let gh = app.install_client(instid);
 
@@ -551,8 +549,8 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                 let suites = gh
                     .checks()
                     .list_suites_for_ref(
-                        &pr.base.repo.owner.login,
-                        &pr.base.repo.name,
+                        &pr.base.repo().owner.login,
+                        &pr.base.repo().name,
                         &pr.head.sha,
                         app.config.id as i64,
                         "",
@@ -593,8 +591,8 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                     let res = gh
                         .checks()
                         .create_suite(
-                            &pr.base.repo.owner.login,
-                            &pr.base.repo.name,
+                            &pr.base.repo().owner.login,
+                            &pr.base.repo().name,
                             &ChecksCreateSuiteRequest {
                                 head_sha: pr.head.sha.to_string(),
                             },
@@ -616,7 +614,7 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                  * or created.
                  */
                 let mut cs = app.db.ensure_check_suite(
-                    pr.base.repo.id,
+                    pr.base.repo().id,
                     instid,
                     suite_id,
                     &pr.head.sha,

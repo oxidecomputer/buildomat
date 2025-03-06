@@ -1,7 +1,8 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
+use anyhow::{bail, Result};
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
@@ -13,8 +14,36 @@ pub struct Payload {
     pub installation: Option<Installation>,
     pub check_suite: Option<CheckSuite>,
     pub check_run: Option<CheckRun>,
-    pub pull_request: Option<PullRequest>,
+    pull_request: Option<PullRequest>,
     pub requested_action: Option<RequestedAction>,
+}
+
+impl Payload {
+    pub fn pull_request(&self) -> Result<&PullRequest> {
+        let mut problems = Vec::new();
+
+        if let Some(pr) = self.pull_request.as_ref() {
+            /*
+             * Unfortunately, GitHub has been known to occasionally omit the
+             * repository object in web hooks that get delivered to us.  If that
+             * occurs, just drop the delivery.
+             */
+            if pr.base.repo.is_none() {
+                problems.push("missing pull_request.base.repo");
+            }
+            if pr.head.repo.is_none() {
+                problems.push("missing pull_request.head.repo");
+            }
+
+            if problems.is_empty() {
+                return Ok(pr);
+            }
+        } else {
+            problems.push("missing pull request information");
+        }
+
+        bail!("{}", problems.join(", "));
+    }
 }
 
 #[derive(Deserialize, Debug)]
@@ -90,12 +119,21 @@ pub struct PullRequestCommit {
     pub ref_: String,
     pub sha: String,
     pub user: User,
-    pub repo: Repository,
+    pub repo: Option<Repository>,
 }
 
 impl PullRequest {
     pub fn is_open(&self) -> bool {
         matches!(self.state, PullRequestState::Open)
+    }
+}
+
+impl PullRequestCommit {
+    pub fn repo(&self) -> &Repository {
+        /*
+         * This is validated in the pull_request() routine on the Payload.
+         */
+        self.repo.as_ref().unwrap()
     }
 }
 
