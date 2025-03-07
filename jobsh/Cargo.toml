@@ -5,13 +5,8 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
-buildomat-bunyan = { path = "../bunyan" }
 buildomat-client = { path = "../client" }
 buildomat-common = { path = "../common" }
-buildomat-download = { path = "../download" }
-#buildomat-github-client = { path = "../client" }
-#buildomat-github-database = { path = "../database" }
-#buildomat-github-hooktypes = { path = "../hooktypes" }
 buildomat-sse = { path = "../sse" }
 
 ansi-to-html = { workspace = true }
@@ -20,10 +15,8 @@ base64 = { workspace = true }
 chrono = { workspace = true }
 dropshot = { workspace = true }
 futures = { workspace = true }
-hmac-sha256 = { workspace = true }
 html-escape = { workspace = true }
 hyper = { workspace = true }
-pem = { workspace = true }
 reqwest = { workspace = true }
 rust-toolchain-file = { workspace = true }
 rusty_ulid = { workspace = true }
@@ -31,10 +24,7 @@ schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 slog = { workspace = true }
-strip-ansi-escapes = { workspace = true }
-tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 toml = { workspace = true }
-usdt = { workspace = true }

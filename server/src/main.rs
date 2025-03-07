@@ -1056,7 +1056,7 @@ async fn main() -> Result<()> {
     let awscfg = aws_config::ConfigLoader::default()
         .region(config.storage.region())
         .credentials_provider(config.storage.creds())
-        .behavior_version(aws_config::BehaviorVersion::v2024_03_28())
+        .behavior_version(aws_config::BehaviorVersion::v2025_01_17())
         .load()
         .await;
     let s3 = aws_sdk_s3::Client::new(&awscfg);

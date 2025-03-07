@@ -603,7 +603,7 @@ pub(crate) async fn aws_worker(c: Arc<Central>) -> Result<()> {
         "config-file",
     );
 
-    let cfg = aws_config::defaults(BehaviorVersion::v2024_03_28())
+    let cfg = aws_config::defaults(BehaviorVersion::v2025_01_17())
         .region(region)
         .credentials_provider(creds)
         .load()

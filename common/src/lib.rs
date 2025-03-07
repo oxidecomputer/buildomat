@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 use std::io::{IsTerminal, Read};
@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 use chrono::prelude::*;
-use rand::distributions::Alphanumeric;
-use rand::{thread_rng, Rng};
+use rand::distr::Alphanumeric;
+use rand::{rng, Rng};
 use regex::Regex;
 use rusty_ulid::Ulid;
 use serde::{Deserialize, Serialize};
@@ -66,11 +66,7 @@ pub async fn sleep_ms(ms: u64) {
 }
 
 pub fn genkey(len: usize) -> String {
-    thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(len)
-        .map(|c| c as char)
-        .collect()
+    rng().sample_iter(&Alphanumeric).take(len).map(|c| c as char).collect()
 }
 
 pub trait UlidDateExt {

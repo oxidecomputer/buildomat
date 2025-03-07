@@ -571,7 +571,7 @@ impl LoadedArchivedJob {
             self.offset_events.checked_add(offset).unwrap(),
         )?;
         let mut out: Vec<ArchivedEvent> = Default::default();
-        while out.len() < limit.try_into().unwrap() {
+        while out.len() < usize::try_from(limit).unwrap() {
             let Some(evnt) = &tw.next_with_tag_as_string_opt(*b"EVNT")? else {
                 break;
             };
