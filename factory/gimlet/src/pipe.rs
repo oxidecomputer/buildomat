@@ -7,7 +7,7 @@ use std::sync::{
     Arc,
 };
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 
 #[derive(Clone)]
 pub struct PipeEnd(Arc<AtomicI32>);
@@ -46,4 +46,14 @@ impl Drop for PipeEnd {
             assert!(unsafe { libc::close(fd) } == 0, "close fd {fd} failed");
         }
     }
+}
+
+mod sys {
+    extern "C" {
+        pub fn closefrom(lowfd: libc::c_int);
+    }
+}
+
+pub fn closefrom(lowfd: libc::c_int) {
+    unsafe { sys::closefrom(lowfd) };
 }

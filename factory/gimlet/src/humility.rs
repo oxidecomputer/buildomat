@@ -2,25 +2,92 @@
  * Copyright 2025 Oxide Computer Company
  */
 
-use std::{os::unix::process::CommandExt as _, process::{Command, Stdio}};
+use std::{
+    io::{Read, Write},
+    os::{fd::FromRawFd, unix::process::CommandExt},
+    process::{Command, Stdio},
+};
+
+use anyhow::{anyhow, bail, Result};
+use debug_parser::{Value, ValueKind};
 
 use crate::pipe::*;
+use buildomat_common::OutputExt;
 
-struct HiffyCaller {
-    humility: String,
-    method: String,
-    args: Vec<(String, String)>,
+pub trait ValueExt {
+    fn is_unit(&self) -> bool;
+    fn from_hex(&self) -> Result<u64>;
+    fn from_bytes(&self) -> Result<Vec<u8>>;
+    fn from_bytes_utf8(&self) -> Result<String>;
 }
 
-struct HiffyOutcome {
-    stdout: String,
+impl ValueExt for Value {
+    fn is_unit(&self) -> bool {
+        if self.name.is_some() {
+            false
+        } else {
+            match &self.kind {
+                ValueKind::Tuple(u) => u.values.is_empty(),
+                _ => false,
+            }
+        }
+    }
+
+    fn from_hex(&self) -> Result<u64> {
+        match &self.kind {
+            ValueKind::Term(t) => {
+                Ok(u64::from_str_radix(t.trim().trim_start_matches("0x"), 16)?)
+            }
+            _ => bail!("wrong kind?"),
+        }
+    }
+
+    fn from_bytes(&self) -> Result<Vec<u8>> {
+        match &self.kind {
+            ValueKind::List(l) => {
+                let mut out = Vec::new();
+
+                for v in &l.values {
+                    match &v.kind {
+                        ValueKind::Term(t) => {
+                            let Some(hex) = t.strip_prefix("0x") else {
+                                bail!("expected a hex number, got {t:?}");
+                            };
+
+                            out.push(u8::from_str_radix(&hex, 16)?);
+                        }
+                        _ => bail!("list should only contain terms"),
+                    }
+                }
+
+                Ok(out)
+            }
+            _ => bail!("value is not a list"),
+        }
+    }
+
+    fn from_bytes_utf8(&self) -> Result<String> {
+        Ok(String::from_utf8(self.from_bytes()?)?)
+    }
+}
+
+pub struct HiffyCaller {
+    pub humility: String,
+    pub method: String,
+    pub archive: String,
+    pub probe: Option<String>,
+    pub args: Vec<(String, String)>,
+}
+
+pub struct HiffyOutcome {
+    pub stdout: String,
     #[allow(unused)]
-    key: String,
-    value: Value,
+    pub key: String,
+    pub value: Value,
 }
 
 impl HiffyOutcome {
-    fn unit(&self) -> Result<()> {
+    pub fn unit(&self) -> Result<()> {
         if self.stdout.contains("Err(") {
             bail!("looks like an error: {:?}", self.stdout);
         }
@@ -34,12 +101,12 @@ impl HiffyOutcome {
 }
 
 impl HiffyCaller {
-    fn arg(&mut self, k: &str, v: &str) -> &mut HiffyCaller {
+    pub fn arg(&mut self, k: &str, v: &str) -> &mut HiffyCaller {
         self.args.push((k.into(), v.into()));
         self
     }
 
-    fn describe(&self) -> String {
+    pub fn describe(&self) -> String {
         let mut msg = format!("{}(", self.method);
         for (i, (k, v)) in self.args.iter().enumerate() {
             if i > 0 {
@@ -51,14 +118,28 @@ impl HiffyCaller {
         msg
     }
 
-    fn call_input(&mut self, buf: &[u8]) -> Result<HiffyOutcome> {
+    pub fn humility(&self) -> Command {
+        let mut cmd = std::process::Command::new("/usr/bin/pfexec");
+
+        cmd.env_clear();
+        cmd.env("HUMILITY_ARCHIVE", &self.archive);
+        if let Some(probe) = &self.probe {
+            cmd.env("HUMILITY_PROBE", probe);
+        }
+
+        cmd.arg(&self.humility);
+
+        cmd
+    }
+
+    pub fn call_input(&mut self, buf: &[u8]) -> Result<HiffyOutcome> {
         println!(
             " * hiffy call {} (input {} bytes)...",
             self.describe(),
             buf.len()
         );
 
-        let mut cmd = Command::new(&self.humility);
+        let mut cmd = self.humility();
         cmd.arg("hiffy");
 
         cmd.arg("-c");
@@ -128,10 +209,10 @@ impl HiffyCaller {
         }
     }
 
-    fn call_output(&mut self, size: u64) -> Result<(String, Vec<u8>)> {
+    pub fn call_output(&mut self, size: u64) -> Result<(String, Vec<u8>)> {
         println!(" * hiffy call {} (output {size} bytes)...", self.describe());
 
-        let mut cmd = Command::new(&self.humility);
+        let mut cmd = self.humility();
         cmd.arg("hiffy");
 
         cmd.arg("-c");
@@ -198,10 +279,10 @@ impl HiffyCaller {
         Ok((stdout, buf))
     }
 
-    fn call(&mut self) -> Result<HiffyOutcome> {
+    pub fn call(&mut self) -> Result<HiffyOutcome> {
         println!(" * hiffy call {}...", self.describe());
 
-        let mut cmd = Command::new(&self.humility);
+        let mut cmd = self.humility();
         cmd.arg("hiffy");
 
         cmd.arg("-c");
@@ -236,5 +317,51 @@ impl HiffyCaller {
     }
 }
 
+pub enum PathStep {
+    Name(String),
+    Map(String),
+    Tuple(usize),
+}
 
+pub fn locate_term<'a>(v: &'a Value, path: &[PathStep]) -> Result<&'a Value> {
+    let mut w = v;
 
+    for ps in path {
+        match ps {
+            PathStep::Name(n) => {
+                if let Some(wn) = &w.name {
+                    if wn != n {
+                        bail!("wanted name {n:?}, got {wn:?}");
+                    }
+                } else {
+                    bail!("wanted name {n:?}, but value has no name");
+                }
+            }
+            PathStep::Map(mk) => match &w.kind {
+                ValueKind::Map(m) => {
+                    if let Some(kv) = m.values.iter().find(|a| &a.key == mk) {
+                        w = &kv.value;
+                    } else {
+                        bail!("could not find key {mk:?} in map");
+                    }
+                }
+                _ => bail!("wanted a map, but had some other kind"),
+            },
+            PathStep::Tuple(idx) => match &w.kind {
+                ValueKind::Tuple(t) => {
+                    if *idx >= t.values.len() {
+                        bail!(
+                            "wanted tuple value {idx}, but only {} values",
+                            t.values.len()
+                        );
+                    }
+
+                    w = &t.values[*idx];
+                }
+                _ => bail!("wanted a map, but had some other kind"),
+            },
+        }
+    }
+
+    Ok(w)
+}
