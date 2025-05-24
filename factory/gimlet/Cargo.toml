@@ -14,9 +14,11 @@ buildomat-common = { path = "../../common" }
 anyhow = { workspace = true }
 chrono = { workspace = true }
 debug_parser = { workspace = true }
+devinfo = { workspace = true }
 dropshot = { workspace = true }
 getopts = { workspace = true }
 hyper = { workspace = true }
+iddqd = { workspace = true }
 libc = { workspace = true }
 rand = { workspace = true }
 schemars = { workspace = true }
@@ -30,3 +32,4 @@ tlvc = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
 usdt = { workspace = true }
+uuid = { workspace = true }
