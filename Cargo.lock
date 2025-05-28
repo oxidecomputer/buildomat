@@ -837,7 +837,10 @@ name = "buildomat-factory-gimlet"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "buildomat-client",
  "buildomat-common",
+ "buildomat-database",
+ "buildomat-types",
  "chrono",
  "debug_parser",
  "devinfo",

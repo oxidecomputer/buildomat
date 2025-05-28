@@ -6,10 +6,10 @@ license = "MPL-2.0"
 
 [dependencies]
 buildomat-common = { path = "../../common" }
-#buildomat-database = { path = "../../database" }
+buildomat-database = { path = "../../database" }
 #buildomat-download = { path = "../../download" }
-#buildomat-client = { path = "../../client" }
-#buildomat-types = { path = "../../types" }
+buildomat-client = { path = "../../client" }
+buildomat-types = { path = "../../types" }
 
 anyhow = { workspace = true }
 chrono = { workspace = true }
