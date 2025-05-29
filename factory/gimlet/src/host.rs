@@ -15,6 +15,7 @@ use std::{
 use anyhow::{anyhow, bail, Result};
 use debug_parser::ValueKind;
 use iddqd::{id_upcast, IdHashItem};
+use slog::{error, info, o, warn, Logger};
 
 use crate::{
     config::{ConfigFileTools, ConfigHost},
@@ -28,6 +29,8 @@ use buildomat_common::*;
 
 #[derive(Debug)]
 pub struct Host {
+    log: Logger,
+
     probe: String,
     archive: String,
 
@@ -38,6 +41,7 @@ pub struct Host {
 impl Host {
     fn hiffy(&self, cmd: &str) -> HiffyCaller {
         HiffyCaller {
+            log: self.log.new(o!("hiffy" => true)),
             humility: self.tools.humility.to_string(),
             archive: self.archive.to_string(),
             probe: Some(self.probe.to_string()),
@@ -53,28 +57,28 @@ impl Host {
 
     pub fn power_off(&self) -> Result<()> {
         if self.power_state()? == "A2" {
-            println!("already powered off");
+            info!(&self.log, "already powered off");
             return Ok(());
         }
 
-        println!("powering off");
+        info!(&self.log, "powering off");
         self.hiffy("Sequencer.set_state").arg("state", "A2").call()?.unit()?;
         Ok(())
     }
 
     pub fn power_on(&self) -> Result<()> {
         if self.power_state()? == "A0" {
-            println!("already powered on");
+            info!(&self.log, "already powered on");
             return Ok(());
         }
 
-        println!("powering on");
+        info!(&self.log, "powering on");
         self.hiffy("Sequencer.set_state").arg("state", "A0").call()?.unit()?;
         Ok(())
     }
 
     pub fn boot_net(&self) -> Result<()> {
-        println!("setting startup options to boot from network");
+        info!(&self.log, "setting startup options to boot from network");
         self.hiffy("ControlPlaneAgent.set_startup_options")
             .arg("startup_options", "0x80")
             .call()?
@@ -83,7 +87,7 @@ impl Host {
     }
 
     pub fn pick_bsu(&self, bsu: u32) -> Result<()> {
-        println!("picking BSU {bsu}");
+        info!(&self.log, "picking BSU {bsu}");
         self.hiffy("HostFlash.set_dev")
             .arg("dev", &format!("Flash{bsu}"))
             .call()?
@@ -93,7 +97,7 @@ impl Host {
 
     pub fn write_rom(&self, os_dir: &str) -> Result<()> {
         let file = format!("{os_dir}/rom");
-        println!("writing rom {file:?}");
+        info!(&self.log, "writing ROM image {file:?}");
 
         let res = Command::new("/usr/bin/pfexec")
             .env_clear()
@@ -117,7 +121,7 @@ impl Host {
 
     pub fn boot_server(&self, os_dir: &str) -> Result<()> {
         let file = format!("{os_dir}/zfs.img");
-        println!("running boot server for {file:?}");
+        info!(&self.log, "running boot server for {file:?}");
 
         let res = Command::new("/usr/bin/pfexec")
             .env_clear()
@@ -146,7 +150,6 @@ impl Host {
             "UserKnownHostsFile=/dev/null".to_string(),
             "ConnectTimeout=5".to_string(),
             "LogLevel=error".to_string(),
-            "User=root".to_string(),
         ]
     }
 
@@ -158,7 +161,7 @@ impl Host {
             cmd.arg("-o").arg(opt);
         }
 
-        cmd.arg(&self.host.config.ip);
+        cmd.arg(format!("root@{}", &self.host.config.ip));
 
         cmd
     }
@@ -175,6 +178,7 @@ impl Host {
     }
 
     pub fn open(
+        log: Logger,
         tools: &ConfigFileTools,
         host: &ConfigHost,
     ) -> Result<Self> {
@@ -219,6 +223,7 @@ impl Host {
          * Attempt to raise the Gimlet and get its serial number.
          */
         let mut hc = HiffyCaller {
+            log: log.new(o!("hiffy" => true)),
             humility: tools.humility.to_string(),
             archive: archive.to_string(),
             probe: Some(probe.to_string()),
@@ -276,7 +281,7 @@ impl Host {
             );
         }
 
-        Ok(Self { probe, archive, tools, host })
+        Ok(Self { log, probe, archive, tools, host })
     }
 }
 
@@ -341,6 +346,7 @@ pub struct Inner {
     host: ConfigHost,
     tools: ConfigFileTools,
 
+    log: Logger,
     locked: Mutex<Locked>,
 }
 
@@ -352,13 +358,11 @@ struct Locked {
 }
 
 impl HostManager {
-    pub fn new(
-        host: ConfigHost,
-        tools: ConfigFileTools,
-    ) -> Self {
+    pub fn new(log: Logger, host: ConfigHost, tools: ConfigFileTools) -> Self {
         let hm0 = Self(Arc::new(Inner {
             host,
             tools,
+            log,
             locked: Mutex::new(Locked {
                 state: HostState::Unknown,
                 clean_needed: false,
@@ -399,7 +403,7 @@ impl HostManager {
     fn thread_noerr(&self) {
         loop {
             if let Err(e) = self.thread() {
-                eprintln!("ERROR: thread: {e}");
+                error!(&self.log, "thread error: {e}");
             }
 
             std::thread::sleep(Duration::from_secs(1));
@@ -407,6 +411,7 @@ impl HostManager {
     }
 
     fn thread(&self) -> Result<()> {
+        let log = &self.log;
         let st = self.locked.lock().unwrap().state;
 
         match st {
@@ -424,7 +429,7 @@ impl HostManager {
                  * Move to the cleaning state.  The actual work is performed in
                  * the handler for that state.
                  */
-                println!("INFO: host moving to CLEANING...");
+                info!(log, "cleaning host");
                 l.state = HostState::Cleaning;
                 l.clean_needed = false;
                 l.start_needed = false;
@@ -435,7 +440,99 @@ impl HostManager {
                  * XXX power cycle the machine, then wait until we can SSH in to
                  * clean up the disks etc.
                  */
-                todo!()
+                let sys =
+                    Host::open(self.log.clone(), &self.tools, &self.host)?;
+                sys.power_off()?;
+                sys.pick_bsu(0)?;
+                sys.write_rom(&self.host.config.cleaning_os_dir)?;
+                sys.boot_net()?;
+                sys.power_on()?;
+                sys.boot_server(&self.host.config.cleaning_os_dir)?;
+
+                let ip = &self.host.config.ip;
+                info!(log, "waiting for system to come up at {ip}");
+
+                let phase = Instant::now();
+                let out = loop {
+                    let now = Instant::now();
+
+                    let dur = now.saturating_duration_since(phase);
+                    if dur.as_secs() > 300 {
+                        bail!("gave up after 300 seconds");
+                    }
+
+                    let out = sys.ssh().arg("pilot local info -j").output()?;
+                    if !out.status.success() {
+                        std::thread::sleep(Duration::from_secs(1));
+                        continue;
+                    }
+
+                    let Ok(out) = String::from_utf8(out.stdout) else {
+                        std::thread::sleep(Duration::from_secs(1));
+                        continue;
+                    };
+
+                    break out;
+                };
+
+                let dur = Instant::now().saturating_duration_since(phase);
+                info!(log,"got pilot local info";
+                    "info" => out,
+                    "seconds" => dur.as_secs(),
+                );
+
+                /*
+                 * Copy the cleanup program to the remote system.
+                 */
+                info!(log, "copying cleanup program to system");
+                let phase = Instant::now();
+                let exe = std::env::current_exe()?;
+                loop {
+                    let now = Instant::now();
+
+                    let dur = now.saturating_duration_since(phase);
+                    if dur.as_secs() > 300 {
+                        bail!("gave up after 300 seconds");
+                    }
+
+                    let out = sys
+                        .scp()
+                        .arg(&exe)
+                        .arg(&format!("root@{ip}:/tmp/cleanup"))
+                        .output()?;
+                    if !out.status.success() {
+                        warn!(log, "could not scp {exe:?} to {ip}");
+                        std::thread::sleep(Duration::from_secs(1));
+                        continue;
+                    }
+
+                    break;
+                }
+
+                /*
+                 * Run the cleanup program on the remote system.
+                 */
+                info!(log, "running cleaning program on system");
+                let out = sys.ssh().arg("/tmp/cleanup -C").output()?;
+                if !out.status.success() {
+                    let e =
+                        String::from_utf8_lossy(&out.stderr).trim().to_string();
+
+                    bail!("could not invoke cleanup program on {ip}: {e}");
+                }
+
+                let out = String::from_utf8(out.stdout)?;
+                info!(log,"got cleanup output";
+                    "info" => out,
+                    "seconds" => dur.as_secs(),
+                );
+
+                info!(log, "host is now ready");
+                let mut l = self.locked.lock().unwrap();
+                l.clean_needed = false;
+                l.start_needed = false;
+                l.state = HostState::Ready;
+                Ok(())
             }
             HostState::Ready => {
                 let mut l = self.locked.lock().unwrap();
@@ -451,7 +548,7 @@ impl HostManager {
                  * Move to the starting state.  The actual work is performed in
                  * the handler for that state.
                  */
-                println!("INFO: host moving to STARTING...");
+                info!(log, "starting host");
                 l.state = HostState::Starting;
                 l.clean_needed = false;
                 l.start_needed = false;

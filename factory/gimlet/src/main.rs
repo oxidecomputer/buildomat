@@ -20,6 +20,7 @@ use disks::Slot;
 use getopts::Options;
 use humility::{HiffyCaller, PathStep, ValueExt};
 use iddqd::{id_upcast, IdHashItem, IdHashMap};
+use slog::o;
 
 mod cleanup;
 mod config;
@@ -89,7 +90,7 @@ async fn main() -> Result<()> {
     opts.optopt("f", "", "configuration file", "CONFIG");
     opts.optopt("d", "", "database file", "FILE");
 
-    let p = getopts::Options::new()
+    let p = opts
         .parsing_style(getopts::ParsingStyle::FloatingFrees)
         .parse(std::env::args_os().skip(1))?;
 
@@ -147,8 +148,21 @@ async fn main() -> Result<()> {
      */
     for h in config.hosts {
         app.hosts
-            .insert_unique(host::HostManager::new(h, config.tools.clone()))
+            .insert_unique(host::HostManager::new(
+                log.new(o!(
+                    "component" => "hostmgr",
+                    "host" => h.id.to_string(),
+                )),
+                h,
+                config.tools.clone(),
+            ))
             .unwrap();
+    }
+
+    std::thread::sleep(Duration::from_secs(1));
+
+    for hm in app.hosts.iter() {
+        hm.clean();
     }
 
     /*
@@ -157,72 +171,4 @@ async fn main() -> Result<()> {
     loop {
         std::thread::sleep(Duration::from_secs(1));
     }
-
-    //    let sys = System::open(&gcfg, &scfg)?;
-    //
-    //    println!("sys = {sys:#?}");
-    //
-    //    let start = Instant::now();
-    //    sys.power_off()?;
-    //    sys.boot_net()?;
-    //    sys.pick_bsu(0)?;
-    //    sys.write_rom()?;
-    //    sys.power_on()?;
-    //    sys.boot_server()?;
-    //
-    //    println!("waiting for system to come up at {}", sys.scfg.ip);
-    //    let phase = Instant::now();
-    //    let out = loop {
-    //        let now = Instant::now();
-    //
-    //        let dur = now.saturating_duration_since(phase);
-    //        if dur.as_secs() > 300 {
-    //            bail!("gave up after 300 seconds");
-    //        }
-    //
-    //        let out = sys.ssh().arg("pilot local info -j").output()?;
-    //        if !out.status.success() {
-    //            std::thread::sleep(Duration::from_secs(1));
-    //            continue;
-    //        }
-    //
-    //        let Ok(out) = String::from_utf8(out.stdout) else {
-    //            std::thread::sleep(Duration::from_secs(1));
-    //            continue;
-    //        };
-    //
-    //        break out;
-    //    };
-    //
-    //    println!("got output: | {out} |");
-    //
-    //    let dur = Instant::now().saturating_duration_since(start);
-    //    println!("duration = {} seconds", dur.as_secs());
-    //
-    //    /*
-    //     * Copy the cleanup program to the remote system.
-    //     */
-    //    let out = sys
-    //        .scp()
-    //        .arg(&exe)
-    //        .arg(&format!("{}:/tmp/cleanup", sys.scfg.ip))
-    //        .output()?;
-    //    if !out.status.success() {
-    //        bail!("could not scp {exe:?} to {}", sys.scfg.ip);
-    //    }
-    //
-    //    /*
-    //     * Run the cleanup program on the remote system.
-    //     */
-    //    let out = sys.ssh().arg("/tmp/cleanup cleanup").output()?;
-    //    if !out.status.success() {
-    //        let e = String::from_utf8_lossy(&out.stderr).trim().to_string();
-    //
-    //        bail!("could not scp {exe:?} to {}: {e}", sys.scfg.ip);
-    //    }
-    //
-    //    let out = String::from_utf8(out.stdout)?;
-    //    println!("output from cleanup = |{out}|");
-    //
-    //    Ok(())
 }

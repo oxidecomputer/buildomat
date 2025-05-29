@@ -10,6 +10,7 @@ use std::{
 
 use anyhow::{anyhow, bail, Result};
 use debug_parser::{Value, ValueKind};
+use slog::{info, warn, Logger};
 
 use crate::pipe::*;
 use buildomat_common::OutputExt;
@@ -72,6 +73,7 @@ impl ValueExt for Value {
 }
 
 pub struct HiffyCaller {
+    pub log: Logger,
     pub humility: String,
     pub method: String,
     pub archive: String,
@@ -133,10 +135,11 @@ impl HiffyCaller {
     }
 
     pub fn call_input(&mut self, buf: &[u8]) -> Result<HiffyOutcome> {
-        println!(
-            " * hiffy call {} (input {} bytes)...",
+        info!(
+            self.log,
+            "hiffy call {} (input {} bytes)",
             self.describe(),
-            buf.len()
+            buf.len(),
         );
 
         let mut cmd = self.humility();
@@ -196,7 +199,7 @@ impl HiffyCaller {
         if let Some((k, v)) = out.split_once(" => ") {
             let parsed = debug_parser::parse(v);
             if parsed.name.as_deref() == Some("Err") {
-                eprintln!("WARNING: {v}");
+                warn!(self.log, "{v}");
             }
 
             Ok(HiffyOutcome {
@@ -210,7 +213,11 @@ impl HiffyCaller {
     }
 
     pub fn call_output(&mut self, size: u64) -> Result<(String, Vec<u8>)> {
-        println!(" * hiffy call {} (output {size} bytes)...", self.describe());
+        info!(
+            self.log,
+            "hiffy call {} (output {size} bytes)...",
+            self.describe(),
+        );
 
         let mut cmd = self.humility();
         cmd.arg("hiffy");
@@ -280,7 +287,7 @@ impl HiffyCaller {
     }
 
     pub fn call(&mut self) -> Result<HiffyOutcome> {
-        println!(" * hiffy call {}...", self.describe());
+        info!(self.log, "hiffy call {}...", self.describe());
 
         let mut cmd = self.humility();
         cmd.arg("hiffy");
@@ -303,7 +310,7 @@ impl HiffyCaller {
         if let Some((k, v)) = out.split_once(" => ") {
             let parsed = debug_parser::parse(v);
             if parsed.name.as_deref() == Some("Err") {
-                eprintln!("WARNING: {v}");
+                warn!(self.log, "{v}");
             }
 
             Ok(HiffyOutcome {
