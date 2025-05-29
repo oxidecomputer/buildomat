@@ -2,9 +2,13 @@
  * Copyright 2025 Oxide Computer Company
  */
 
-use std::{os::{fd::AsRawFd, unix::fs::OpenOptionsExt}, process::{Command, Stdio}, time::{Duration, Instant}};
+use std::{
+    os::{fd::AsRawFd, unix::fs::OpenOptionsExt},
+    process::{Command, Stdio},
+    time::{Duration, Instant},
+};
 
-use anyhow::{Result, bail};
+use anyhow::{anyhow, bail, Result};
 
 use crate::{disks, efi};
 use disks::Slot;
