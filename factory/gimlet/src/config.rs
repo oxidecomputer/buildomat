@@ -48,6 +48,7 @@ pub(crate) struct ConfigFileHost {
 
     pub ip: String,
     pub mac: String,
+    pub control_nic: String,
 
     pub cleaning_os_dir: String,
 

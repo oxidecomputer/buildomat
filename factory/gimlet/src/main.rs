@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use debug_parser::ValueKind;
 
 use buildomat_common::*;
@@ -20,18 +20,23 @@ use disks::Slot;
 use getopts::Options;
 use humility::{HiffyCaller, PathStep, ValueExt};
 use iddqd::{id_upcast, IdHashItem, IdHashMap};
-use slog::o;
+use slog::{info, o, Logger};
 
 mod cleanup;
 mod config;
 mod db;
 mod disks;
 mod efi;
+mod factory;
 mod host;
 mod humility;
 mod pipe;
 
 pub struct App {
+    log: Logger,
+    client: buildomat_client::Client,
+    config: config::Config,
+    db: db::Database,
     hosts: IdHashMap<host::HostManager>,
 }
 
@@ -120,8 +125,6 @@ async fn main() -> Result<()> {
         .bearer_token(&config.factory.token)
         .build()?;
 
-    let mut app = App { hosts: Default::default() };
-
     /*
      * Install a custom panic hook that will try to exit the process after a
      * short delay.  This is unfortunate, but I am not sure how else to avoid a
@@ -138,16 +141,14 @@ async fn main() -> Result<()> {
         });
     }));
 
-    /*
-     * Interaction with the buildomat server is performed in this task:
-     * XXX
-     */
+    let mut app0 =
+        App { log, client, hosts: Default::default(), config, db };
 
     /*
      * Start a host manager thread for each configured host:
      */
     for h in config.hosts {
-        app.hosts
+        app0.hosts
             .insert_unique(host::HostManager::new(
                 log.new(o!(
                     "component" => "hostmgr",
@@ -159,16 +160,17 @@ async fn main() -> Result<()> {
             .unwrap();
     }
 
-    std::thread::sleep(Duration::from_secs(1));
-
-    for hm in app.hosts.iter() {
-        hm.clean();
-    }
+    let app0 = Arc::new(app0);
 
     /*
-     * XXX wait for events to transpire
+     * Interaction with the buildomat server is performed in this task.
      */
-    loop {
-        std::thread::sleep(Duration::from_secs(1));
+    let app = Arc::clone(&app0);
+    let t_factory = tokio::task::spawn(async move {
+        factory::factory_task(app).await.context("factory task failure")
+    });
+
+    tokio::select! {
+        _ = t_factory => bail!("factory task stopped early"),
     }
 }

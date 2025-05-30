@@ -4,6 +4,7 @@
 
 use std::{
     collections::HashMap,
+    io::Write,
     ops::Deref,
     os::unix::{fs::OpenOptionsExt, io::AsRawFd},
     path::Path,
@@ -107,13 +108,12 @@ impl Host {
             .arg("qspi")
             .arg("-D")
             .arg(file)
-            .stdout(Stdio::inherit())
-            .stdin(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .status()?;
+            .output()?;
 
-        if !res.success() {
-            bail!("rom write failed");
+        if !res.status.success() {
+            let e = String::from_utf8_lossy(&res.stderr).trim().to_string();
+
+            bail!("rom write failed: {e}");
         }
 
         Ok(())
@@ -129,16 +129,15 @@ impl Host {
             .arg("-s")
             .arg("-t")
             .arg("300")
-            .arg("e1000g0")
+            .arg(&self.host.config.control_nic)
             .arg(file)
             .arg(&self.host.config.mac)
-            .stdout(Stdio::inherit())
-            .stdin(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .status()?;
+            .output()?;
 
-        if !res.success() {
-            bail!("boot server failed");
+        if !res.status.success() {
+            let e = String::from_utf8_lossy(&res.stderr).trim().to_string();
+
+            bail!("boot server failed: {e}");
         }
 
         Ok(())
@@ -320,6 +319,15 @@ pub enum HostState {
     Starting,
 }
 
+/*
+ * What is the current intended end state to drive towards for this host.
+ */
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum HostGoal {
+    Clean,
+    Start { bootstrap: String, url: String },
+}
+
 #[derive(Clone, Debug)]
 pub struct HostManager(Arc<Inner>);
 
@@ -353,8 +361,7 @@ pub struct Inner {
 #[derive(Debug)]
 struct Locked {
     state: HostState,
-    clean_needed: bool,
-    start_needed: bool,
+    goal: Option<HostGoal>,
 }
 
 impl HostManager {
@@ -365,8 +372,7 @@ impl HostManager {
             log,
             locked: Mutex::new(Locked {
                 state: HostState::Unknown,
-                clean_needed: false,
-                start_needed: false,
+                goal: None,
             }),
         }));
 
@@ -382,22 +388,93 @@ impl HostManager {
         &self.host.id
     }
 
+    pub fn ip(&self) -> &str {
+        &self.host.config.ip
+    }
+
     pub fn clean(&self) {
-        /*
-         * XXX
-         */
-        self.locked.lock().unwrap().clean_needed = true;
+        let log = &self.log;
+        let mut l = self.locked.lock().unwrap();
+
+        match l.state {
+            HostState::Unknown => {
+                match l.goal {
+                    /*
+                     * A clean has already been requested.
+                     */
+                    Some(HostGoal::Clean) => (),
+                    Some(_) | None => {
+                        info!(log, "host in unknown state marked for cleaning");
+                        l.goal = Some(HostGoal::Clean);
+                    }
+                }
+            }
+            HostState::Cleaning => {
+                match l.goal {
+                    /*
+                     * Already cleaning.
+                     */
+                    Some(HostGoal::Clean) | None => (),
+                    /*
+                     * We do not allow a host to be marked for agent start until
+                     * it is in the ready state.
+                     */
+                    Some(HostGoal::Start { .. }) => unreachable!(),
+                }
+            }
+            HostState::Ready | HostState::Starting => {
+                match l.goal {
+                    /*
+                     * A clean has already been requested.
+                     */
+                    Some(HostGoal::Clean) => (),
+                    Some(_) | None => {
+                        info!(log, "previously ready host marked for cleaning");
+                        l.goal = Some(HostGoal::Clean);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn start(&self, url: &str, bootstrap: &str) -> Result<()> {
+        let log = &self.log;
+        let mut l = self.locked.lock().unwrap();
+
+        let new_goal = Some(HostGoal::Start {
+            bootstrap: bootstrap.to_string(),
+            url: url.to_string(),
+        });
+
+        match l.state {
+            HostState::Unknown | HostState::Starting | HostState::Cleaning => {
+                bail!("cannot start a host in the {:?} state", l.state);
+            }
+            HostState::Ready => {
+                if new_goal == l.goal {
+                    /*
+                     * We're already geared up to do this.
+                     */
+                    return Ok(());
+                } else if l.goal.is_some() {
+                    bail!(
+                        "second attempt to start host with different \
+                        parameters"
+                    );
+                }
+
+                info!(log, "starting host";
+                    "url" => url, "bootstrap" => bootstrap);
+                l.goal = new_goal;
+                Ok(())
+            }
+        }
     }
 
     pub fn is_ready(&self) -> bool {
-        self.locked.lock().unwrap().state == HostState::Ready
-    }
+        let l = self.locked.lock().unwrap();
 
-    pub fn start(&self) {
-        /*
-         * XXX
-         */
-        self.locked.lock().unwrap().start_needed = true;
+        l.state == HostState::Ready && l.goal.is_none()
     }
 
     fn thread_noerr(&self) {
@@ -418,22 +495,16 @@ impl HostManager {
             HostState::Unknown => {
                 let mut l = self.locked.lock().unwrap();
 
-                if !l.clean_needed {
-                    /*
-                     * Don't touch the host until a clean is requested.
-                     */
-                    return Ok(());
+                match l.goal {
+                    Some(HostGoal::Clean) => {
+                        info!(log, "cleaning host");
+                        l.state = HostState::Cleaning;
+                        l.goal = None;
+                        Ok(())
+                    }
+                    Some(HostGoal::Start { .. }) => unreachable!(),
+                    None => return Ok(()),
                 }
-
-                /*
-                 * Move to the cleaning state.  The actual work is performed in
-                 * the handler for that state.
-                 */
-                info!(log, "cleaning host");
-                l.state = HostState::Cleaning;
-                l.clean_needed = false;
-                l.start_needed = false;
-                Ok(())
             }
             HostState::Cleaning => {
                 /*
@@ -454,9 +525,7 @@ impl HostManager {
 
                 let phase = Instant::now();
                 let out = loop {
-                    let now = Instant::now();
-
-                    let dur = now.saturating_duration_since(phase);
+                    let dur = Instant::now().saturating_duration_since(phase);
                     if dur.as_secs() > 300 {
                         bail!("gave up after 300 seconds");
                     }
@@ -488,9 +557,7 @@ impl HostManager {
                 let phase = Instant::now();
                 let exe = std::env::current_exe()?;
                 loop {
-                    let now = Instant::now();
-
-                    let dur = now.saturating_duration_since(phase);
+                    let dur = Instant::now().saturating_duration_since(phase);
                     if dur.as_secs() > 300 {
                         bail!("gave up after 300 seconds");
                     }
@@ -521,44 +588,149 @@ impl HostManager {
                     bail!("could not invoke cleanup program on {ip}: {e}");
                 }
 
+                let dur = Instant::now().saturating_duration_since(phase);
                 let out = String::from_utf8(out.stdout)?;
                 info!(log,"got cleanup output";
                     "info" => out,
                     "seconds" => dur.as_secs(),
                 );
 
-                info!(log, "host is now ready");
                 let mut l = self.locked.lock().unwrap();
-                l.clean_needed = false;
-                l.start_needed = false;
-                l.state = HostState::Ready;
-                Ok(())
+                match l.goal {
+                    Some(HostGoal::Start { .. }) => unreachable!(),
+                    Some(HostGoal::Clean) | None => {
+                        info!(log, "host is now ready");
+                        l.state = HostState::Ready;
+                        l.goal = None;
+                        Ok(())
+                    }
+                }
             }
             HostState::Ready => {
                 let mut l = self.locked.lock().unwrap();
 
-                if !l.start_needed {
-                    /*
-                     * Don't touch the host until a start is requested.
-                     */
-                    return Ok(());
+                match l.goal {
+                    Some(HostGoal::Clean) => {
+                        info!(log, "cleaning host");
+                        l.state = HostState::Cleaning;
+                        Ok(())
+                    }
+                    Some(HostGoal::Start { .. }) => {
+                        info!(log, "starting host");
+                        l.state = HostState::Starting;
+                        Ok(())
+                    }
+                    None => {
+                        /*
+                         * Otherwise, don't touch the host until a start is
+                         * requested.
+                         */
+                        Ok(())
+                    }
                 }
-
-                /*
-                 * Move to the starting state.  The actual work is performed in
-                 * the handler for that state.
-                 */
-                info!(log, "starting host");
-                l.state = HostState::Starting;
-                l.clean_needed = false;
-                l.start_needed = false;
-                Ok(())
             }
             HostState::Starting => {
                 /*
-                 * XXX ssh to the machine and install the agent service
+                 * Get the bootstrap token we should use:
                  */
-                todo!()
+                let program = {
+                    let template =
+                        include_str!("../../propolis/scripts/user_data.sh");
+
+                    let mut l = self.locked.lock().unwrap();
+                    match &l.goal {
+                        Some(HostGoal::Clean) => {
+                            info!(log, "cleaning host");
+                            l.state = HostState::Cleaning;
+                            return Ok(());
+                        }
+                        Some(HostGoal::Start { bootstrap, url }) => template
+                            .replace("%STRAP%", &bootstrap)
+                            .replace("%URL%", &url),
+                        None => {
+                            info!(log, "host state unknown");
+                            l.state = HostState::Unknown;
+                            return Ok(());
+                        }
+                    }
+                };
+
+                let sys =
+                    Host::open(self.log.clone(), &self.tools, &self.host)?;
+
+                /*
+                 * Copy the agent startup program to the remote system.
+                 */
+                info!(log, "copying agent startup program to system");
+                let phase = Instant::now();
+                let exe = std::env::current_exe()?;
+                loop {
+                    let dur = Instant::now().saturating_duration_since(phase);
+                    if dur.as_secs() > 300 {
+                        bail!("gave up after 300 seconds");
+                    }
+
+                    let mut child = sys
+                        .ssh()
+                        .arg("tee /tmp/install.sh >/dev/null")
+                        .stdin(Stdio::piped())
+                        .spawn()?;
+
+                    let mut stdin = child.stdin.take().unwrap();
+                    stdin.write_all(program.as_bytes())?;
+
+                    let out = child.wait_with_output()?;
+
+                    if !out.status.success() {
+                        warn!(log, "could not send startup program");
+                        std::thread::sleep(Duration::from_secs(1));
+                        continue;
+                    }
+
+                    break;
+                }
+
+                /*
+                 * Run the agent startup program on the remote system.
+                 */
+                info!(log, "installing agent on system");
+                let out = sys
+                    .ssh()
+                    .arg(format!("bash -x /tmp/install.sh 2>&1"))
+                    .output()?;
+                if !out.status.success() {
+                    let e =
+                        String::from_utf8_lossy(&out.stdout).trim().to_string();
+
+                    bail!("could not invoke startup program: {e}");
+                }
+
+                let dur = Instant::now().saturating_duration_since(phase);
+                let out = String::from_utf8(out.stdout)?;
+                info!(log,"got install output";
+                    "info" => out,
+                    "seconds" => dur.as_secs(),
+                );
+
+                let mut l = self.locked.lock().unwrap();
+                match l.goal {
+                    Some(HostGoal::Start { .. }) => {
+                        info!(log, "host is started");
+                        l.state = HostState::Unknown;
+                        l.goal = None;
+                        Ok(())
+                    }
+                    Some(HostGoal::Clean) => {
+                        info!(log, "cleaning host");
+                        l.state = HostState::Cleaning;
+                        Ok(())
+                    }
+                    None => {
+                        info!(log, "host state unknown");
+                        l.state = HostState::Unknown;
+                        Ok(())
+                    }
+                }
             }
         }
     }

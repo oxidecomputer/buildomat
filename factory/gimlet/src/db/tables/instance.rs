@@ -92,6 +92,10 @@ impl InstanceId {
     pub fn seq(&self) -> u64 {
         self.seq
     }
+
+    pub fn host(&self) -> crate::HostId {
+        crate::HostId { model: self.model.clone(), serial: self.serial.clone() }
+    }
 }
 
 #[derive(Clone, Debug)]
