@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 /*
  * Copyright 2025 Oxide Computer Company
  */

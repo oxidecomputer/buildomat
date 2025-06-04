@@ -121,6 +121,7 @@ impl Gpt {
         Ok(Gpt { vtoc })
     }
 
+    #[allow(unused)]
     pub fn read_from_fd(f: RawFd) -> Result<Gpt> {
         let fd = f.as_raw_fd();
 

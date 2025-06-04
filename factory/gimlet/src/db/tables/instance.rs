@@ -7,10 +7,15 @@ use anyhow::{anyhow, bail, Result};
 
 sqlite_sql_enum!(InstanceState => {
     /**
-     * A freshly rebooted system requires that we install a copy of the
-     * buildomat agent and provide the system with a bootstrap token.
+     * Take control of the machine, which may be in an unknown state.
      */
     Preinstall,
+
+    /**
+     * The machine has been returned to a known state, so we can begin installng
+     * the agent.
+     */
+    Installing,
 
     /**
      * Once the system has been installed and provided with the token, it

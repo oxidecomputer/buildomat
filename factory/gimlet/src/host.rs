@@ -6,22 +6,16 @@ use std::{
     collections::HashMap,
     io::Write,
     ops::Deref,
-    os::unix::{fs::OpenOptionsExt, io::AsRawFd},
-    path::Path,
     process::{Command, Stdio},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
 use anyhow::{anyhow, bail, Result};
-use debug_parser::ValueKind;
 use iddqd::{id_upcast, IdHashItem};
 use slog::{error, info, o, warn, Logger};
 
-use crate::{
-    config::{ConfigFileTools, ConfigHost},
-    disks::Slot,
-};
+use crate::config::{ConfigFileTools, ConfigHost};
 use crate::{
     humility::{self, HiffyCaller, PathStep, ValueExt},
     HostId,
@@ -325,7 +319,7 @@ pub enum HostState {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum HostGoal {
     Clean,
-    Start { bootstrap: String, url: String },
+    Start { bootstrap: String, url: String, os_dir: String },
 }
 
 #[derive(Clone, Debug)]
@@ -437,13 +431,19 @@ impl HostManager {
         }
     }
 
-    pub fn start(&self, url: &str, bootstrap: &str) -> Result<()> {
+    pub fn start(
+        &self,
+        url: &str,
+        bootstrap: &str,
+        os_dir: &str,
+    ) -> Result<()> {
         let log = &self.log;
         let mut l = self.locked.lock().unwrap();
 
         let new_goal = Some(HostGoal::Start {
             bootstrap: bootstrap.to_string(),
             url: url.to_string(),
+            os_dir: os_dir.to_string(),
         });
 
         match l.state {
@@ -471,10 +471,16 @@ impl HostManager {
         }
     }
 
+    pub fn is_starting(&self) -> bool {
+        let l = self.locked.lock().unwrap();
+
+        l.state == HostState::Starting
+    }
+
     pub fn is_ready(&self) -> bool {
         let l = self.locked.lock().unwrap();
 
-        l.state == HostState::Ready && l.goal.is_none()
+        l.state == HostState::Ready
     }
 
     fn thread_noerr(&self) {
@@ -631,9 +637,10 @@ impl HostManager {
             }
             HostState::Starting => {
                 /*
-                 * Get the bootstrap token we should use:
+                 * Determine which OS image to use, and create a shell program
+                 * to bootstrap the agent:
                  */
-                let program = {
+                let (program, os_dir) = {
                     let template =
                         include_str!("../../propolis/scripts/user_data.sh");
 
@@ -644,9 +651,12 @@ impl HostManager {
                             l.state = HostState::Cleaning;
                             return Ok(());
                         }
-                        Some(HostGoal::Start { bootstrap, url }) => template
-                            .replace("%STRAP%", &bootstrap)
-                            .replace("%URL%", &url),
+                        Some(HostGoal::Start { bootstrap, url, os_dir }) => (
+                            template
+                                .replace("%STRAP%", &bootstrap)
+                                .replace("%URL%", &url),
+                            os_dir.to_string(),
+                        ),
                         None => {
                             info!(log, "host state unknown");
                             l.state = HostState::Unknown;
@@ -658,12 +668,52 @@ impl HostManager {
                 let sys =
                     Host::open(self.log.clone(), &self.tools, &self.host)?;
 
+                sys.power_off()?;
+                /*
+                 * Run the target image in BSU 1, so that we don't always have
+                 * to rewrite the cleaning image in BSU 0:
+                 */
+                sys.pick_bsu(1)?;
+                sys.write_rom(&os_dir)?;
+                sys.boot_net()?;
+                sys.power_on()?;
+                sys.boot_server(&os_dir)?;
+
+                let ip = &self.host.config.ip;
+                info!(log, "waiting for system to come up at {ip}");
+
+                let phase = Instant::now();
+                let out = loop {
+                    let dur = Instant::now().saturating_duration_since(phase);
+                    if dur.as_secs() > 300 {
+                        bail!("gave up after 300 seconds");
+                    }
+
+                    let out = sys.ssh().arg("pilot local info -j").output()?;
+                    if !out.status.success() {
+                        std::thread::sleep(Duration::from_secs(1));
+                        continue;
+                    }
+
+                    let Ok(out) = String::from_utf8(out.stdout) else {
+                        std::thread::sleep(Duration::from_secs(1));
+                        continue;
+                    };
+
+                    break out;
+                };
+
+                let dur = Instant::now().saturating_duration_since(phase);
+                info!(log,"got pilot local info";
+                    "info" => out,
+                    "seconds" => dur.as_secs(),
+                );
+
                 /*
                  * Copy the agent startup program to the remote system.
                  */
                 info!(log, "copying agent startup program to system");
                 let phase = Instant::now();
-                let exe = std::env::current_exe()?;
                 loop {
                     let dur = Instant::now().saturating_duration_since(phase);
                     if dur.as_secs() > 300 {

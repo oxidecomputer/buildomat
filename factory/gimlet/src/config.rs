@@ -5,7 +5,8 @@
 use iddqd::{id_upcast, IdHashItem, IdHashMap};
 use std::{collections::HashMap, path::Path};
 
-use anyhow::{bail, Result};
+use anyhow::Result;
+use buildomat_types::config::ConfigFileDiag;
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug, Clone)]
@@ -16,8 +17,8 @@ pub(crate) struct ConfigFile {
     pub host: HashMap<String, ConfigFileHost>,
     pub target: HashMap<String, ConfigFileTarget>,
     pub tools: ConfigFileTools,
-    // #[serde(default)]
-    // pub diag: ConfigFileDiag,
+    #[serde(default)]
+    pub diag: ConfigFileDiag,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -34,8 +35,9 @@ pub(crate) struct ConfigFileFactory {
 
 #[derive(Deserialize, Debug, Clone)]
 pub(crate) struct ConfigFileTarget {
-    pub hosts: Vec<String>,
     pub os_dir: String,
+    #[serde(default)]
+    pub diag: ConfigFileDiag,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -51,7 +53,6 @@ pub(crate) struct ConfigFileHost {
     pub control_nic: String,
 
     pub cleaning_os_dir: String,
-
     // XXX debug_*?
     // XXX extra_ips
 }
@@ -61,6 +62,23 @@ pub(crate) struct ConfigFileTools {
     pub humility: String,
     pub bootserver: String,
     pub gimlets: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConfigTarget {
+    pub id: String,
+    pub os_dir: String,
+    pub diag: ConfigFileDiag,
+}
+
+impl IdHashItem for ConfigTarget {
+    type Key<'a> = &'a String;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+
+    id_upcast!();
 }
 
 #[derive(Debug, Clone)]
@@ -84,11 +102,13 @@ pub struct Config {
     pub factory: ConfigFileFactory,
     pub tools: ConfigFileTools,
     pub hosts: IdHashMap<ConfigHost>,
+    pub targets: IdHashMap<ConfigTarget>,
+    pub diag: ConfigFileDiag,
 }
 
 pub fn load<P: AsRef<Path>>(path: P) -> Result<Config> {
     let p = path.as_ref();
-    let ConfigFile { general, factory, host, target, tools } =
+    let ConfigFile { general, factory, host, target, tools, diag } =
         buildomat_common::read_toml(p)?;
 
     let mut hosts: IdHashMap<ConfigHost> = Default::default();
@@ -98,5 +118,16 @@ pub fn load<P: AsRef<Path>>(path: P) -> Result<Config> {
             .unwrap();
     }
 
-    Ok(Config { general, factory, tools, hosts })
+    let mut targets: IdHashMap<ConfigTarget> = Default::default();
+    for (id, tc) in target {
+        targets
+            .insert_unique(ConfigTarget {
+                id: id.to_string(),
+                os_dir: tc.os_dir,
+                diag: tc.diag,
+            })
+            .unwrap();
+    }
+
+    Ok(Config { general, factory, tools, hosts, targets, diag })
 }

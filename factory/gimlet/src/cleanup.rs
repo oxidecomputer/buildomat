@@ -69,7 +69,7 @@ fn prepare_m2() -> Result<()> {
     };
 
     let chr = d.primary().chr.clone();
-    let mut f = std::fs::OpenOptions::new()
+    let f = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .custom_flags(libc::O_NONBLOCK)

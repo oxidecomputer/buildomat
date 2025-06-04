@@ -73,9 +73,11 @@ impl Database {
 
             let valid_source_states: &[InstanceState] = match state {
                 InstanceState::Preinstall => &[],
-                InstanceState::Installed => &[InstanceState::Preinstall],
+                InstanceState::Installing => &[InstanceState::Preinstall],
+                InstanceState::Installed => &[InstanceState::Installing],
                 InstanceState::Destroying => &[
                     InstanceState::Preinstall,
+                    InstanceState::Installing,
                     InstanceState::Installed,
                 ],
                 InstanceState::Destroyed => &[InstanceState::Destroying],

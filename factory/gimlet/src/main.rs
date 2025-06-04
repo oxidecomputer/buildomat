@@ -1,3 +1,5 @@
+#![allow(unused_imports)]
+
 /*
  * Copyright 2025 Oxide Computer Company
  */
@@ -13,6 +15,7 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context, Result};
+use buildomat_types::metadata;
 use debug_parser::ValueKind;
 
 use buildomat_common::*;
@@ -28,6 +31,7 @@ mod db;
 mod disks;
 mod efi;
 mod factory;
+mod instance;
 mod host;
 mod humility;
 mod pipe;
@@ -38,6 +42,18 @@ pub struct App {
     config: config::Config,
     db: db::Database,
     hosts: IdHashMap<host::HostManager>,
+}
+
+impl App {
+    fn metadata(
+        &self,
+        t: &config::ConfigTarget,
+    ) -> Result<metadata::FactoryMetadata> {
+        /*
+         * XXX
+         */
+        self.config.diag.apply_overrides(&t.diag).build()
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -81,7 +97,6 @@ impl std::fmt::Display for HostId {
 #[tokio::main(worker_threads = 4)]
 async fn main() -> Result<()> {
     usdt::register_probes().unwrap();
-    let exe = std::env::current_exe()?;
 
     let mut opts = Options::new();
 
@@ -141,21 +156,20 @@ async fn main() -> Result<()> {
         });
     }));
 
-    let mut app0 =
-        App { log, client, hosts: Default::default(), config, db };
+    let mut app0 = App { log, client, hosts: Default::default(), config, db };
 
     /*
      * Start a host manager thread for each configured host:
      */
-    for h in config.hosts {
+    for h in app0.config.hosts.iter() {
         app0.hosts
             .insert_unique(host::HostManager::new(
-                log.new(o!(
+                app0.log.new(o!(
                     "component" => "hostmgr",
                     "host" => h.id.to_string(),
                 )),
-                h,
-                config.tools.clone(),
+                h.clone(),
+                app0.config.tools.clone(),
             ))
             .unwrap();
     }
@@ -170,7 +184,16 @@ async fn main() -> Result<()> {
         factory::factory_task(app).await.context("factory task failure")
     });
 
+    /*
+     * Per-instance management tasks are driven by this task:
+     */
+    let app = Arc::clone(&app0);
+    let t_instance = tokio::task::spawn(async move {
+        instance::instance_worker(app).await.context("instance task failure")
+    });
+
     tokio::select! {
         _ = t_factory => bail!("factory task stopped early"),
+        _ = t_instance => bail!("instance task stopped early"),
     }
 }

@@ -1,13 +1,8 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
-use std::{
-    collections::{BTreeSet, HashSet},
-    str::FromStr,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 
 use crate::{
     db::{types::*, CreateInstance},
@@ -18,7 +13,7 @@ use slog::{debug, error, info, o, warn, Logger};
 
 async fn factory_task_one(log: &Logger, c: &Arc<App>) -> Result<()> {
     /*
-     * Keep track of the hosts that are active.
+     * Keep track of the hosts that are potentially free for jobs.
      */
     let mut inactive_hosts =
         c.hosts.iter().map(|hm| hm.id().clone()).collect::<HashSet<_>>();
@@ -90,7 +85,7 @@ async fn factory_task_one(log: &Logger, c: &Arc<App>) -> Result<()> {
                      * order to get any potential per-target diagnostic
                      * configuration.
                      */
-                    let Some(targ) = c.config.target.get(&i.target) else {
+                    let Some(targ) = c.config.targets.get(&i.target) else {
                         error!(
                             log,
                             "instance {id} for worker {} has target {} which \
@@ -100,7 +95,7 @@ async fn factory_task_one(log: &Logger, c: &Arc<App>) -> Result<()> {
                         );
                         continue;
                     };
-                    // XXX let md = c.metadata(targ)?;
+                    let md = c.metadata(targ)?;
 
                     c.client
                         .factory_worker_associate()
@@ -108,7 +103,7 @@ async fn factory_task_one(log: &Logger, c: &Arc<App>) -> Result<()> {
                         .body_map(|b| {
                             b.private(id.to_string())
                                 .ip(Some(hm.ip().to_string()))
-                            // XXX .metadata(Some(md))
+                                .metadata(Some(md))
                         })
                         .send()
                         .await?;
@@ -134,10 +129,10 @@ async fn factory_task_one(log: &Logger, c: &Arc<App>) -> Result<()> {
                          * duplicate instance creation when creation or
                          * bootstrap is taking longer than expected.
                          */
-                        info!(
-                            log,
-                            "renew lease {} for worker {}", i.lease, w.id
-                        );
+                        // XXX info!(
+                        // XXX     log,
+                        // XXX     "renew lease {} for worker {}", i.lease, w.id
+                        // XXX );
                         c.client
                             .factory_lease_renew()
                             .job(&i.lease)
@@ -238,19 +233,11 @@ async fn factory_task_one(log: &Logger, c: &Arc<App>) -> Result<()> {
     }
 
     /*
-     * Check through the inactive hosts.  Kick off cleaning on any hosts that
-     * are not currently ready.
+     * Check through the inactive hosts to find those in the ready state; i.e.,
+     * has been through cleaning already and is ready to be started with a
+     * particular target image.
      */
-    inactive_hosts.retain(|hid| {
-        let hm = c.hosts.get(hid).unwrap();
-
-        if hm.is_ready() {
-            true
-        } else {
-            hm.clean();
-            false
-        }
-    });
+    inactive_hosts.retain(|hid| c.hosts.get(hid).unwrap().is_ready());
 
     /*
      * Are there any hosts ready to run a job?
@@ -273,7 +260,11 @@ async fn factory_task_one(log: &Logger, c: &Arc<App>) -> Result<()> {
         .factory_lease()
         .body_map(|b| {
             b.supported_targets(
-                c.config.target.keys().cloned().collect::<Vec<_>>(),
+                c.config
+                    .targets
+                    .iter()
+                    .map(|t| t.id.clone())
+                    .collect::<Vec<_>>(),
             )
         })
         .send()
@@ -289,7 +280,7 @@ async fn factory_task_one(log: &Logger, c: &Arc<App>) -> Result<()> {
     /*
      * Locate target-specific configuration.
      */
-    let Some(targ) = c.config.target.get(&lease.target) else {
+    let Some(targ) = c.config.targets.get(&lease.target) else {
         error!(log, "server wants target we do not support: {lease:?}");
         return Ok(());
     };
@@ -300,6 +291,11 @@ async fn factory_task_one(log: &Logger, c: &Arc<App>) -> Result<()> {
         .body_map(|b| b.target(&lease.target).wait_for_flush(false))
         .send()
         .await?;
+
+    // XXX NO    /*
+    // XXX NO     * Start the host.
+    // XXX NO     */
+    // XXX NO    hm.start(&c.config.general.baseurl, &w.bootstrap, &targ.os_dir)?;
 
     let instance_id = c.db.instance_create(
         hm.id(),
@@ -315,13 +311,14 @@ async fn factory_task_one(log: &Logger, c: &Arc<App>) -> Result<()> {
     /*
      * Record the instance ID against the worker for which it was created:
      */
-    //let md = c.metadata(targ)?;
+    let md = c.metadata(targ)?;
     c.client
         .factory_worker_associate()
         .worker(&w.id)
         .body_map(|b| {
-            b.private(instance_id.to_string()).ip(Some(hm.ip().to_string()))
-            // XXX .metadata(Some(md))
+            b.private(instance_id.to_string())
+                .ip(Some(hm.ip().to_string()))
+                .metadata(Some(md))
         })
         .send()
         .await?;
