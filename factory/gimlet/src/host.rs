@@ -33,6 +33,12 @@ pub struct Host {
     host: ConfigHost,
 }
 
+pub struct ExecResult {
+    pub out: String,
+    #[allow(unused)]
+    pub err: String,
+}
+
 impl Host {
     fn hiffy(&self, cmd: &str) -> HiffyCaller {
         HiffyCaller {
@@ -146,7 +152,9 @@ impl Host {
         ]
     }
 
-    pub fn ssh(&self) -> Command {
+    pub fn ssh_exec(&self, script: &str) -> Result<ExecResult> {
+        let ip = &self.host.config.ip;
+
         let mut cmd = Command::new("/usr/bin/ssh");
         cmd.env_clear();
 
@@ -155,11 +163,61 @@ impl Host {
         }
 
         cmd.arg(format!("root@{}", &self.host.config.ip));
+        cmd.arg(script);
 
-        cmd
+        let res = cmd.output()?;
+
+        if !res.status.success() {
+            let e = String::from_utf8_lossy(&res.stderr).trim().to_string();
+
+            bail!("ssh {ip} {script:?} failed: {e}");
+        }
+
+        Ok(ExecResult {
+            err: String::from_utf8_lossy(&res.stderr).to_string(),
+            out: String::from_utf8(res.stdout)?,
+        })
     }
 
-    pub fn scp(&self) -> Command {
+    pub fn ssh_send_file(&self, path: &str, contents: &[u8]) -> Result<()> {
+        let ip = &self.host.config.ip;
+
+        let mut cmd = Command::new("/usr/bin/ssh");
+        cmd.env_clear();
+
+        for opt in Self::ssh_options() {
+            cmd.arg("-o").arg(opt);
+        }
+
+        cmd.arg(format!("root@{ip}"));
+        cmd.arg(format!("tee {path} >/dev/null"));
+
+        cmd.stdin(Stdio::piped());
+
+        let mut child = cmd.spawn()?;
+
+        /*
+         * Write the contents of the file to stdin of the tee(1) process on the
+         * remote end, then close the file descriptor by dropping it:
+         */
+        let mut stdin = child.stdin.take().unwrap();
+        stdin.write_all(contents)?;
+        drop(stdin);
+
+        let out = child.wait_with_output()?;
+
+        if !out.status.success() {
+            let e = String::from_utf8_lossy(&out.stderr).trim().to_string();
+
+            bail!("could not send file to {ip} at {path}: {e}");
+        }
+
+        Ok(())
+    }
+
+    pub fn scp_to(&self, local: &str, remote: &str) -> Result<()> {
+        let ip = &self.host.config.ip;
+
         let mut cmd = Command::new("/usr/bin/scp");
         cmd.env_clear();
 
@@ -167,7 +225,18 @@ impl Host {
             cmd.arg("-o").arg(opt);
         }
 
-        cmd
+        cmd.arg(local);
+        cmd.arg(format!("{ip}:{remote}"));
+
+        let res = cmd.output()?;
+
+        if !res.status.success() {
+            let e = String::from_utf8_lossy(&res.stderr).trim().to_string();
+
+            bail!("scp {local} {ip}:{remote} failed: {e}");
+        }
+
+        Ok(())
     }
 
     pub fn open(
@@ -278,13 +347,26 @@ impl Host {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum HostStatus {
+    /**
+     * Cleaned and ready to be attached to an instance.
+     */
+    Ready,
+
+    /**
+     * An instance has been started.
+     */
+    Active,
+}
+
 /*
  * As distinct from the per-instance state tracked in the database, this state
  * is purely kept in memory.  If the factory is interrupted, we'll effectively
  * be back in the "unknown" state until we're told to do something else.
  */
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum HostState {
+#[derive(Debug, PartialEq, Eq, Clone)]
+enum HostState {
     /**
      * At factory startup, we do not know what is going on with the host; e.g.,
      * an existing job (which we do not wish to interrupt) may be running, or we
@@ -298,7 +380,7 @@ pub enum HostState {
      * will power cycle the host and upon reboot from a known image we will
      * clear out any detritus left by prior job runs.
      */
-    Cleaning,
+    Cleaning(CleaningState),
 
     /**
      * We have finished cleaning and the host is ready to execute a job.
@@ -307,10 +389,35 @@ pub enum HostState {
 
     /**
      * We are attempting to start the agent and allow it to complete bootstrap.
-     * Once we have successfully installed the agent, we move back to the
-     * Unknown state.
+     * Once we have successfully installed the agent, we move to the Started
+     * state.
      */
-    Starting,
+    Starting(StartingState, HostGoalStart),
+
+    /**
+     * Allow the host to execute until we are instructed to reset and clean the
+     * host again.
+     */
+    Started,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum CleaningState {
+    WriteRom,
+    Boot,
+    BootWait,
+    Cleanup,
+    Ready,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum StartingState {
+    WriteRom,
+    Boot,
+    BootWait,
+    Setup,
+    InstallAgent,
+    Ready,
 }
 
 /*
@@ -319,7 +426,14 @@ pub enum HostState {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum HostGoal {
     Clean,
-    Start { bootstrap: String, url: String, os_dir: String },
+    Start(HostGoalStart),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct HostGoalStart {
+    bootstrap: String,
+    url: String,
+    os_dir: String,
 }
 
 #[derive(Clone, Debug)]
@@ -354,8 +468,8 @@ pub struct Inner {
 
 #[derive(Debug)]
 struct Locked {
-    state: HostState,
     goal: Option<HostGoal>,
+    status: Option<HostStatus>,
 }
 
 impl HostManager {
@@ -364,10 +478,7 @@ impl HostManager {
             host,
             tools,
             log,
-            locked: Mutex::new(Locked {
-                state: HostState::Unknown,
-                goal: None,
-            }),
+            locked: Mutex::new(Locked { goal: None, status: None }),
         }));
 
         let hm = hm0.clone();
@@ -386,106 +497,86 @@ impl HostManager {
         &self.host.config.ip
     }
 
-    pub fn clean(&self) {
-        let log = &self.log;
-        let mut l = self.locked.lock().unwrap();
-
-        match l.state {
-            HostState::Unknown => {
-                match l.goal {
-                    /*
-                     * A clean has already been requested.
-                     */
-                    Some(HostGoal::Clean) => (),
-                    Some(_) | None => {
-                        info!(log, "host in unknown state marked for cleaning");
-                        l.goal = Some(HostGoal::Clean);
-                    }
-                }
-            }
-            HostState::Cleaning => {
-                match l.goal {
-                    /*
-                     * Already cleaning.
-                     */
-                    Some(HostGoal::Clean) | None => (),
-                    /*
-                     * We do not allow a host to be marked for agent start until
-                     * it is in the ready state.
-                     */
-                    Some(HostGoal::Start { .. }) => unreachable!(),
-                }
-            }
-            HostState::Ready | HostState::Starting => {
-                match l.goal {
-                    /*
-                     * A clean has already been requested.
-                     */
-                    Some(HostGoal::Clean) => (),
-                    Some(_) | None => {
-                        info!(log, "previously ready host marked for cleaning");
-                        l.goal = Some(HostGoal::Clean);
-                    }
-                }
-            }
-        }
-    }
-
     pub fn start(
         &self,
         url: &str,
         bootstrap: &str,
         os_dir: &str,
     ) -> Result<()> {
-        let log = &self.log;
         let mut l = self.locked.lock().unwrap();
 
-        let new_goal = Some(HostGoal::Start {
-            bootstrap: bootstrap.to_string(),
-            url: url.to_string(),
-            os_dir: os_dir.to_string(),
-        });
+        if matches!(l.status, Some(HostStatus::Ready)) && l.goal.is_none() {
+            l.goal = Some(HostGoal::Start(HostGoalStart {
+                bootstrap: bootstrap.to_string(),
+                url: url.to_string(),
+                os_dir: os_dir.to_string(),
+            }));
 
-        match l.state {
-            HostState::Unknown | HostState::Starting | HostState::Cleaning => {
-                bail!("cannot start a host in the {:?} state", l.state);
-            }
-            HostState::Ready => {
-                if new_goal == l.goal {
+            Ok(())
+        } else {
+            bail!(
+                "cannot start a host with status {:?} and goal {:?}",
+                l.status,
+                l.goal,
+            );
+        }
+    }
+
+    /**
+     * Used to check if a host is currently ready to be used for a new job. This
+     * routine is obviously racy in contexts where goals are also being issued,
+     * and only exists to be used when a host is not currently attached to an
+     * instance.
+     */
+    pub fn is_ready(&self) -> bool {
+        let l = self.locked.lock().unwrap();
+
+        matches!(l.status, Some(HostStatus::Ready)) && l.goal.is_none()
+    }
+
+    pub fn make_ready(&self) -> Result<bool> {
+        let mut l = self.locked.lock().unwrap();
+
+        match &l.status {
+            Some(HostStatus::Ready) => {
+                if l.goal.is_some() {
                     /*
-                     * We're already geared up to do this.
+                     * If another goal is currently issued but not acknowledged,
+                     * we want to wait for the task to take it and decide what
+                     * to do before reporting status.
                      */
-                    return Ok(());
-                } else if l.goal.is_some() {
-                    bail!(
-                        "second attempt to start host with different \
-                        parameters"
-                    );
+                    Ok(false)
+                } else {
+                    /*
+                     * The host is ready to go!
+                     */
+                    Ok(true)
                 }
-
-                info!(log, "starting host";
-                    "url" => url, "bootstrap" => bootstrap);
-                l.goal = new_goal;
-                Ok(())
+            }
+            Some(HostStatus::Active) => {
+                /*
+                 * The host is active and running a job.  We need to request
+                 * that it be cleaned.
+                 */
+                l.goal = Some(HostGoal::Clean);
+                Ok(false)
+            }
+            None => {
+                /*
+                 * The host status is not currently known.  Drive it towards
+                 * cleaning.
+                 */
+                l.goal = Some(HostGoal::Clean);
+                Ok(false)
             }
         }
     }
 
-    pub fn is_starting(&self) -> bool {
-        let l = self.locked.lock().unwrap();
-
-        l.state == HostState::Starting
-    }
-
-    pub fn is_ready(&self) -> bool {
-        let l = self.locked.lock().unwrap();
-
-        l.state == HostState::Ready
-    }
-
     fn thread_noerr(&self) {
+        let mut st = HostState::Unknown;
+
         loop {
-            if let Err(e) = self.thread() {
+            if let Err(e) = self.thread(&mut st) {
                 error!(&self.log, "thread error: {e}");
             }
 
@@ -493,295 +584,292 @@ impl HostManager {
         }
     }
 
-    fn thread(&self) -> Result<()> {
+    fn thread(&self, st: &mut HostState) -> Result<()> {
         let log = &self.log;
-        let st = self.locked.lock().unwrap().state;
 
         match st {
             HostState::Unknown => {
                 let mut l = self.locked.lock().unwrap();
 
-                match l.goal {
+                /*
+                 * We don't know what the status of the host is.
+                 */
+                l.status = None;
+
+                match l.goal.take() {
                     Some(HostGoal::Clean) => {
                         info!(log, "cleaning host");
-                        l.state = HostState::Cleaning;
-                        l.goal = None;
-                        Ok(())
+                        *st = HostState::Cleaning(CleaningState::WriteRom);
                     }
-                    Some(HostGoal::Start { .. }) => unreachable!(),
-                    None => return Ok(()),
+                    Some(HostGoal::Start { .. }) => {
+                        warn!(
+                            log,
+                            "ignoring request to start from unknown state",
+                        );
+                    }
+                    None => (),
                 }
+
+                Ok(())
             }
-            HostState::Cleaning => {
-                /*
-                 * XXX power cycle the machine, then wait until we can SSH in to
-                 * clean up the disks etc.
-                 */
-                let sys =
-                    Host::open(self.log.clone(), &self.tools, &self.host)?;
-                sys.power_off()?;
-                sys.pick_bsu(0)?;
-                sys.write_rom(&self.host.config.cleaning_os_dir)?;
-                sys.boot_net()?;
-                sys.power_on()?;
-                sys.boot_server(&self.host.config.cleaning_os_dir)?;
+            HostState::Cleaning(cst) => {
+                let mut new_cst = cst.clone();
 
-                let ip = &self.host.config.ip;
-                info!(log, "waiting for system to come up at {ip}");
+                {
+                    let mut l = self.locked.lock().unwrap();
 
-                let phase = Instant::now();
-                let out = loop {
-                    let dur = Instant::now().saturating_duration_since(phase);
-                    if dur.as_secs() > 300 {
-                        bail!("gave up after 300 seconds");
-                    }
+                    /*
+                     * We don't know what the status of the host is.
+                     */
+                    l.status = None;
 
-                    let out = sys.ssh().arg("pilot local info -j").output()?;
-                    if !out.status.success() {
-                        std::thread::sleep(Duration::from_secs(1));
-                        continue;
-                    }
-
-                    let Ok(out) = String::from_utf8(out.stdout) else {
-                        std::thread::sleep(Duration::from_secs(1));
-                        continue;
-                    };
-
-                    break out;
-                };
-
-                let dur = Instant::now().saturating_duration_since(phase);
-                info!(log,"got pilot local info";
-                    "info" => out,
-                    "seconds" => dur.as_secs(),
-                );
-
-                /*
-                 * Copy the cleanup program to the remote system.
-                 */
-                info!(log, "copying cleanup program to system");
-                let phase = Instant::now();
-                let exe = std::env::current_exe()?;
-                loop {
-                    let dur = Instant::now().saturating_duration_since(phase);
-                    if dur.as_secs() > 300 {
-                        bail!("gave up after 300 seconds");
-                    }
-
-                    let out = sys
-                        .scp()
-                        .arg(&exe)
-                        .arg(&format!("root@{ip}:/tmp/cleanup"))
-                        .output()?;
-                    if !out.status.success() {
-                        warn!(log, "could not scp {exe:?} to {ip}");
-                        std::thread::sleep(Duration::from_secs(1));
-                        continue;
-                    }
-
-                    break;
-                }
-
-                /*
-                 * Run the cleanup program on the remote system.
-                 */
-                info!(log, "running cleaning program on system");
-                let out = sys.ssh().arg("/tmp/cleanup -C").output()?;
-                if !out.status.success() {
-                    let e =
-                        String::from_utf8_lossy(&out.stderr).trim().to_string();
-
-                    bail!("could not invoke cleanup program on {ip}: {e}");
-                }
-
-                let dur = Instant::now().saturating_duration_since(phase);
-                let out = String::from_utf8(out.stdout)?;
-                info!(log,"got cleanup output";
-                    "info" => out,
-                    "seconds" => dur.as_secs(),
-                );
-
-                let mut l = self.locked.lock().unwrap();
-                match l.goal {
-                    Some(HostGoal::Start { .. }) => unreachable!(),
-                    Some(HostGoal::Clean) | None => {
-                        info!(log, "host is now ready");
-                        l.state = HostState::Ready;
-                        l.goal = None;
-                        Ok(())
+                    match l.goal.take() {
+                        Some(HostGoal::Clean) => (),
+                        Some(HostGoal::Start { .. }) => {
+                            warn!(
+                                log,
+                                "ignoring request to start from cleaning state",
+                            );
+                        }
+                        None => (),
                     }
                 }
+
+                if let Err(e) = self.thread_cleaning(&mut new_cst) {
+                    error!(log, "cleaning error: {e}");
+                }
+
+                if &new_cst != cst {
+                    info!(log, "cleaning state: {cst:?} -> {new_cst:?}");
+                    *cst = new_cst;
+                }
+
+                if matches!(cst, CleaningState::Ready) {
+                    info!(log, "cleaning complete; host is now ready!");
+                    *st = HostState::Ready;
+                }
+
+                Ok(())
             }
             HostState::Ready => {
                 let mut l = self.locked.lock().unwrap();
 
-                match l.goal {
+                /*
+                 * Clear the host status before we check for a new goal. We'll
+                 * restore it if there is no goal.  We hold the lock over this
+                 * sequence so there won't be any apparent flapping.
+                 */
+                l.status = None;
+
+                match l.goal.take() {
                     Some(HostGoal::Clean) => {
-                        info!(log, "cleaning host");
-                        l.state = HostState::Cleaning;
-                        Ok(())
+                        info!(log, "cleaning host from the ready state");
+                        *st = HostState::Cleaning(CleaningState::WriteRom);
                     }
-                    Some(HostGoal::Start { .. }) => {
-                        info!(log, "starting host");
-                        l.state = HostState::Starting;
-                        Ok(())
+                    Some(HostGoal::Start(hgs)) => {
+                        info!(log, "starting host";
+                            "url" => &hgs.url,
+                            "os_dir" => &hgs.os_dir,
+                        );
+                        *st = HostState::Starting(StartingState::WriteRom, hgs);
                     }
                     None => {
                         /*
-                         * Otherwise, don't touch the host until a start is
-                         * requested.
+                         * Only report that the host is ready if we are not
+                         * about to perform some other action.
                          */
-                        Ok(())
+                        l.status = Some(HostStatus::Ready);
                     }
                 }
+
+                Ok(())
             }
-            HostState::Starting => {
-                /*
-                 * Determine which OS image to use, and create a shell program
-                 * to bootstrap the agent:
-                 */
-                let (program, os_dir) = {
-                    let template =
-                        include_str!("../../propolis/scripts/user_data.sh");
+            HostState::Starting(sst, hgs) => {
+                let mut new_sst = sst.clone();
 
+                {
                     let mut l = self.locked.lock().unwrap();
-                    match &l.goal {
+
+                    /*
+                     * We don't know what the status of the host is.
+                     */
+                    l.status = None;
+
+                    match l.goal.take() {
                         Some(HostGoal::Clean) => {
-                            info!(log, "cleaning host");
-                            l.state = HostState::Cleaning;
+                            info!(log, "cleaning host from the starting state");
+                            *st = HostState::Cleaning(CleaningState::WriteRom);
                             return Ok(());
                         }
-                        Some(HostGoal::Start { bootstrap, url, os_dir }) => (
-                            template
-                                .replace("%STRAP%", &bootstrap)
-                                .replace("%URL%", &url),
-                            os_dir.to_string(),
-                        ),
-                        None => {
-                            info!(log, "host state unknown");
-                            l.state = HostState::Unknown;
-                            return Ok(());
+                        Some(HostGoal::Start { .. }) => {
+                            warn!(
+                                log,
+                                "ignoring request to start from starting state",
+                            );
                         }
+                        None => (),
                     }
-                };
-
-                let sys =
-                    Host::open(self.log.clone(), &self.tools, &self.host)?;
-
-                sys.power_off()?;
-                /*
-                 * Run the target image in BSU 1, so that we don't always have
-                 * to rewrite the cleaning image in BSU 0:
-                 */
-                sys.pick_bsu(1)?;
-                sys.write_rom(&os_dir)?;
-                sys.boot_net()?;
-                sys.power_on()?;
-                sys.boot_server(&os_dir)?;
-
-                let ip = &self.host.config.ip;
-                info!(log, "waiting for system to come up at {ip}");
-
-                let phase = Instant::now();
-                let out = loop {
-                    let dur = Instant::now().saturating_duration_since(phase);
-                    if dur.as_secs() > 300 {
-                        bail!("gave up after 300 seconds");
-                    }
-
-                    let out = sys.ssh().arg("pilot local info -j").output()?;
-                    if !out.status.success() {
-                        std::thread::sleep(Duration::from_secs(1));
-                        continue;
-                    }
-
-                    let Ok(out) = String::from_utf8(out.stdout) else {
-                        std::thread::sleep(Duration::from_secs(1));
-                        continue;
-                    };
-
-                    break out;
-                };
-
-                let dur = Instant::now().saturating_duration_since(phase);
-                info!(log,"got pilot local info";
-                    "info" => out,
-                    "seconds" => dur.as_secs(),
-                );
-
-                /*
-                 * Copy the agent startup program to the remote system.
-                 */
-                info!(log, "copying agent startup program to system");
-                let phase = Instant::now();
-                loop {
-                    let dur = Instant::now().saturating_duration_since(phase);
-                    if dur.as_secs() > 300 {
-                        bail!("gave up after 300 seconds");
-                    }
-
-                    let mut child = sys
-                        .ssh()
-                        .arg("tee /tmp/install.sh >/dev/null")
-                        .stdin(Stdio::piped())
-                        .spawn()?;
-
-                    let mut stdin = child.stdin.take().unwrap();
-                    stdin.write_all(program.as_bytes())?;
-
-                    let out = child.wait_with_output()?;
-
-                    if !out.status.success() {
-                        warn!(log, "could not send startup program");
-                        std::thread::sleep(Duration::from_secs(1));
-                        continue;
-                    }
-
-                    break;
                 }
 
-                /*
-                 * Run the agent startup program on the remote system.
-                 */
-                info!(log, "installing agent on system");
-                let out = sys
-                    .ssh()
-                    .arg(format!("bash -x /tmp/install.sh 2>&1"))
-                    .output()?;
-                if !out.status.success() {
-                    let e =
-                        String::from_utf8_lossy(&out.stdout).trim().to_string();
-
-                    bail!("could not invoke startup program: {e}");
+                if let Err(e) = self.thread_starting(&mut new_sst, &hgs) {
+                    error!(log, "starting error: {e}");
                 }
 
-                let dur = Instant::now().saturating_duration_since(phase);
-                let out = String::from_utf8(out.stdout)?;
-                info!(log,"got install output";
-                    "info" => out,
-                    "seconds" => dur.as_secs(),
-                );
+                if &new_sst != sst {
+                    info!(log, "starting state: {sst:?} -> {new_sst:?}");
+                    *sst = new_sst;
+                }
 
+                if matches!(sst, StartingState::Ready) {
+                    info!(log, "starting complete; host is now started!");
+                    *st = HostState::Started;
+                }
+
+                Ok(())
+            }
+            HostState::Started => {
                 let mut l = self.locked.lock().unwrap();
-                match l.goal {
-                    Some(HostGoal::Start { .. }) => {
-                        info!(log, "host is started");
-                        l.state = HostState::Unknown;
-                        l.goal = None;
-                        Ok(())
-                    }
+
+                /*
+                 * We have started the agent on the host.  Report that status
+                 * and come to rest until we're told to clean the host again.
+                 */
+                l.status = Some(HostStatus::Active);
+
+                match l.goal.take() {
                     Some(HostGoal::Clean) => {
-                        info!(log, "cleaning host");
-                        l.state = HostState::Cleaning;
-                        Ok(())
+                        l.status = None;
+                        info!(log, "cleaning host from the started state");
+                        *st = HostState::Cleaning(CleaningState::WriteRom);
                     }
-                    None => {
-                        info!(log, "host state unknown");
-                        l.state = HostState::Unknown;
-                        Ok(())
+                    Some(HostGoal::Start { .. }) => {
+                        warn!(
+                            log,
+                            "ignoring request to start from starting state",
+                        );
                     }
+                    None => (),
                 }
+
+                Ok(())
             }
         }
+    }
+
+    fn thread_cleaning(&self, cst: &mut CleaningState) -> Result<()> {
+        let log = &self.log;
+        let sys = Host::open(self.log.clone(), &self.tools, &self.host)?;
+
+        match cst {
+            CleaningState::WriteRom => {
+                sys.power_off()?;
+                sys.pick_bsu(0)?;
+                sys.write_rom(&self.host.config.cleaning_os_dir)?;
+                *cst = CleaningState::Boot;
+            }
+            CleaningState::Boot => {
+                sys.boot_net()?;
+                sys.power_on()?;
+                sys.boot_server(&self.host.config.cleaning_os_dir)?;
+                *cst = CleaningState::BootWait;
+            }
+            CleaningState::BootWait => {
+                let info = sys.ssh_exec("pilot local info -j")?;
+                info!(log, "got pilot local info"; "info" => info.out);
+
+                let pb = sys
+                    .ssh_exec("svcs -Ho sta,nsta svc:/site/postboot:default")?;
+                let t = pb.out.trim().split_whitespace().collect::<Vec<_>>();
+                if t.len() != 2 || t[0] == "ON" || t[1] == "-" {
+                    bail!("postboot not ready: {t:?}");
+                }
+
+                *cst = CleaningState::Cleanup;
+            }
+            CleaningState::Cleanup => {
+                /*
+                 * Copy cleanup program to system and run it.
+                 */
+                let exe = std::env::current_exe()?;
+
+                sys.scp_to(exe.to_str().unwrap(), "/tmp/cleanup")?;
+                let res = sys.ssh_exec("/tmp/cleanup -C")?;
+
+                info!(log, "got cleanup output"; "info" => res.out);
+
+                *cst = CleaningState::Ready;
+            }
+            CleaningState::Ready => (),
+        }
+
+        Ok(())
+    }
+
+    fn thread_starting(
+        &self,
+        sst: &mut StartingState,
+        hgs: &HostGoalStart,
+    ) -> Result<()> {
+        let log = &self.log;
+        let sys = Host::open(self.log.clone(), &self.tools, &self.host)?;
+
+        match sst {
+            StartingState::WriteRom => {
+                sys.power_off()?;
+                sys.pick_bsu(1)?;
+                sys.write_rom(&hgs.os_dir)?;
+                *sst = StartingState::Boot;
+            }
+            StartingState::Boot => {
+                sys.boot_net()?;
+                sys.power_on()?;
+                sys.boot_server(&hgs.os_dir)?;
+                *sst = StartingState::BootWait;
+            }
+            StartingState::BootWait => {
+                let info = sys.ssh_exec("pilot local info -j")?;
+                info!(log, "got pilot local info"; "info" => info.out);
+
+                let pb = sys
+                    .ssh_exec("svcs -Ho sta,nsta svc:/site/postboot:default")?;
+                let t = pb.out.trim().split_whitespace().collect::<Vec<_>>();
+                if t.len() != 2 || t[0] == "ON" || t[1] == "-" {
+                    bail!("postboot not ready: {t:?}");
+                }
+
+                *sst = StartingState::Setup;
+            }
+            StartingState::Setup => {
+                /*
+                 * Copy setup program to system and run it.
+                 */
+                let exe = std::env::current_exe()?;
+
+                sys.scp_to(exe.to_str().unwrap(), "/tmp/setup")?;
+                let res = sys.ssh_exec("/tmp/setup -S")?;
+
+                info!(log, "got setup output"; "info" => res.out);
+
+                *sst = StartingState::InstallAgent;
+            }
+            StartingState::InstallAgent => {
+                /*
+                 * Create a shell program to bootstrap the agent:
+                 */
+                let program = include_str!("../../gimlet/scripts/install.sh")
+                    .replace("%STRAP%", &hgs.bootstrap)
+                    .replace("%URL%", &hgs.url);
+
+                sys.ssh_send_file("/tmp/install.sh", program.as_bytes())?;
+                let res = sys.ssh_exec("bash -x /tmp/install.sh 2>&1")?;
+
+                info!(log, "got install output"; "info" => res.out);
+
+                *sst = StartingState::Ready;
+            }
+            StartingState::Ready => (),
+        }
+
+        Ok(())
     }
 }

@@ -105,7 +105,8 @@ async fn main() -> Result<()> {
      * system and executed there to clean up detritus from past jobs and set up
      * the basic environment we need for the next job:
      */
-    opts.optflag("C", "", "cleanup the local system (destructive!");
+    opts.optflag("C", "", "cleanup the local system (destructive!)");
+    opts.optflag("S", "", "setup the local system");
 
     opts.optopt("f", "", "configuration file", "CONFIG");
     opts.optopt("d", "", "database file", "FILE");
@@ -116,6 +117,10 @@ async fn main() -> Result<()> {
 
     if !p.free.is_empty() {
         bail!("unexpected arguments");
+    }
+
+    if p.opt_present("S") {
+        return cleanup::setup();
     }
 
     if p.opt_present("C") {

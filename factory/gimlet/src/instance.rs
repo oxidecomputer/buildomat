@@ -58,9 +58,7 @@ async fn clean_inactive(
             instances_with_workers.iter().all(|i| &i.host() != hm.id())
         })
         .for_each(|hm| {
-            if !hm.is_ready() {
-                hm.clean()
-            }
+            hm.make_ready().ok();
         });
 
     Ok(())
@@ -99,7 +97,12 @@ async fn instance_worker_start(
 }
 
 async fn instance_worker_one_noerr(log: &Logger, c: &App, id: InstanceId) {
-    info!(log, "instance worker starting");
+    let ist = if let Some(i) = c.db.instance_get(&id).ok().flatten() {
+        i.state.to_string()
+    } else {
+        "?".to_string()
+    };
+    info!(log, "instance worker starting"; "initial_state" => ist);
 
     let hm = c.hosts.get(&id.host()).unwrap();
 
@@ -146,54 +149,46 @@ async fn instance_worker_one(
     match i.state {
         InstanceState::Preinstall => {
             /*
-             * We expect the machine to be ready at this stage.  If it is not,
-             * request cleaning to make it ready.
+             * Make the host ready.  This may involve power cycling it, booting
+             * the housekeeping image, and cleaning out the disks, so it could
+             * take some time.
              */
-            if !hm.is_ready() {
-                hm.clean();
-                Ok(DoNext::Sleep)
-            } else {
-                info!(log, "instance {id} now installing");
-                c.db.instance_new_state(id, InstanceState::Installing)?;
-                Ok(DoNext::Immediate)
+            if !hm.make_ready()? {
+                return Ok(DoNext::Sleep);
             }
+
+            info!(log, "instance {id} now installing");
+            c.db.instance_new_state(id, InstanceState::Installing)?;
+            Ok(DoNext::Immediate)
         }
         InstanceState::Installing => {
-            /*
-             * We've cleaned the system at least once.
-             */
-            if hm.is_ready() {
-                hm.start(
-                    &c.config.general.baseurl,
-                    &i.bootstrap,
-                    &targ.os_dir,
-                )?;
-
-                Ok(DoNext::Sleep)
-            } else if hm.is_starting() {
+            if !hm.make_ready()? {
                 /*
-                 * Wait for startup to complete, one way or another.
+                 * The host should already be ready at this point, but if the
+                 * factory is interrupted we might have to do it again before we
+                 * can start the instance.
                  */
-                Ok(DoNext::Sleep)
-            } else {
-                info!(log, "instance {id} now installed");
-                c.db.instance_new_state(id, InstanceState::Installed)?;
-                Ok(DoNext::Immediate)
+                return Ok(DoNext::Sleep);
             }
+
+            hm.start(&c.config.general.baseurl, &i.bootstrap, &targ.os_dir)?;
+
+            info!(log, "instance {id} now installed");
+            c.db.instance_new_state(id, InstanceState::Installed)?;
+            Ok(DoNext::Immediate)
         }
         InstanceState::Installed => Ok(DoNext::Sleep),
         InstanceState::Destroying => {
             /*
              * Begin cleaning the machine, and wait for it to be ready.
              */
-            if hm.is_ready() {
-                info!(log, "instance {id} now destroyed");
-                c.db.instance_new_state(id, InstanceState::Destroyed)?;
-                Ok(DoNext::Immediate)
-            } else {
-                hm.clean();
-                Ok(DoNext::Sleep)
+            if !hm.make_ready()? {
+                return Ok(DoNext::Sleep);
             }
+
+            info!(log, "instance {id} now destroyed");
+            c.db.instance_new_state(id, InstanceState::Destroyed)?;
+            Ok(DoNext::Immediate)
         }
         InstanceState::Destroyed => {
             info!(log, "instance {id} completely cleaned up");

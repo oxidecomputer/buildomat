@@ -9,9 +9,158 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Result};
+use buildomat_common::*;
 
 use crate::{disks, efi};
 use disks::Slot;
+
+#[derive(Debug)]
+struct Status {
+    current: String,
+    next: Option<String>,
+}
+
+fn svcs(fmri: &str) -> Result<Status> {
+    let out = Command::new("/bin/svcs")
+        .env_clear()
+        .arg("-Ho")
+        .arg("sta,nsta")
+        .arg(fmri)
+        .output()?;
+
+    if !out.status.success() {
+        bail!("could not get status of {fmri}: {}", out.info());
+    }
+
+    let out = String::from_utf8(out.stdout)?;
+    let out = out.lines().collect::<Vec<_>>();
+    if out.len() != 1 {
+        bail!("could not get status of {fmri}: unexpected output: {out:?}");
+    }
+
+    let t = out[0].split_ascii_whitespace().collect::<Vec<_>>();
+    if t.len() != 2 {
+        bail!("could not get status of {fmri}: unexpected output: {out:?}");
+    }
+
+    Ok(Status {
+        current: t[0].trim().to_string(),
+        next: if t[1].trim() == "-" {
+            None
+        } else {
+            Some(t[1].trim().to_string())
+        },
+    })
+}
+
+pub fn zpool_import(pool: &str) -> Result<()> {
+    let out = Command::new("/sbin/zpool")
+        .env_clear()
+        .arg("import")
+        .arg(pool)
+        .output()?;
+
+    if !out.status.success() {
+        let e = String::from_utf8_lossy(&out.stderr).trim().to_string();
+
+        bail!("zpool import {pool:?} failure: {e}");
+    }
+
+    Ok(())
+}
+
+pub fn zpool_unimported_list() -> Result<Vec<String>> {
+    let out = Command::new("/sbin/zpool").env_clear().arg("import").output()?;
+
+    if !out.status.success() {
+        let e = String::from_utf8_lossy(&out.stderr).trim().to_string();
+
+        bail!("zpool import (to list) failure: {e}");
+    }
+
+    let out = String::from_utf8(out.stdout)?;
+    let mut pools = out
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| l.starts_with("pool:"))
+        .map(|l| l.split(':').map(|t| t.trim()).collect::<Vec<_>>())
+        .filter(|t| t.len() == 2 && t[0] == "pool")
+        .map(|t| t[1].to_string())
+        .collect::<Vec<_>>();
+
+    pools.sort();
+
+    Ok(pools)
+}
+
+pub fn setup() -> Result<()> {
+    const MAX_TIME: u64 = 60;
+
+    /*
+     * First, make sure we wait for the postboot service to come online.  In the
+     * images we are using, this service is generally responsible for bringing
+     * up the network and then adjusting the clock and the boot wall time.
+     */
+    let fmri = "svc:/site/postboot:default";
+    println!(" * waiting for {fmri} to come online...");
+    let start = Instant::now();
+    loop {
+        let dur = Instant::now().saturating_duration_since(start);
+        if dur.as_secs() > MAX_TIME {
+            bail!("giving up after {MAX_TIME} seconds");
+        }
+
+        if let Ok(st) = svcs(&fmri) {
+            if st.next.is_none() && st.current == "ON" {
+                println!(" * {fmri} now online!");
+                break;
+            }
+        }
+
+        std::thread::sleep(Duration::from_millis(250));
+    }
+
+    /*
+     * Import the zpool we created during the cleaning process; there should
+     * only be one!
+     */
+    let pools = zpool_unimported_list()?;
+    if pools.len() == 0 {
+        bail!("no unimported pool found!");
+    } else if pools.len() > 1 {
+        bail!("more than one unimported pool found!");
+    }
+
+    let pool = &pools[0];
+    let Some(pool_id) = pool.strip_prefix("oxi_") else {
+        bail!("unexpected pool name {pool:?}");
+    };
+
+    println!(" * importing pool {pool:?}...");
+    zpool_import(&pool)?;
+
+    /*
+     * Update the BSU symlink:
+     */
+    std::fs::create_dir_all("/pool/bsu")?;
+    std::fs::remove_file("/pool/bsu/0").ok();
+    std::os::unix::fs::symlink(&format!("../int/{pool_id}"), "/pool/bsu/0")?;
+
+    /*
+     * Create the swap device:
+     */
+    let out = Command::new("/usr/lib/buildomat/mkswap").env_clear().output()?;
+
+    if !out.status.success() {
+        let e = String::from_utf8_lossy(&out.stderr).trim().to_string();
+
+        bail!("mkswap failure: {e}");
+    }
+
+    println!(" * swap device attached");
+
+    Ok(())
+}
 
 pub fn cleanup() -> Result<()> {
     const MAX_TIME: u64 = 60;
@@ -152,26 +301,6 @@ fn prepare_m2() -> Result<()> {
     }
 
     println!(" * zpool {pool} created");
-
-    /*
-     * Update the BSU symlink:
-     */
-    std::fs::create_dir_all("/pool/bsu")?;
-    std::fs::remove_file("/pool/bsu/0").ok();
-    std::os::unix::fs::symlink(&format!("../int/{id}"), "/pool/bsu/0")?;
-
-    /*
-     * Create the swap device:
-     */
-    let out = Command::new("/usr/lib/buildomat/mkswap").env_clear().output()?;
-
-    if !out.status.success() {
-        let e = String::from_utf8_lossy(&out.stderr).trim().to_string();
-
-        bail!("mkswap failure: {e}");
-    }
-
-    println!(" * swap device attached");
 
     Ok(())
 }
