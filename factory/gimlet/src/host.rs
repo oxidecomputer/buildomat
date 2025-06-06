@@ -654,17 +654,20 @@ impl HostManager {
             HostState::Ready => {
                 let mut l = self.locked.lock().unwrap();
 
-                /*
-                 * Clear the host status before we check for a new goal. We'll
-                 * restore it if there is no goal.  We hold the lock over this
-                 * sequence so there won't be any apparent flapping.
-                 */
-                l.status = None;
-
                 match l.goal.take() {
                     Some(HostGoal::Clean) => {
-                        info!(log, "cleaning host from the ready state");
-                        *st = HostState::Cleaning(CleaningState::WriteRom);
+                        if !matches!(l.status, Some(HostStatus::Ready)) {
+                            /*
+                             * We've not yet reported that the host was ready,
+                             * so we can drop this clean request and just say we
+                             * did it.
+                             */
+                            l.status = Some(HostStatus::Ready);
+                        } else {
+                            info!(log, "cleaning host from the ready state");
+                            *st = HostState::Cleaning(CleaningState::WriteRom);
+                            l.status = None;
+                        }
                     }
                     Some(HostGoal::Start(hgs)) => {
                         info!(log, "starting host";
@@ -672,6 +675,7 @@ impl HostManager {
                             "os_dir" => &hgs.os_dir,
                         );
                         *st = HostState::Starting(StartingState::WriteRom, hgs);
+                        l.status = None;
                     }
                     None => {
                         /*
