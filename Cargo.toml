@@ -8,6 +8,7 @@ members = [
 	"database",
 	"download",
 	"factory/aws",
+	"factory/gimlet",
 	"factory/lab",
 	"factory/propolis",
 	"github/client",
@@ -36,6 +37,8 @@ aws-types = "1"
 base64 = "0.22"
 bytes = "1.1"
 chrono = { version = "0.4", features = [ "serde" ] }
+debug_parser = "0.1"
+devinfo = { version = "0.1", features = [ "private" ] }
 dirs-next = "2"
 dropshot = { git = "https://github.com/oxidecomputer/dropshot" }
 futures = "0.3"
@@ -49,6 +52,7 @@ http = "1"
 http-body-util = "0.1"
 http-range = "0.1"
 hyper = "1"
+iddqd = "0.3"
 ipnet = "2.8"
 jmclib = { git = "https://github.com/jclulow/rust-jmclib", features = ["sqlite"] }
 libc = "0.2.113"
@@ -89,4 +93,5 @@ tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = [ "io" ] }
 toml = "0.8"
 usdt = "0.5"
+uuid = { version = "1", features = [ "v4" ] }
 zone = { version = "0.3", features = [ "async" ], default-features = false }

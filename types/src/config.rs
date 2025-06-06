@@ -5,7 +5,32 @@
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::metadata::{FactoryMetadata, FactoryMetadataV1};
+use crate::metadata::{FactoryAddresses, FactoryMetadata, FactoryMetadataV1};
+
+/**
+ * This "extra_ips" configuration property appears against a host to denote
+ * extra IP addresses that area available for jobs to use, beyond the single
+ * DHCP address configured on the primary interface.
+ */
+#[derive(Deserialize, Debug, Clone)]
+pub struct ConfigFileExtraIps {
+    pub cidr: String,
+    pub first: String,
+    pub count: u32,
+}
+
+impl ConfigFileExtraIps {
+    pub fn with_gateway(&self, name: &str, gateway: &str) -> FactoryAddresses {
+        FactoryAddresses {
+            name: name.to_string(),
+            cidr: self.cidr.to_string(),
+            first: self.first.to_string(),
+            count: self.count,
+            gateway: Some(gateway.to_string()),
+            routed: false,
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
 #[serde(untagged)]
@@ -146,9 +171,12 @@ impl ConfigFileDiag {
         }
     }
 
-    pub fn build(&self) -> Result<FactoryMetadata> {
+    pub fn build_with_addresses(
+        &self,
+        addresses: Vec<FactoryAddresses>,
+    ) -> Result<FactoryMetadata> {
         Ok(FactoryMetadata::V1(FactoryMetadataV1 {
-            addresses: Default::default(),
+            addresses,
             root_password_hash: self.root_password_hash.as_string()?,
             root_authorized_keys: self.root_authorized_keys.as_string()?,
             dump_to_rpool: self.dump_to_rpool.as_u32()?,
@@ -160,6 +188,10 @@ impl ConfigFileDiag {
                 .as_string()?,
             rpool_disable_sync: self.rpool_disable_sync.as_bool()?,
         }))
+    }
+
+    pub fn build(&self) -> Result<FactoryMetadata> {
+        self.build_with_addresses(Default::default())
     }
 }
 

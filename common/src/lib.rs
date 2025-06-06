@@ -118,6 +118,7 @@ pub fn guess_mime_type(filename: &str) -> String {
 
 pub trait OutputExt {
     fn info(&self) -> String;
+    fn stdout_string(&self) -> Result<String>;
 }
 
 impl OutputExt for std::process::Output {
@@ -150,6 +151,10 @@ impl OutputExt for std::process::Output {
         }
 
         out
+    }
+
+    fn stdout_string(&self) -> Result<String> {
+        Ok(String::from_utf8(self.stdout.clone())?)
     }
 }
 

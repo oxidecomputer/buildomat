@@ -1,9 +1,10 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 use std::collections::HashMap;
 
+use buildomat_types::config::ConfigFileExtraIps;
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug, Clone)]
@@ -60,16 +61,9 @@ impl ConfigFileTarget {
 }
 
 #[derive(Deserialize, Debug, Clone)]
-pub(crate) struct ConfigFileExtraIps {
-    pub cidr: String,
-    pub first: String,
-    pub count: u32,
-}
-
-#[derive(Deserialize, Debug, Clone)]
 pub(crate) struct ConfigFileHost {
     pub ip: String,
-    pub gateway: Option<String>,
+    pub gateway: String,
     pub console: String,
     pub lab_baseurl: String,
     pub nodename: String,

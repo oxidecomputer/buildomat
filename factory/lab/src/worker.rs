@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 use std::str::FromStr;
@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
-use buildomat_types::metadata;
+use buildomat_types::config::{ConfigFileDiag, Inheritable};
 use slog::{debug, error, info, o, trace, warn, Logger};
 
 use super::Central;
@@ -266,15 +266,18 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
                     let mut addresses = Vec::new();
                     let hc = c.config.host.get(&nodename).unwrap();
                     if let Some(ips) = hc.extra_ips.as_ref() {
-                        addresses.push(metadata::FactoryAddresses {
-                            name: "extra".to_string(),
-                            cidr: ips.cidr.to_string(),
-                            first: ips.first.to_string(),
-                            count: ips.count,
-                            gateway: hc.gateway.as_deref().map(str::to_string),
-                            routed: false,
-                        });
+                        addresses.push(ips.with_gateway("extra", &hc.gateway));
                     }
+
+                    let diag = ConfigFileDiag {
+                        /*
+                         * The lab worker currently boots chiefly UFS ramdisks
+                         * and does not provide a ZFS pool backed by a disk.
+                         */
+                        rpool_disable_sync: Some(Inheritable::Bool(false)),
+                        ..Default::default()
+                    };
+                    let md = diag.build_with_addresses(addresses)?;
 
                     c.client
                         .factory_worker_associate()
@@ -282,22 +285,7 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
                         .body_map(|body| {
                             body.private(i.id())
                                 .ip(Some(hc.ip.clone()))
-                                .metadata(Some(metadata::FactoryMetadata::V1(
-                                    metadata::FactoryMetadataV1 {
-                                        addresses,
-                                        root_password_hash: None,
-                                        root_authorized_keys: None,
-                                        dump_to_rpool: None,
-                                        post_job_diagnostic_script: None,
-                                        pre_job_diagnostic_script: None,
-                                        /*
-                                         * The lab worker currently boots
-                                         * chiefly UFS ramdisks and does not
-                                         * provide a ZFS pool backed by a disk.
-                                         */
-                                        rpool_disable_sync: Some(false),
-                                    },
-                                )))
+                                .metadata(Some(md))
                         })
                         .send()
                         .await?;
