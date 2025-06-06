@@ -55,8 +55,6 @@ pub(crate) struct ConfigFileHost {
     pub control_nic: String,
 
     pub cleaning_os_dir: String,
-    // XXX debug_*?
-    // XXX extra_ips
 }
 
 #[derive(Deserialize, Debug, Clone)]

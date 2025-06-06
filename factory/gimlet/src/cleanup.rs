@@ -386,7 +386,7 @@ fn format_disks() -> Result<()> {
                  * them blank.
                  */
                 println!("U.2 device {label} ({}): {nvme}", d.name);
-                //XXX nvmeadm_format(&nvme, None)?;
+                nvmeadm_format(&nvme, None)?;
             }
         }
     }

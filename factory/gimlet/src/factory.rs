@@ -129,10 +129,10 @@ async fn factory_task_one(log: &Logger, c: &Arc<App>) -> Result<()> {
                          * duplicate instance creation when creation or
                          * bootstrap is taking longer than expected.
                          */
-                        // XXX info!(
-                        // XXX     log,
-                        // XXX     "renew lease {} for worker {}", i.lease, w.id
-                        // XXX );
+                        debug!(
+                            log,
+                            "renew lease {} for worker {}", i.lease, w.id
+                        );
                         c.client
                             .factory_lease_renew()
                             .job(&i.lease)
@@ -291,11 +291,6 @@ async fn factory_task_one(log: &Logger, c: &Arc<App>) -> Result<()> {
         .body_map(|b| b.target(&lease.target).wait_for_flush(false))
         .send()
         .await?;
-
-    // XXX NO    /*
-    // XXX NO     * Start the host.
-    // XXX NO     */
-    // XXX NO    hm.start(&c.config.general.baseurl, &w.bootstrap, &targ.os_dir)?;
 
     let instance_id = c.db.instance_create(
         hm.id(),
