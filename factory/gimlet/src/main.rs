@@ -21,6 +21,7 @@ use debug_parser::ValueKind;
 use buildomat_common::*;
 use disks::Slot;
 use getopts::Options;
+use host::HostManager;
 use humility::{HiffyCaller, PathStep, ValueExt};
 use iddqd::{id_upcast, IdHashItem, IdHashMap};
 use slog::{info, o, Logger};
@@ -31,9 +32,9 @@ mod db;
 mod disks;
 mod efi;
 mod factory;
-mod instance;
 mod host;
 mod humility;
+mod instance;
 mod pipe;
 
 pub struct App {
@@ -47,12 +48,13 @@ pub struct App {
 impl App {
     fn metadata(
         &self,
+        hm: &HostManager,
         t: &config::ConfigTarget,
     ) -> Result<metadata::FactoryMetadata> {
-        /*
-         * XXX
-         */
-        self.config.diag.apply_overrides(&t.diag).build()
+        self.config
+            .diag
+            .apply_overrides(&t.diag)
+            .build_with_addresses(hm.extra_ips())
     }
 }
 

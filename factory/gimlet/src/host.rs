@@ -12,6 +12,7 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Result};
+use buildomat_types::metadata::FactoryAddresses;
 use iddqd::{id_upcast, IdHashItem};
 use slog::{error, info, o, warn, Logger};
 
@@ -495,6 +496,16 @@ impl HostManager {
 
     pub fn ip(&self) -> &str {
         &self.host.config.ip
+    }
+
+    pub fn extra_ips(&self) -> Vec<FactoryAddresses> {
+        self.host
+            .config
+            .extra_ips
+            .as_ref()
+            .map(|eip| eip.with_gateway("extra", &self.host.config.gateway))
+            .into_iter()
+            .collect()
     }
 
     pub fn start(

@@ -95,7 +95,7 @@ async fn factory_task_one(log: &Logger, c: &Arc<App>) -> Result<()> {
                         );
                         continue;
                     };
-                    let md = c.metadata(targ)?;
+                    let md = c.metadata(hm, targ)?;
 
                     c.client
                         .factory_worker_associate()
@@ -311,7 +311,7 @@ async fn factory_task_one(log: &Logger, c: &Arc<App>) -> Result<()> {
     /*
      * Record the instance ID against the worker for which it was created:
      */
-    let md = c.metadata(targ)?;
+    let md = c.metadata(hm, targ)?;
     c.client
         .factory_worker_associate()
         .worker(&w.id)

@@ -6,7 +6,7 @@ use iddqd::{id_upcast, IdHashItem, IdHashMap};
 use std::{collections::HashMap, path::Path};
 
 use anyhow::Result;
-use buildomat_types::config::ConfigFileDiag;
+use buildomat_types::config::{ConfigFileDiag, ConfigFileExtraIps};
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug, Clone)]
@@ -49,6 +49,8 @@ pub(crate) struct ConfigFileHost {
     pub rev: u64,
 
     pub ip: String,
+    pub gateway: String,
+    pub extra_ips: Option<ConfigFileExtraIps>,
     pub mac: String,
     pub control_nic: String,
 
