@@ -57,6 +57,7 @@ pub fn real0() -> (String, String, Option<JobFile>) {
             #:	\"oxidecomputer/helios-omicron-brand\",\n\
             #:	\"oxidecomputer/helios-omnios-build\",\n\
             #:	\"oxidecomputer/helios-omnios-extra\",\n\
+            #:	\"oxidecomputer/bldb\",\n\
             #:	\"oxidecomputer/nanobl-rs\",\n\
             #: ]\n\
             #:\n\
@@ -122,6 +123,7 @@ pub fn real0() -> (String, String, Option<JobFile>) {
                 "oxidecomputer/helios-omicron-brand",
                 "oxidecomputer/helios-omnios-build",
                 "oxidecomputer/helios-omnios-extra",
+                "oxidecomputer/bldb",
                 "oxidecomputer/nanobl-rs",
             ],
             "output_rules": [
