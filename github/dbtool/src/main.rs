@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -21,11 +21,11 @@ use std::time::{Duration, Instant};
 const SHORT_SHA_LEN: usize = 16;
 
 trait FlagsExt {
+    #[must_use]
     fn add_flags(&mut self, name: &'static str) -> Flags;
 }
 
 impl FlagsExt for Row {
-    #[must_use]
     fn add_flags(&mut self, name: &'static str) -> Flags {
         Flags { row: self, name, out: String::new() }
     }

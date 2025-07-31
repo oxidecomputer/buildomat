@@ -25,11 +25,11 @@ const WIDTH_AGE: usize = 6;
 mod config;
 
 trait FlagsExt {
+    #[must_use]
     fn add_flags(&mut self, name: &'static str) -> Flags;
 }
 
 impl FlagsExt for Row {
-    #[must_use]
     fn add_flags(&mut self, name: &'static str) -> Flags {
         Flags { row: self, name, out: String::new() }
     }
