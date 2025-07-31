@@ -91,7 +91,52 @@ fn openapi() -> Result<()> {
     Ok(())
 }
 
-fn build_linux_agent() -> Result<()> {
+#[derive(Copy, Clone, Debug)]
+enum AgentBuild {
+    Linux,
+    Helios,
+}
+
+impl AgentBuild {
+    fn job_name(&self) -> &str {
+        match self {
+            AgentBuild::Linux => "build-linux-agent",
+            AgentBuild::Helios => "build-helios-agent",
+        }
+    }
+
+    fn script(&self) -> &str {
+        match self {
+            AgentBuild::Linux => {
+                include_str!("../scripts/build_linux_agent.sh")
+            }
+            AgentBuild::Helios => {
+                include_str!("../scripts/build_helios_agent.sh")
+            }
+        }
+    }
+
+    fn output_filename(&self) -> &str {
+        match self {
+            AgentBuild::Linux => "buildomat-agent-linux.gz",
+            AgentBuild::Helios => "buildomat-agent.gz",
+        }
+    }
+
+    fn use_target(&self) -> &str {
+        /*
+         * We should use the earliest version of a target when building the
+         * agent.  Using a newer target may result in binaries that don't work
+         * in older images.
+         */
+        match self {
+            AgentBuild::Linux => "ubuntu-18.04",
+            AgentBuild::Helios => "helios-2.0-20240204",
+        }
+    }
+}
+
+fn build_agent(ab: AgentBuild) -> Result<()> {
     let files = Command::new("git").arg("ls-files").output()?;
 
     if !files.status.success() {
@@ -132,13 +177,13 @@ fn build_linux_agent() -> Result<()> {
         .arg("run")
         .arg("-W")
         .arg("-n")
-        .arg("build-linux-agent")
+        .arg(ab.job_name())
         .arg("-c")
-        .arg(include_str!("../scripts/build_linux_agent.sh"))
+        .arg(ab.script())
         .arg("-t")
-        .arg("ubuntu-18.04")
+        .arg(ab.use_target())
         .arg("-O")
-        .arg("=/out/buildomat-agent-linux.gz")
+        .arg(format!("=/out/{}", ab.output_filename()))
         .arg("-O")
         .arg("=/out/*.sha256.txt")
         .arg("-i")
@@ -182,8 +227,8 @@ fn build_linux_agent() -> Result<()> {
         .arg("job")
         .arg("copy")
         .arg(&jid)
-        .arg("/out/buildomat-agent-linux.gz")
-        .arg("./buildomat-agent-linux.gz")
+        .arg(format!("/out/{}", ab.output_filename()))
+        .arg(format!("./{}", ab.output_filename()))
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -192,7 +237,7 @@ fn build_linux_agent() -> Result<()> {
     println!("unpacking agent...");
 
     Command::new("gunzip")
-        .arg("./buildomat-agent-linux.gz")
+        .arg(format!("./{}", ab.output_filename()))
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -309,7 +354,8 @@ fn crates() -> Result<()> {
 fn main() -> Result<()> {
     match std::env::args().nth(1).as_deref() {
         Some("openapi") => openapi(),
-        Some("build-linux-agent") => build_linux_agent(),
+        Some("build-linux-agent") => build_agent(AgentBuild::Linux),
+        Some("build-agent") => build_agent(AgentBuild::Helios),
         Some("crates") => crates(),
         Some(_) | None => {
             bail!("do not know how to do that");
