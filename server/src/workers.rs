@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 use chrono::prelude::*;
@@ -87,40 +87,50 @@ async fn worker_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
                 continue;
             }
 
+            if j.worker.is_none() {
+                /*
+                 * This job has not yet been assigned to a worker.  We do not
+                 * want to cancel jobs that have merely been queued for a long
+                 * time.
+                 */
+                continue;
+            }
+
             /*
-             * Determine when we assigned this job to a worker by looking at the
-             * timestamp on the first control event.
+             * Determine when we assigned this job to a worker:
              */
-            let control =
-                c.db.job_events(j.id, 0, 10_000)?
-                    .iter()
-                    .find(|jev| jev.stream == "control")
-                    .cloned();
-            if let Some(control) = control {
-                if control.age().as_secs() > c.config.job.max_runtime {
-                    warn!(
-                        log,
-                        "job {} duration {} exceeds {} seconds; \
+            let times = c.db.job_times(j.id)?;
+            let Some(atime) = times.get("assigned") else {
+                continue;
+            };
+            let age = Utc::now()
+                .signed_duration_since(atime)
+                .to_std()
+                .unwrap_or_else(|_| std::time::Duration::from_secs(0));
+
+            if age.as_secs() > c.config.job.max_runtime {
+                warn!(
+                    log,
+                    "job {} duration {} exceeds {} seconds; \
                         recycling worker {}",
-                        j.id,
-                        control.age().as_secs(),
+                    j.id,
+                    age.as_secs(),
+                    c.config.job.max_runtime,
+                    w.id,
+                );
+                c.db.job_append_event(
+                    j.id,
+                    None,
+                    "control",
+                    Utc::now(),
+                    None,
+                    &format!(
+                        "job duration {} exceeds {} seconds; aborting",
+                        age.as_secs(),
                         c.config.job.max_runtime,
-                        w.id,
-                    );
-                    c.db.job_append_event(
-                        j.id,
-                        None,
-                        "control",
-                        Utc::now(),
-                        None,
-                        &format!(
-                            "job duration {} exceeds {} seconds; aborting",
-                            control.age().as_secs(),
-                            c.config.job.max_runtime,
-                        ),
-                    )?;
-                    c.db.worker_recycle(w.id)?;
-                }
+                    ),
+                )?;
+                c.db.worker_recycle(w.id)?;
             }
         }
     }

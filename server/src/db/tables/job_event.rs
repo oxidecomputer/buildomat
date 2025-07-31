@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 use super::sublude::*;
@@ -74,9 +74,5 @@ impl JobEvent {
                 self.time_remote.into(),
             ])
             .to_owned()
-    }
-
-    pub fn age(&self) -> Duration {
-        self.time.age()
     }
 }
