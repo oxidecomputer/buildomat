@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use tempfile::NamedTempFile;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 pub trait OutputExt {
     fn info(&self) -> String;

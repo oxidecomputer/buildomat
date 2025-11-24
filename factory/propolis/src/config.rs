@@ -4,7 +4,7 @@
 
 use std::{collections::HashMap, net::Ipv4Addr, path::PathBuf};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use buildomat_types::config::ConfigFileDiag;
 use serde::Deserialize;
 
@@ -93,7 +93,7 @@ impl ConfigFile {
         &self,
         slot: u32,
         id: &InstanceId,
-    ) -> Result<InstanceInSlot> {
+    ) -> Result<InstanceInSlot<'_>> {
         Ok(InstanceInSlot { config: self, slot, id: id.clone() })
     }
 

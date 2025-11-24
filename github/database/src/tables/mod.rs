@@ -8,17 +8,17 @@ mod sublude {
 
     pub use crate::itypes::*;
     #[allow(unused_imports)]
-    pub use anyhow::{anyhow, bail, Result};
+    pub use anyhow::{Result, anyhow, bail};
     #[allow(unused_imports)]
     pub use buildomat_common::*;
     pub use buildomat_database::{
-        rusqlite, sqlite_json_new_type, sqlite_sql_enum, FromRow,
+        FromRow, rusqlite, sqlite_json_new_type, sqlite_sql_enum,
     };
     pub use buildomat_github_hooktypes as hooktypes;
     pub use rusqlite::Row;
     pub use sea_query::{
-        enum_def, ColumnRef, Expr, Iden, InsertStatement, Query, SeaRc,
-        SelectStatement,
+        ColumnRef, Expr, Iden, InsertStatement, Query, SeaRc, SelectStatement,
+        enum_def,
     };
     pub use serde::{Deserialize, Serialize};
 }

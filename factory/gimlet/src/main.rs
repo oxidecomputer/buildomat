@@ -14,7 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use buildomat_types::metadata;
 use debug_parser::ValueKind;
 
@@ -23,8 +23,8 @@ use disks::Slot;
 use getopts::Options;
 use host::HostManager;
 use humility::{HiffyCaller, PathStep, ValueExt};
-use iddqd::{id_upcast, IdHashItem, IdHashMap};
-use slog::{info, o, Logger};
+use iddqd::{IdHashItem, IdHashMap, id_upcast};
+use slog::{Logger, info, o};
 
 mod cleanup;
 mod config;

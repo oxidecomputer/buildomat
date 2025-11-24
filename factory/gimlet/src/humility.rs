@@ -10,9 +10,9 @@ use std::{
     process::{Command, Stdio},
 };
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use debug_parser::{Value, ValueKind};
-use slog::{info, warn, Logger};
+use slog::{Logger, info, warn};
 
 use crate::pipe::*;
 use buildomat_common::OutputExt;
@@ -57,7 +57,7 @@ impl ValueExt for Value {
                                 bail!("expected a hex number, got {t:?}");
                             };
 
-                            out.push(u8::from_str_radix(&hex, 16)?);
+                            out.push(u8::from_str_radix(hex, 16)?);
                         }
                         _ => bail!("list should only contain terms"),
                     }

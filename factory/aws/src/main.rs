@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use buildomat_common::*;
 use buildomat_types::metadata;
 use getopts::Options;
@@ -72,7 +72,7 @@ impl Central {
          * Allow the per-target diagnostic configuration to override the base
          * diagnostic configuration.
          */
-        Ok(self.config.diag.apply_overrides(&t.diag).build()?)
+        self.config.diag.apply_overrides(&t.diag).build()
     }
 }
 

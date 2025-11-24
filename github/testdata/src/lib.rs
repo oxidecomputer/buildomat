@@ -159,7 +159,7 @@ pub fn real0() -> (String, String, Option<JobFile>) {
 
 #[cfg(test)]
 pub mod test {
-    use anyhow::{bail, Result};
+    use anyhow::{Result, bail};
 
     use super::*;
 

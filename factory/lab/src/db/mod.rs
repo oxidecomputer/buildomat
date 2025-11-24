@@ -6,11 +6,11 @@ use std::path::Path;
 
 use anyhow::Result;
 use buildomat_common::*;
-use buildomat_database::{conflict, DBResult, FromRow, Handle, Sqlite};
+use buildomat_database::{DBResult, FromRow, Handle, Sqlite, conflict};
 use chrono::prelude::*;
 use sea_query::{Expr, Order, Query};
 #[allow(unused_imports)]
-use slog::{debug, error, info, warn, Logger};
+use slog::{Logger, debug, error, info, warn};
 
 mod tables;
 

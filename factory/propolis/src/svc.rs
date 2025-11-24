@@ -4,8 +4,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{anyhow, bail, Result};
-use slog::{error, info, warn, Logger};
+use anyhow::{Result, anyhow, bail};
+use slog::{Logger, error, info, warn};
 use smf::ScfError;
 
 #[derive(Clone)]

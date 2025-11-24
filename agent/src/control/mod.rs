@@ -4,7 +4,7 @@
 
 use std::{io::Read, ops::Range, time::Duration};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use bytes::BytesMut;
 use hiercmd::prelude::*;
 use ipnet::IpAdd;
@@ -178,13 +178,13 @@ async fn cmd_address_list(mut l: Level<Stuff>) -> Result<()> {
                 let mut r = Row::default();
 
                 r.add_str("name", &addr.name);
-                r.add_str("cidr", &net.to_string());
-                r.add_str("first", &first.to_string());
-                r.add_str("last", &last.to_string());
+                r.add_str("cidr", net.to_string());
+                r.add_str("first", first.to_string());
+                r.add_str("last", last.to_string());
                 r.add_u64("count", addr.count.into());
                 r.add_str("family", "inet");
-                r.add_str("network", &net.network().to_string());
-                r.add_str("mask", &net.netmask().to_string());
+                r.add_str("network", net.network().to_string());
+                r.add_str("mask", net.netmask().to_string());
                 r.add_str("routed", if addr.routed { "yes" } else { "no" });
                 r.add_str("gateway", addr.gateway.as_deref().unwrap_or("-"));
 

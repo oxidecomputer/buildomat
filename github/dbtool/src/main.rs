@@ -2,11 +2,11 @@
  * Copyright 2025 Oxide Computer Company
  */
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
+use buildomat_github_database::Database;
 use buildomat_github_database::types::{
     CheckRunId, CheckRunVariety, CheckSuiteId,
 };
-use buildomat_github_database::Database;
 use buildomat_github_hooktypes as hooktypes;
 use chrono::prelude::*;
 use hiercmd::prelude::*;
@@ -22,11 +22,11 @@ const SHORT_SHA_LEN: usize = 16;
 
 trait FlagsExt {
     #[must_use]
-    fn add_flags(&mut self, name: &'static str) -> Flags;
+    fn add_flags(&mut self, name: &'static str) -> Flags<'_>;
 }
 
 impl FlagsExt for Row {
-    fn add_flags(&mut self, name: &'static str) -> Flags {
+    fn add_flags(&mut self, name: &'static str) -> Flags<'_> {
         Flags { row: self, name, out: String::new() }
     }
 }
@@ -69,7 +69,7 @@ impl Stuff {
         std::fs::DirBuilder::new().mode(0o700).recursive(true).create(&out)?;
         out.push(set);
         std::fs::DirBuilder::new().mode(0o700).recursive(true).create(&out)?;
-        out.push(&format!("{}.json", file));
+        out.push(format!("{}.json", file));
         Ok(out)
     }
 }
@@ -290,7 +290,7 @@ async fn do_delivery_list(mut l: Level<Stuff>) -> Result<()> {
         );
         r.add_str(
             "ack",
-            &del.ack.map(|n| n.to_string()).unwrap_or_else(|| "-".to_string()),
+            del.ack.map(|n| n.to_string()).unwrap_or_else(|| "-".to_string()),
         );
 
         let seq = del.seq;
@@ -371,10 +371,10 @@ async fn do_check_suite_list(mut l: Level<Stuff>) -> Result<()> {
 
     for suite in l.context().db().list_check_suites()? {
         let mut r = Row::default();
-        r.add_str("id", &suite.id.to_string());
+        r.add_str("id", suite.id.to_string());
         r.add_u64("ghid", suite.github_id as u64);
         r.add_u64("repo", suite.repo as u64);
-        r.add_str("state", &format!("{:?}", suite.state));
+        r.add_str("state", format!("{:?}", suite.state));
         r.add_str("ssha", &suite.head_sha[0..SHORT_SHA_LEN]);
         r.add_str("sha", suite.head_sha);
         r.add_str("branch", suite.head_branch.as_deref().unwrap_or("-"));
@@ -407,14 +407,14 @@ async fn do_check_suite_runs(mut l: Level<Stuff>) -> Result<()> {
 
     for run in l.context().db().list_check_runs_for_suite(csid)? {
         let mut r = Row::default();
-        r.add_str("id", &run.id.to_string());
+        r.add_str("id", run.id.to_string());
         r.add_flags("flags")
             .flag('A', run.active)
             .flag('F', run.flushed)
             .build();
         r.add_str("active", if run.active { "yes" } else { "no" });
         r.add_str("flushed", if run.flushed { "yes" } else { "no" });
-        r.add_str("variety", &run.variety.to_string());
+        r.add_str("variety", run.variety.to_string());
         r.add_str("name", &run.name);
 
         t.add_row(r);

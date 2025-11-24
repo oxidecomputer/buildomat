@@ -2,7 +2,7 @@
  * Copyright 2025 Oxide Computer Company
  */
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]

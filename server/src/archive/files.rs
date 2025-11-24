@@ -6,13 +6,13 @@ use std::io::ErrorKind;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use aws_sdk_s3::primitives::ByteStream;
 use chrono::prelude::*;
 #[allow(unused_imports)]
-use slog::{debug, error, info, warn, Logger};
+use slog::{Logger, debug, error, info, warn};
 
-use crate::{db, Central};
+use crate::{Central, db};
 
 async fn archive_files_one(
     log: &Logger,

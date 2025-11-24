@@ -11,15 +11,15 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use buildomat_types::metadata::FactoryAddresses;
-use iddqd::{id_upcast, IdHashItem};
-use slog::{error, info, o, warn, Logger};
+use iddqd::{IdHashItem, id_upcast};
+use slog::{Logger, error, info, o, warn};
 
 use crate::config::{ConfigFileTools, ConfigHost};
 use crate::{
-    humility::{self, HiffyCaller, PathStep, ValueExt},
     HostId,
+    humility::{self, HiffyCaller, PathStep, ValueExt},
 };
 use buildomat_common::*;
 
@@ -624,7 +624,7 @@ impl HostManager {
                 Ok(())
             }
             HostState::Cleaning(cst) => {
-                let mut new_cst = cst.clone();
+                let mut new_cst = *cst;
 
                 {
                     let mut l = self.locked.lock().unwrap();
@@ -700,7 +700,7 @@ impl HostManager {
                 Ok(())
             }
             HostState::Starting(sst, hgs) => {
-                let mut new_sst = sst.clone();
+                let mut new_sst = *sst;
 
                 {
                     let mut l = self.locked.lock().unwrap();
@@ -726,7 +726,7 @@ impl HostManager {
                     }
                 }
 
-                if let Err(e) = self.thread_starting(&mut new_sst, &hgs) {
+                if let Err(e) = self.thread_starting(&mut new_sst, hgs) {
                     error!(log, "starting error: {e}");
                 }
 
@@ -794,7 +794,7 @@ impl HostManager {
 
                 let pb = sys
                     .ssh_exec("svcs -Ho sta,nsta svc:/site/postboot:default")?;
-                let t = pb.out.trim().split_whitespace().collect::<Vec<_>>();
+                let t = pb.out.split_whitespace().collect::<Vec<_>>();
                 if t.len() != 2 || t[0] == "ON" || t[1] == "-" {
                     bail!("postboot not ready: {t:?}");
                 }
@@ -847,7 +847,7 @@ impl HostManager {
 
                 let pb = sys
                     .ssh_exec("svcs -Ho sta,nsta svc:/site/postboot:default")?;
-                let t = pb.out.trim().split_whitespace().collect::<Vec<_>>();
+                let t = pb.out.split_whitespace().collect::<Vec<_>>();
                 if t.len() != 2 || t[0] == "ON" || t[1] == "-" {
                     bail!("postboot not ready: {t:?}");
                 }

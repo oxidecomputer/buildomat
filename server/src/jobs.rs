@@ -9,10 +9,10 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use chrono::prelude::*;
 #[allow(unused_imports)]
-use slog::{error, info, warn, Logger};
+use slog::{Logger, error, info, warn};
 
-use super::db::{FactoryId, JobId, TargetId, WorkerId};
 use super::Central;
+use super::db::{FactoryId, JobId, TargetId, WorkerId};
 
 /*
  * Give a factory a minute to create a worker, or to extend the lease.

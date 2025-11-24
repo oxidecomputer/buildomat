@@ -8,7 +8,7 @@ use std::{sync::Arc, time::Instant};
 
 use anyhow::Result;
 #[allow(unused_imports)]
-use slog::{error, info, warn, Logger};
+use slog::{Logger, error, info, warn};
 
 use super::Central;
 
@@ -163,10 +163,8 @@ pub(crate) async fn worker_cleanup(log: Logger, c: Arc<Central>) -> Result<()> {
                 info!(log, "starting worker liveness checks");
                 liveness_checks = true;
             }
-        } else {
-            if let Err(e) = worker_liveness_one(&log, &c).await {
-                error!(log, "worker liveness task error: {:?}", e);
-            }
+        } else if let Err(e) = worker_liveness_one(&log, &c).await {
+            error!(log, "worker liveness task error: {:?}", e);
         }
 
         tokio::time::sleep(delay).await;

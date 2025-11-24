@@ -4,20 +4,20 @@
 
 use std::{io::ErrorKind, os::unix::prelude::PermissionsExt, sync::Arc};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use bytes::{Buf, BufMut, BytesMut};
 use tokio::{
     io::Interest,
     net::{UnixListener, UnixStream},
     sync::{
-        mpsc::{channel, Receiver, Sender},
         Mutex, Notify,
+        mpsc::{Receiver, Sender, channel},
     },
 };
 
 use super::{
-    protocol::{Decoder, Message, Payload},
     SOCKET_PATH,
+    protocol::{Decoder, Message, Payload},
 };
 
 #[derive(Debug)]

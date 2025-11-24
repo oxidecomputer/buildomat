@@ -10,8 +10,8 @@ use std::os::unix::fs::FileExt;
 use anyhow::Result;
 use bytes::BytesMut;
 use dropshot::Body;
-use hyper::{body::Frame, Response};
-use slog::{o, Logger};
+use hyper::{Response, body::Frame};
+use slog::{Logger, o};
 use tokio::sync::mpsc;
 
 /*

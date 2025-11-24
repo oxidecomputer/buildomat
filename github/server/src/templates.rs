@@ -7,7 +7,7 @@ use std::result::Result as SResult;
 
 use anyhow::Result;
 use dropshot::HttpError;
-use slog::{error, Logger};
+use slog::{Logger, error};
 
 pub struct Templates {
     log: Logger,

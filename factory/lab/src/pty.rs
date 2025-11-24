@@ -1,6 +1,6 @@
 use std::{os::unix::prelude::*, ptr};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use libc::c_int;
 
 pub struct Pty {

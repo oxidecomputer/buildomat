@@ -10,9 +10,9 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Instant;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use buildomat_client::prelude::*;
-use buildomat_client::{types::*, ClientBuilder};
+use buildomat_client::{ClientBuilder, types::*};
 use buildomat_common::*;
 use chrono::prelude::*;
 use hiercmd::prelude::*;
@@ -26,11 +26,11 @@ mod config;
 
 trait FlagsExt {
     #[must_use]
-    fn add_flags(&mut self, name: &'static str) -> Flags;
+    fn add_flags(&mut self, name: &'static str) -> Flags<'_>;
 }
 
 impl FlagsExt for Row {
-    fn add_flags(&mut self, name: &'static str) -> Flags {
+    fn add_flags(&mut self, name: &'static str) -> Flags<'_> {
         Flags { row: self, name, out: String::new() }
     }
 }
@@ -1226,7 +1226,7 @@ async fn do_job_store_list(mut l: Level<Stuff>) -> Result<()> {
         );
         r.add_str(
             "updated",
-            &ent.time_update.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            ent.time_update.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         );
 
         t.add_row(r);
@@ -1351,7 +1351,7 @@ async fn do_user_list(mut l: Level<Stuff>) -> Result<()> {
         r.add_str("name", &u.name);
         r.add_str(
             "creation",
-            &u.time_create.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            u.time_create.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         );
         r.add_age("age", u.time_create.age());
         t.add_row(r);
@@ -2117,11 +2117,7 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
     let a = no_args!(l);
     let nrc = if let Some(arg) = a.opts().opt_str("r") {
         let nrc = arg.parse::<u64>()?;
-        if nrc == 0 {
-            None
-        } else {
-            Some(nrc)
-        }
+        if nrc == 0 { None } else { Some(nrc) }
     } else {
         Some(10)
     };

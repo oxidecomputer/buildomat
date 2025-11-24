@@ -4,7 +4,7 @@
 
 use std::ffi::OsString;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use buildomat_types::metadata;
 use bytes::{Buf, BufMut, BytesMut};
 use serde::{Deserialize, Serialize};

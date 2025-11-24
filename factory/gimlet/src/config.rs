@@ -2,7 +2,7 @@
  * Copyright 2025 Oxide Computer Company
  */
 
-use iddqd::{id_upcast, IdHashItem, IdHashMap};
+use iddqd::{IdHashItem, IdHashMap, id_upcast};
 use std::{collections::HashMap, path::Path};
 
 use anyhow::Result;

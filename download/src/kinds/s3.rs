@@ -4,10 +4,10 @@
 
 use super::sublude::*;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use dropshot::Body;
-use hyper::{body::Frame, Response};
-use slog::{o, Logger};
+use hyper::{Response, body::Frame};
+use slog::{Logger, o};
 use tokio::sync::mpsc;
 
 const BUF_COUNT: usize = 10;

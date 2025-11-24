@@ -15,13 +15,13 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use chrono::prelude::*;
 use futures::StreamExt;
 use hiercmd::prelude::*;
 use rusty_ulid::Ulid;
 use serde::{Deserialize, Serialize};
-use slog::{crit, error, info, o, Logger};
+use slog::{Logger, crit, error, info, o};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -1093,7 +1093,7 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
         let status = Command::new("/sbin/zfs")
             .arg("create")
             .arg("-o")
-            .arg(&format!("mountpoint={}", INPUT_PATH))
+            .arg(format!("mountpoint={}", INPUT_PATH))
             .arg(INPUT_DATASET)
             .env_clear()
             .current_dir("/")

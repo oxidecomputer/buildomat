@@ -16,7 +16,7 @@ use sea_query::{
     SelectStatement, SqliteQueryBuilder, UpdateStatement, Value,
 };
 use sea_query_rusqlite::{RusqliteBinder, RusqliteValues};
-use slog::{debug, Logger};
+use slog::{Logger, debug};
 use thiserror::Error;
 
 #[usdt::provider]

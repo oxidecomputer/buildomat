@@ -4,11 +4,11 @@
 
 use std::{sync::Arc, time::Duration};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use buildomat_common::*;
 use buildomat_types::metadata;
 use getopts::Options;
-use slog::{info, o, Logger};
+use slog::{Logger, info, o};
 
 mod config;
 mod db;
@@ -39,7 +39,7 @@ impl Central {
          * Allow the per-target diagnostic configuration to override the base
          * diagnostic configuration.
          */
-        Ok(self.config.diag.apply_overrides(&t.diag).build()?)
+        self.config.diag.apply_overrides(&t.diag).build()
     }
 }
 

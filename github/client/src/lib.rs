@@ -8,10 +8,10 @@ const GITHUB_API_URL: &str = "https://api.github.com";
 use std::time::Duration;
 
 use anyhow::Result;
+pub use octorust::Client;
 pub use octorust::auth::JWTCredentials;
 use octorust::auth::{Credentials, InstallationTokenGenerator};
 pub use octorust::types;
-pub use octorust::Client;
 
 fn mk_reqwest_client() -> Result<reqwest::Client> {
     Ok(reqwest::ClientBuilder::new()

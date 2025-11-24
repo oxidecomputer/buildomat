@@ -10,14 +10,14 @@ use std::os::unix::prelude::FileExt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use chrono::prelude::*;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
-use slog::{debug, error, info, warn, Logger};
+use slog::{Logger, debug, error, info, warn};
 use tlvc_text::{Piece, Tag};
 
-use crate::{db, Central};
+use crate::{Central, db};
 
 pub const JOB_ARCHIVE_VERSION: u32 = 2;
 

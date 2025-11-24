@@ -8,9 +8,9 @@ use bytes::Bytes;
 use dropshot::Body;
 use http_body_util::StreamBody;
 use hyper::{
+    Response, StatusCode,
     body::Frame,
     header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE},
-    Response, StatusCode,
 };
 
 use tokio::sync::mpsc;
@@ -43,7 +43,7 @@ fn make_get_response<E>(
     rx: mpsc::Receiver<std::result::Result<Frame<Bytes>, E>>,
 ) -> Result<Response<Body>>
 where
-    E: Into<Box<(dyn std::error::Error + Send + Sync + 'static)>>
+    E: Into<Box<dyn std::error::Error + Send + Sync + 'static>>
         + Send
         + Sync
         + 'static,

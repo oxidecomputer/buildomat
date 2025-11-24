@@ -12,15 +12,15 @@ use std::{
 };
 
 use crate::{
+    Central,
     config::ImageSource,
     db::types::*,
-    net::{dladm_create_vnic, dladm_delete_vnic, dladm_vnic_get, Vnic},
+    net::{Vnic, dladm_create_vnic, dladm_delete_vnic, dladm_vnic_get},
     zones::*,
-    Central,
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use buildomat_common::OutputExt;
-use slog::{debug, error, info, o, warn, Logger};
+use slog::{Logger, debug, error, info, o, warn};
 use zone::Zone;
 
 pub const ZFS: &str = "/sbin/zfs";
@@ -461,8 +461,8 @@ async fn instance_worker_one(
                     include_str!("../smf/serial.xml"),
                 ),
             ] {
-                std::fs::write(&vmdir.join(&format!("{name}.sh")), script)?;
-                std::fs::write(&smfdir.join(format!("{name}.xml")), bundle)?;
+                std::fs::write(vmdir.join(format!("{name}.sh")), script)?;
+                std::fs::write(smfdir.join(format!("{name}.xml")), bundle)?;
             }
 
             std::fs::write(&siteprofile, include_str!("../smf/site.xml"))?;

@@ -3,21 +3,21 @@
  */
 
 use crate::{App, FlushOut, FlushState};
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use buildomat_client::types::{DependSubmit, JobOutput};
 use buildomat_common::*;
 use buildomat_download::PotentialRange;
-use buildomat_github_database::{types::*, Database};
-use buildomat_jobsh::variety::basic::{output_sse, output_table, BasicConfig};
+use buildomat_github_database::{Database, types::*};
+use buildomat_jobsh::variety::basic::{BasicConfig, output_sse, output_table};
 use chrono::SecondsFormat;
 use dropshot::Body;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use http_body_util::StreamBody;
-use hyper::body::Frame;
 use hyper::Response;
+use hyper::body::Frame;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
-use slog::{debug, error, info, o, trace, warn, Logger};
+use slog::{Logger, debug, error, info, o, trace, warn};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
@@ -552,8 +552,7 @@ pub(crate) async fn run(
                 db.load_check_run_for_suite_by_name(cs.id, crd.job())?
             {
                 if !matches!(ocr.variety, CheckRunVariety::Basic) {
-                    let msg =
-                        "Basic variety jobs can only depend on other Basic \
+                    let msg = "Basic variety jobs can only depend on other Basic \
                         variety jobs.";
 
                     return fatal(&mut p, cr, db, msg);
@@ -611,8 +610,7 @@ pub(crate) async fn run(
              * organisation that owns the repository.
              */
             if cs.approved_by.is_none() {
-                let msg =
-                    "Use of \"access_repos\" requires authorisation from \
+                let msg = "Use of \"access_repos\" requires authorisation from \
                     a member of the organisation that owns the repository.";
 
                 return fatal(&mut p, cr, db, msg);
@@ -678,11 +676,11 @@ pub(crate) async fn run(
          * We pass several GitHub-specific environment variables to tasks in the
          * job:
          */
-        tb.env("GITHUB_REPOSITORY", &format!("{}/{}", repo.owner, repo.name));
+        tb.env("GITHUB_REPOSITORY", format!("{}/{}", repo.owner, repo.name));
         tb.env("GITHUB_SHA", &cs.head_sha);
         if let Some(branch) = cs.head_branch.as_deref() {
             tb.env("GITHUB_BRANCH", branch);
-            tb.env("GITHUB_REF", &format!("refs/heads/{}", branch));
+            tb.env("GITHUB_REF", format!("refs/heads/{}", branch));
         }
 
         let app0 = app.clone();
@@ -1046,7 +1044,7 @@ pub(crate) async fn artefact(
                     .header(hyper::header::CONTENT_TYPE, "text/html")
                     .header(hyper::header::CONTENT_LENGTH, md.len())
                     .body(Body::wrap(StreamBody::new(
-                        stream.map_ok(|b| Frame::data(b)),
+                        stream.map_ok(Frame::data),
                     )))?,
             ));
         }
@@ -1110,7 +1108,7 @@ pub(crate) async fn artefact(
                     .header(hyper::header::CONTENT_TYPE, ct)
                     .header(hyper::header::CONTENT_LENGTH, cl)
                     .body(Body::wrap(StreamBody::new(
-                        backend.into_inner_stream().map_ok(|b| Frame::data(b)),
+                        backend.into_inner_stream().map_ok(Frame::data),
                     )))?,
             ));
         }
@@ -1253,13 +1251,9 @@ pub(crate) async fn details(
         }
 
         out += "<h3>Output:</h3>\n";
-        out += &output_table(
-            &bm,
-            &job,
-            local_time,
-            format!("./{}/live", cr.id.to_string()),
-        )
-        .await?;
+        out +=
+            &output_table(&bm, &job, local_time, format!("./{}/live", cr.id))
+                .await?;
     }
 
     Ok(out)

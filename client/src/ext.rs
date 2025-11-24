@@ -16,11 +16,7 @@ impl ClientJobExt for crate::types::Job {
         let until = self.times.get(until)?;
 
         if let Ok(dur) = until.signed_duration_since(*from).to_std() {
-            if dur.is_zero() {
-                None
-            } else {
-                Some(dur)
-            }
+            if dur.is_zero() { None } else { Some(dur) }
         } else {
             None
         }

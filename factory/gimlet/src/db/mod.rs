@@ -5,10 +5,10 @@
 use std::{collections::HashSet, path::Path};
 
 use anyhow::Result;
-use buildomat_database::{conflict, DBResult, FromRow, Sqlite};
+use buildomat_database::{DBResult, FromRow, Sqlite, conflict};
 use sea_query::{Expr, Order, Query};
 #[allow(unused_imports)]
-use slog::{debug, error, info, warn, Logger};
+use slog::{Logger, debug, error, info, warn};
 
 mod tables;
 

@@ -5,8 +5,8 @@
 use std::result::Result as SResult;
 use std::time::Duration;
 
-use anyhow::{bail, Result};
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
+use anyhow::{Result, bail};
+use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 
 pub mod events;
 pub mod ext;
@@ -28,7 +28,7 @@ pub mod prelude {
     pub use futures::{StreamExt, TryStreamExt};
     pub use reqwest::StatusCode;
 }
-pub use gen::{types, Client, Error};
+pub use gen::{Client, Error, types};
 use tokio::{sync::mpsc, time::sleep};
 
 pub struct ClientBuilder {

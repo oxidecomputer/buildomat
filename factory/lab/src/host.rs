@@ -5,11 +5,11 @@
 use std::io::Read;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use buildomat_common::*;
 use slog::{debug, error, info, trace, warn};
 
@@ -445,14 +445,16 @@ pub(crate) fn start_manager(
     let c0 = Arc::clone(&c);
     thread::Builder::new()
         .name("host-manager".into())
-        .spawn(move || loop {
-            let log = c0.log.clone();
+        .spawn(move || {
+            loop {
+                let log = c0.log.clone();
 
-            if let Err(e) = thread_manager(&c0, &rx) {
-                error!(log, "host manager thread error: {:?}", e);
+                if let Err(e) = thread_manager(&c0, &rx) {
+                    error!(log, "host manager thread error: {:?}", e);
+                }
+
+                thread::sleep(Duration::from_secs(1));
             }
-
-            thread::sleep(Duration::from_secs(1));
         })
         .unwrap();
 
@@ -472,17 +474,19 @@ pub(crate) fn start_manager(
         let tx = c.tx.lock().unwrap().clone();
         thread::Builder::new()
             .name(format!("serial-{}", nodename))
-            .spawn(move || loop {
-                if let Err(e) = thread_serial(&hc, &tx) {
-                    error!(
-                        log,
-                        "host {} serial thread error: {:?}", nodename, e
-                    );
-                } else {
-                    warn!(log, "host {} serial thread exited", nodename);
-                }
+            .spawn(move || {
+                loop {
+                    if let Err(e) = thread_serial(&hc, &tx) {
+                        error!(
+                            log,
+                            "host {} serial thread error: {:?}", nodename, e
+                        );
+                    } else {
+                        warn!(log, "host {} serial thread exited", nodename);
+                    }
 
-                thread::sleep(Duration::from_secs(1));
+                    thread::sleep(Duration::from_secs(1));
+                }
             })
             .unwrap();
     }

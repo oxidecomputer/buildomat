@@ -1,6 +1,6 @@
 use std::os::fd::{AsRawFd, RawFd};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 #[allow(non_camel_case_types)]
 #[allow(unused)]
@@ -88,7 +88,7 @@ pub mod sys {
             vtoc: *mut *mut dk_gpt_t,
         ) -> c_int;
         pub fn efi_alloc_and_read(fd: c_int, vtoc: *mut *mut dk_gpt_t)
-            -> c_int;
+        -> c_int;
         pub fn efi_write(fd: c_int, vtoc: *mut dk_gpt_t) -> c_int;
         pub fn efi_free(vtoc: *mut dk_gpt_t);
         pub fn efi_reserved_sectors(vtoc: *mut dk_gpt_t) -> c_uint;

@@ -7,9 +7,9 @@ use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 use std::{collections::HashMap, time::SystemTime};
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use aws_config::Region;
-use aws_config::{meta::region::RegionProviderChain, BehaviorVersion};
+use aws_config::{BehaviorVersion, meta::region::RegionProviderChain};
 use aws_sdk_ec2::config::Credentials;
 use aws_sdk_ec2::types::{
     BlockDeviceMapping, EbsBlockDevice, Filter,
@@ -18,9 +18,9 @@ use aws_sdk_ec2::types::{
 };
 use base64::Engine;
 use buildomat_client::types::*;
-use slog::{debug, error, info, o, warn, Logger};
+use slog::{Logger, debug, error, info, o, warn};
 
-use super::{config::ConfigFileAwsTarget, types::*, Central, ConfigFile};
+use super::{Central, ConfigFile, config::ConfigFileAwsTarget, types::*};
 
 #[derive(Debug)]
 struct Instance {
@@ -69,8 +69,7 @@ impl Instance {
                     .as_millis()
                     .try_into()
                     .unwrap();
-
-                (if when <= now { now - when } else { 0 }) / 1000
+                now.saturating_sub(when) / 1000
             })
             .unwrap_or(0)
     }
@@ -188,7 +187,7 @@ async fn create_instance(
 
     let mut instances = res
         .instances()
-        .into_iter()
+        .iter()
         .map(|i| Instance::from((i, config.aws.tag.as_str())))
         .collect::<Vec<_>>();
 
@@ -218,13 +217,12 @@ async fn instances(
     Ok(res
         .reservations()
         .iter()
-        .map(|r| {
+        .flat_map(|r| {
             r.instances().iter().map(|i| {
                 let i = Instance::from((i, tag));
                 (i.id.to_string(), i)
             })
         })
-        .flatten()
         .collect())
 }
 
@@ -421,7 +419,7 @@ async fn aws_worker_one(
              * There is a record of a particular instance ID for this worker.
              * Check to see if that instance exists.
              */
-            if let Some(i) = insts.get(&instance_id.to_string()) {
+            if let Some(i) = insts.get(instance_id) {
                 if i.state == "terminated" {
                     /*
                      * The instance exists, but is terminated.  Delete the

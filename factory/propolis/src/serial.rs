@@ -12,8 +12,8 @@ use std::{
 
 use crate::ucred::PeerUCred;
 use crate::zones::*;
-use anyhow::{anyhow, bail, Result};
-use slog::{debug, error, info, o, trace, warn, Logger};
+use anyhow::{Result, anyhow, bail};
+use slog::{Logger, debug, error, info, o, trace, warn};
 use tokio::net::UnixListener;
 use tokio::{io::Interest, net::UnixStream};
 
@@ -219,11 +219,7 @@ fn clean_line(linebuf: &[u8]) -> Option<String> {
     let s = String::from_utf8_lossy(linebuf);
     let s = s.replace('\x1b', "^[");
     let s = s.trim();
-    if !s.is_empty() {
-        Some(s.to_string())
-    } else {
-        None
-    }
+    if !s.is_empty() { Some(s.to_string()) } else { None }
 }
 
 async fn zone_serial_task(log: Logger, mut z: Zone, sock: UnixStream) {

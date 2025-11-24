@@ -4,7 +4,7 @@
 
 use std::os::fd::AsRawFd;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use libc::{getpeerucred, ucred_free, ucred_getzoneid, ucred_t, zoneid_t};
 
 pub trait PeerUCred: AsRawFd {
@@ -39,10 +39,6 @@ impl Drop for UCred {
 impl UCred {
     pub fn zoneid(&self) -> Option<zoneid_t> {
         let zoneid = unsafe { ucred_getzoneid(self.uc) };
-        if zoneid < 0 {
-            None
-        } else {
-            Some(zoneid)
-        }
+        if zoneid < 0 { None } else { Some(zoneid) }
     }
 }

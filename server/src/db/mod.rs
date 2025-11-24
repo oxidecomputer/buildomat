@@ -9,15 +9,15 @@ use std::time::Duration;
 
 use anyhow::Result;
 use buildomat_common::*;
-use buildomat_database::{conflict, DBResult, FromRow, Handle, Sqlite};
+use buildomat_database::{DBResult, FromRow, Handle, Sqlite, conflict};
 use buildomat_types::*;
 use chrono::prelude::*;
 use sea_query::{
-    all, Alias, Asterisk, Cond, Expr, Iden, IntoTableRef, Keyword, Order,
-    Query, SeaRc, SelectStatement, TableRef,
+    Alias, Asterisk, Cond, Expr, Iden, IntoTableRef, Keyword, Order, Query,
+    SeaRc, SelectStatement, TableRef, all,
 };
 #[allow(unused_imports)]
-use slog::{debug, error, info, warn, Logger};
+use slog::{Logger, debug, error, info, warn};
 use tokio::sync::watch;
 
 mod tables;
@@ -2361,7 +2361,7 @@ impl Database {
          */
         let max_val_count = 100;
         let max_val_kib = 10;
-        if value.as_bytes().len() > max_val_kib * 1024 {
+        if value.len() > max_val_kib * 1024 {
             conflict!("maximum value size is {max_val_kib}KiB");
         }
 
