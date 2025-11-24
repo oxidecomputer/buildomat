@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::result::Result as SResult;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 use buildomat_download::RequestContextEx;
 use dropshot::{

@@ -6,11 +6,11 @@ mod sublude {
     pub use std::str::FromStr;
 
     pub use crate::db::types::*;
-    pub use buildomat_database::{rusqlite, sqlite_sql_enum, FromRow};
+    pub use buildomat_database::{FromRow, rusqlite, sqlite_sql_enum};
     pub use rusqlite::Row;
     pub use sea_query::{
-        enum_def, ColumnRef, Expr, Iden, InsertStatement, Query, SeaRc,
-        SelectStatement,
+        ColumnRef, Expr, Iden, InsertStatement, Query, SeaRc, SelectStatement,
+        enum_def,
     };
 }
 

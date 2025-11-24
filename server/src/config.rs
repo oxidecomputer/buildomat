@@ -8,7 +8,7 @@ use anyhow::Result;
 use buildomat_common::*;
 use serde::Deserialize;
 #[allow(unused_imports)]
-use slog::{error, info, o, warn, Logger};
+use slog::{Logger, error, info, o, warn};
 
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]

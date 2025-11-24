@@ -15,13 +15,13 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use chrono::prelude::*;
 use futures::StreamExt;
 use hiercmd::prelude::*;
 use rusty_ulid::Ulid;
 use serde::{Deserialize, Serialize};
-use slog::{crit, error, info, o, Logger};
+use slog::{Logger, crit, error, info, o};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;

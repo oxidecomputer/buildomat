@@ -2,7 +2,7 @@
  * Copyright 2025 Oxide Computer Company
  */
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use buildomat_client::prelude::*;
 use buildomat_common::*;
 use buildomat_download::RequestContextEx;
@@ -10,19 +10,19 @@ use buildomat_github_database::types::*;
 use buildomat_sse::HeaderMapEx;
 use chrono::prelude::*;
 use dropshot::{
-    endpoint, Body, ConfigDropshot, HttpError, HttpResponseOk, RequestContext,
+    Body, ConfigDropshot, HttpError, HttpResponseOk, RequestContext, endpoint,
 };
 use futures::TryStreamExt;
 use schemars::JsonSchema;
 use serde::Deserialize;
 #[allow(unused_imports)]
-use slog::{debug, error, info, o, trace, warn, Logger};
+use slog::{Logger, debug, error, info, o, trace, warn};
 use std::collections::{HashMap, HashSet};
 use std::result::Result as SResult;
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::{variety, App};
+use super::{App, variety};
 
 fn sign(body: &[u8], secret: &str) -> String {
     let hmac = hmac_sha256::HMAC::mac(body, secret.as_bytes());

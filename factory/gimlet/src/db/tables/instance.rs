@@ -3,7 +3,7 @@
  */
 
 use super::sublude::*;
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 
 sqlite_sql_enum!(InstanceState => {
     /**

@@ -13,22 +13,22 @@ use std::result::Result as SResult;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use aws_sdk_s3::primitives::ByteStream;
 use buildomat_common::*;
 use buildomat_download::unruin_content_length;
 use dropshot::{
-    endpoint, ApiDescription, Body, ClientErrorStatusCode, ConfigDropshot,
-    HttpError, HttpServerStarter, Query as TypedQuery, RequestContext,
-    RequestInfo,
+    ApiDescription, Body, ClientErrorStatusCode, ConfigDropshot, HttpError,
+    HttpServerStarter, Query as TypedQuery, RequestContext, RequestInfo,
+    endpoint,
 };
 use getopts::Options;
-use hyper::{header::AUTHORIZATION, Response};
+use hyper::{Response, header::AUTHORIZATION};
 use rusty_ulid::Ulid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 #[allow(unused_imports)]
-use slog::{error, info, o, warn, Logger};
+use slog::{Logger, error, info, o, warn};
 
 mod api;
 mod archive;
@@ -158,11 +158,7 @@ impl Central {
         req: &RequestInfo,
     ) -> SResult<String, HttpError> {
         let v = if let Some(h) = req.headers().get(AUTHORIZATION) {
-            if let Ok(v) = h.to_str() {
-                Some(v.to_string())
-            } else {
-                None
-            }
+            if let Ok(v) = h.to_str() { Some(v.to_string()) } else { None }
         } else {
             None
         };

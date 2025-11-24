@@ -4,8 +4,8 @@
 
 use std::collections::HashMap;
 
-use anyhow::{bail, Result};
-use buildomat_client::{types::TaskSubmit, ClientExt, EventOrState};
+use anyhow::{Result, bail};
+use buildomat_client::{ClientExt, EventOrState, types::TaskSubmit};
 use buildomat_common::*;
 use buildomat_sse::ServerSentEvents;
 use dropshot::Body;
@@ -284,7 +284,7 @@ async fn load_rust_toolchain_from_repo(
     file_loader: &FileLoader,
 ) -> Result<RustToolchain> {
     use rust_toolchain_file::{
-        toml::ToolchainSection, ParseStrategy, Parser, ToolchainFile, Variant,
+        ParseStrategy, Parser, ToolchainFile, Variant, toml::ToolchainSection,
     };
 
     let Ok(Some(f)) = file_loader("rust-toolchain.toml").await else {

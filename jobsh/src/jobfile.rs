@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use buildomat_common::*;
 use serde::Deserialize;
 

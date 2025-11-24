@@ -7,9 +7,9 @@ use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 use std::{collections::HashMap, time::SystemTime};
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use aws_config::Region;
-use aws_config::{meta::region::RegionProviderChain, BehaviorVersion};
+use aws_config::{BehaviorVersion, meta::region::RegionProviderChain};
 use aws_sdk_ec2::config::Credentials;
 use aws_sdk_ec2::types::{
     BlockDeviceMapping, EbsBlockDevice, Filter,
@@ -18,9 +18,9 @@ use aws_sdk_ec2::types::{
 };
 use base64::Engine;
 use buildomat_client::types::*;
-use slog::{debug, error, info, o, warn, Logger};
+use slog::{Logger, debug, error, info, o, warn};
 
-use super::{config::ConfigFileAwsTarget, types::*, Central, ConfigFile};
+use super::{Central, ConfigFile, config::ConfigFileAwsTarget, types::*};
 
 #[derive(Debug)]
 struct Instance {
@@ -69,7 +69,7 @@ impl Instance {
                     .as_millis()
                     .try_into()
                     .unwrap();
-                    now.saturating_sub(when) / 1000
+                now.saturating_sub(when) / 1000
             })
             .unwrap_or(0)
     }

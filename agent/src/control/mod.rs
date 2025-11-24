@@ -4,7 +4,7 @@
 
 use std::{io::Read, ops::Range, time::Duration};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use bytes::BytesMut;
 use hiercmd::prelude::*;
 use ipnet::IpAdd;

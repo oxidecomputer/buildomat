@@ -4,7 +4,7 @@
 
 #![allow(clippy::vec_init_then_push)]
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use base64::Engine;
 use buildomat_common::*;
 use buildomat_github_client::types::{
@@ -16,11 +16,11 @@ use buildomat_github_hooktypes as hooktypes;
 use buildomat_jobsh::jobfile::JobFileSet;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
-use slog::{debug, error, info, o, trace, warn, Logger};
+use slog::{Logger, debug, error, info, o, trace, warn};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
-use variety::control::{ControlPrivate, CONTROL_RUN_NAME};
+use variety::control::{CONTROL_RUN_NAME, ControlPrivate};
 
 mod config;
 mod http;

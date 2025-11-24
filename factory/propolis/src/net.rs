@@ -1,6 +1,6 @@
 use std::process::Command;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use buildomat_common::*;
 
 const DLADM: &str = "/usr/sbin/dladm";
@@ -126,11 +126,7 @@ pub fn dladm_vnic_get(vnic: &str) -> Result<Option<Vnic>> {
                         .parse()
                         .map_err(|e| anyhow!("parsing VLAN ID: {e}"))?;
 
-                    if vid == 0 {
-                        None
-                    } else {
-                        Some(vid)
-                    }
+                    if vid == 0 { None } else { Some(vid) }
                 },
             })
         })

@@ -10,9 +10,9 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Instant;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use buildomat_client::prelude::*;
-use buildomat_client::{types::*, ClientBuilder};
+use buildomat_client::{ClientBuilder, types::*};
 use buildomat_common::*;
 use chrono::prelude::*;
 use hiercmd::prelude::*;
@@ -2117,11 +2117,7 @@ async fn do_dash(mut l: Level<Stuff>) -> Result<()> {
     let a = no_args!(l);
     let nrc = if let Some(arg) = a.opts().opt_str("r") {
         let nrc = arg.parse::<u64>()?;
-        if nrc == 0 {
-            None
-        } else {
-            Some(nrc)
-        }
+        if nrc == 0 { None } else { Some(nrc) }
     } else {
         Some(10)
     };

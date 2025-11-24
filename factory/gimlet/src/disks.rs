@@ -6,8 +6,8 @@
 
 use std::path::PathBuf;
 
-use anyhow::{bail, Result};
-use iddqd::{id_upcast, IdOrdItem, IdOrdMap};
+use anyhow::{Result, bail};
+use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Slot {

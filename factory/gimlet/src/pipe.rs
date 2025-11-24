@@ -5,11 +5,11 @@
  */
 
 use std::sync::{
-    atomic::{AtomicI32, Ordering},
     Arc,
+    atomic::{AtomicI32, Ordering},
 };
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 #[derive(Clone)]
 pub struct PipeEnd(Arc<AtomicI32>);

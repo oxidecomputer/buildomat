@@ -6,7 +6,7 @@ use rusqlite::Row;
 use sea_query::{ColumnRef, Cond, Expr, Query, SelectStatement};
 
 use crate::db::types::*;
-use buildomat_database::{rusqlite, FromRow};
+use buildomat_database::{FromRow, rusqlite};
 
 mod sublude {
     pub use std::str::FromStr;
@@ -15,13 +15,13 @@ mod sublude {
     pub use crate::db::types::*;
     pub use crate::db::{CreateDepend, CreateOutputRule, CreateTask};
     pub use anyhow::Result;
-    pub use buildomat_database::{rusqlite, FromRow};
+    pub use buildomat_database::{FromRow, rusqlite};
     pub use buildomat_types::metadata;
     pub use chrono::prelude::*;
     pub use rusqlite::Row;
     pub use sea_query::{
-        enum_def, ColumnRef, Expr, Iden, InsertStatement, OnConflict, Query,
-        SeaRc, SelectStatement,
+        ColumnRef, Expr, Iden, InsertStatement, OnConflict, Query, SeaRc,
+        SelectStatement, enum_def,
     };
 }
 

@@ -7,7 +7,7 @@ use std::{
     path::Path,
 };
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 #[derive(Clone, PartialEq)]
 pub struct ShadowFile {

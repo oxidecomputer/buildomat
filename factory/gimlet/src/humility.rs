@@ -10,9 +10,9 @@ use std::{
     process::{Command, Stdio},
 };
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use debug_parser::{Value, ValueKind};
-use slog::{info, warn, Logger};
+use slog::{Logger, info, warn};
 
 use crate::pipe::*;
 use buildomat_common::OutputExt;

@@ -5,11 +5,11 @@
 use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 
 use crate::{
-    db::{types::*, CreateInstance},
     App,
+    db::{CreateInstance, types::*},
 };
 use anyhow::Result;
-use slog::{debug, error, info, o, warn, Logger};
+use slog::{Logger, debug, error, info, o, warn};
 
 async fn factory_task_one(log: &Logger, c: &Arc<App>) -> Result<()> {
     /*

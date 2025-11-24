@@ -8,9 +8,9 @@ use bytes::Bytes;
 use dropshot::Body;
 use http_body_util::StreamBody;
 use hyper::{
+    Response, StatusCode,
     body::Frame,
     header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE},
-    Response, StatusCode,
 };
 
 use tokio::sync::mpsc;

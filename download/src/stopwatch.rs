@@ -4,10 +4,10 @@
 
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use bytes::Bytes;
 use hyper::body::Frame;
-use slog::{error, info, Logger};
+use slog::{Logger, error, info};
 
 pub struct Stopwatch {
     start: Instant,

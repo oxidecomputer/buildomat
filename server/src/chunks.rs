@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 #[allow(unused_imports)]
-use slog::{error, info, warn, Logger};
+use slog::{Logger, error, info, warn};
 
 use super::Central;
 

@@ -216,7 +216,7 @@ pub mod test {
                 \x1b[38;2;0;255;0;1;3;4manother",
                 "\u{1b}[9000;2;255;0;0;1;3;4mTest message\u{1b}[0m and \
                 &amp;/&#x27; \u{1b}[38;2;0;255;0;1;3;4manother",
-            )
+            ),
         ];
 
         for (input, expected) in data {

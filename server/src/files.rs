@@ -4,11 +4,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use rusty_ulid::Ulid;
-use slog::{error, info, o, Logger};
+use slog::{Logger, error, info, o};
 
-use crate::{db::JobId, Central};
+use crate::{Central, db::JobId};
 
 /**
  * Track work required to commit chunks into files.  For large files this can

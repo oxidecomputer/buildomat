@@ -1,11 +1,11 @@
 use std::{result::Result as SResult, time::Duration};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use bytes::Bytes;
 use dropshot::Body;
 use http::{
-    header::{CACHE_CONTROL, CONTENT_TYPE},
     Response, StatusCode,
+    header::{CACHE_CONTROL, CONTENT_TYPE},
 };
 use http_body_util::StreamBody;
 use hyper::body::Frame;

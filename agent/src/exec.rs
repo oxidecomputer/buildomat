@@ -8,9 +8,9 @@ use std::io::{BufRead, BufReader, Read};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use chrono::prelude::*;
 
 use super::OutputRecord;
@@ -294,8 +294,7 @@ fn run_common(
                  * process.
                  */
                 if ab.bgproc.is_none() {
-                    tx.blocking_send(ab.exit(&start, &end, i32::MAX))
-                        .unwrap();
+                    tx.blocking_send(ab.exit(&start, &end, i32::MAX)).unwrap();
                 }
 
                 false
@@ -326,11 +325,8 @@ fn run_common(
                     )
                     .unwrap();
                 }
-                let code = if let Some(code) = es.code() {
-                    code
-                } else {
-                    i32::MAX
-                };
+                let code =
+                    if let Some(code) = es.code() { code } else { i32::MAX };
                 tx.blocking_send(ab.exit(&start, &end, code)).unwrap();
                 stdio_warning
             }

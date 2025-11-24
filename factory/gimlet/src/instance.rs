@@ -4,13 +4,13 @@
 
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
-use anyhow::{bail, Result};
-use slog::{error, info, o, Logger};
+use anyhow::{Result, bail};
+use slog::{Logger, error, info, o};
 
 use crate::{
+    App,
     db::{InstanceId, InstanceState},
     host::HostManager,
-    App,
 };
 
 pub(crate) async fn instance_worker(c: Arc<App>) -> Result<()> {

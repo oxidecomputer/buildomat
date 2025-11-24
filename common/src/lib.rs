@@ -10,11 +10,11 @@ use std::time::Duration;
 use anyhow::Result;
 use chrono::prelude::*;
 use rand::distr::Alphanumeric;
-use rand::{rng, Rng};
+use rand::{Rng, rng};
 use regex::Regex;
 use rusty_ulid::Ulid;
 use serde::{Deserialize, Serialize};
-use slog::{o, Drain, Logger};
+use slog::{Drain, Logger, o};
 
 pub fn read_toml<P: AsRef<Path>, T>(n: P) -> Result<T>
 where

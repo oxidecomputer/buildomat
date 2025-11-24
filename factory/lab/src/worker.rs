@@ -6,9 +6,9 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use buildomat_types::config::{ConfigFileDiag, Inheritable};
-use slog::{debug, error, info, o, trace, warn, Logger};
+use slog::{Logger, debug, error, info, o, trace, warn};
 
 use super::Central;
 
@@ -301,11 +301,11 @@ async fn lab_worker_one(log: &Logger, c: &Central) -> Result<()> {
                      * list above based on the ready nodes.
                      */
                     warn!(
-                    log,
-                    "server asked for target (host {}) that is not ready: {}",
-                    t.nodenames().join(", or "),
-                    lease.target
-                );
+                        log,
+                        "server asked for target (host {}) that is not ready: {}",
+                        t.nodenames().join(", or "),
+                        lease.target
+                    );
                 }
             } else {
                 warn!(

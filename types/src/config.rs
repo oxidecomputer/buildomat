@@ -2,7 +2,7 @@
  * Copyright 2024 Oxide Computer Company
  */
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::metadata::{FactoryAddresses, FactoryMetadata, FactoryMetadataV1};

@@ -11,15 +11,15 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use buildomat_types::metadata::FactoryAddresses;
-use iddqd::{id_upcast, IdHashItem};
-use slog::{error, info, o, warn, Logger};
+use iddqd::{IdHashItem, id_upcast};
+use slog::{Logger, error, info, o, warn};
 
 use crate::config::{ConfigFileTools, ConfigHost};
 use crate::{
-    humility::{self, HiffyCaller, PathStep, ValueExt},
     HostId,
+    humility::{self, HiffyCaller, PathStep, ValueExt},
 };
 use buildomat_common::*;
 

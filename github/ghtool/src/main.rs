@@ -2,7 +2,7 @@
  * Copyright 2024 Oxide Computer Company
  */
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use hiercmd::prelude::*;
 
 mod config;

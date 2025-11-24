@@ -4,7 +4,7 @@
 
 use std::{collections::HashMap, net::Ipv4Addr, path::PathBuf};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use buildomat_types::config::ConfigFileDiag;
 use serde::Deserialize;
 

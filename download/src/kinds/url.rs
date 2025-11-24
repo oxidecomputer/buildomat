@@ -4,16 +4,16 @@
 
 use super::sublude::*;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 
 use dropshot::Body;
 use futures::TryStreamExt;
 use hyper::{
+    Response, StatusCode,
     body::Frame,
     header::{CONTENT_LENGTH, CONTENT_RANGE, RANGE},
-    Response, StatusCode,
 };
-use slog::{o, Logger};
+use slog::{Logger, o};
 use tokio::sync::mpsc;
 
 const BUF_COUNT: usize = 10;

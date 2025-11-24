@@ -4,7 +4,7 @@
 
 use std::ffi::CString;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 pub use libc::zoneid_t;
 
 #[link(name = "c")]

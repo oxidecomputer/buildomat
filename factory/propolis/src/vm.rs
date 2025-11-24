@@ -12,15 +12,15 @@ use std::{
 };
 
 use crate::{
+    Central,
     config::ImageSource,
     db::types::*,
-    net::{dladm_create_vnic, dladm_delete_vnic, dladm_vnic_get, Vnic},
+    net::{Vnic, dladm_create_vnic, dladm_delete_vnic, dladm_vnic_get},
     zones::*,
-    Central,
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use buildomat_common::OutputExt;
-use slog::{debug, error, info, o, warn, Logger};
+use slog::{Logger, debug, error, info, o, warn};
 use zone::Zone;
 
 pub const ZFS: &str = "/sbin/zfs";

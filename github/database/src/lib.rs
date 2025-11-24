@@ -9,7 +9,7 @@ use buildomat_database::Sqlite;
  * Re-export these so that buildomat-github-* family crates do not also need a
  * buildomat-database dependency:
  */
-pub use buildomat_database::{conflict, DBResult, DatabaseError, FromRow};
+pub use buildomat_database::{DBResult, DatabaseError, FromRow, conflict};
 use chrono::prelude::*;
 use sea_query::{Expr, OnConflict, Order, Query};
 use slog::Logger;

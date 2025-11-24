@@ -7,11 +7,11 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use buildomat_common::*;
 use chrono::prelude::*;
 use getopts::Options;
-use slog::{info, warn, Logger};
+use slog::{Logger, info, warn};
 use std::time::{Duration, Instant};
 
 mod config;

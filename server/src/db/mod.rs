@@ -9,15 +9,15 @@ use std::time::Duration;
 
 use anyhow::Result;
 use buildomat_common::*;
-use buildomat_database::{conflict, DBResult, FromRow, Handle, Sqlite};
+use buildomat_database::{DBResult, FromRow, Handle, Sqlite, conflict};
 use buildomat_types::*;
 use chrono::prelude::*;
 use sea_query::{
-    all, Alias, Asterisk, Cond, Expr, Iden, IntoTableRef, Keyword, Order,
-    Query, SeaRc, SelectStatement, TableRef,
+    Alias, Asterisk, Cond, Expr, Iden, IntoTableRef, Keyword, Order, Query,
+    SeaRc, SelectStatement, TableRef, all,
 };
 #[allow(unused_imports)]
-use slog::{debug, error, info, warn, Logger};
+use slog::{Logger, debug, error, info, warn};
 use tokio::sync::watch;
 
 mod tables;
