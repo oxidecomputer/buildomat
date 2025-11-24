@@ -83,7 +83,7 @@ async fn instance_worker_start(
         }
         instances_with_workers.insert(id.clone());
 
-        let c = Arc::clone(&c);
+        let c = Arc::clone(c);
         let log = log.new(o!(
             "component" => "instance_worker",
             "instance" => id.to_string(),

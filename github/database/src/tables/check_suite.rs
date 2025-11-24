@@ -61,7 +61,7 @@ impl From<jobfile::JobFile> for JobFile {
             content,
             dependencies: dependencies
                 .into_iter()
-                .map(|(a, b)| (a.into(), b.into()))
+                .map(|(a, b)| (a, b.into()))
                 .collect(),
         }
     }

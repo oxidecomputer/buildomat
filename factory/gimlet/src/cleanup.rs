@@ -110,7 +110,7 @@ pub fn setup() -> Result<()> {
             bail!("giving up after {MAX_TIME} seconds");
         }
 
-        if let Ok(st) = svcs(&fmri) {
+        if let Ok(st) = svcs(fmri) {
             if st.next.is_none() && st.current == "ON" {
                 println!(" * {fmri} now online!");
                 break;
@@ -125,7 +125,7 @@ pub fn setup() -> Result<()> {
      * only be one!
      */
     let pools = zpool_unimported_list()?;
-    if pools.len() == 0 {
+    if pools.is_empty() {
         bail!("no unimported pool found!");
     } else if pools.len() > 1 {
         bail!("more than one unimported pool found!");
@@ -137,14 +137,14 @@ pub fn setup() -> Result<()> {
     };
 
     println!(" * importing pool {pool:?}...");
-    zpool_import(&pool)?;
+    zpool_import(pool)?;
 
     /*
      * Update the BSU symlink:
      */
     std::fs::create_dir_all("/pool/bsu")?;
     std::fs::remove_file("/pool/bsu/0").ok();
-    std::os::unix::fs::symlink(&format!("../int/{pool_id}"), "/pool/bsu/0")?;
+    std::os::unix::fs::symlink(format!("../int/{pool_id}"), "/pool/bsu/0")?;
 
     /*
      * Create the swap device:
@@ -252,7 +252,7 @@ fn prepare_m2() -> Result<()> {
         let p = &mut vtoc.parts_mut()[i];
         p.p_tag = efi::sys::V_USR;
         p.p_start = next_start;
-        p.p_size = size.into();
+        p.p_size = size;
         next_start = next_start.checked_add(size).unwrap();
     }
 
@@ -287,11 +287,11 @@ fn prepare_m2() -> Result<()> {
         .env_clear()
         .arg("create")
         .arg("-O")
-        .arg(&format!("mountpoint=/pool/int/{id}"))
+        .arg(format!("mountpoint=/pool/int/{id}"))
         .arg("-O")
         .arg("compress=on")
         .arg(&pool)
-        .arg(&format!("{}s5", d.name))
+        .arg(format!("{}s5", d.name))
         .output()?;
 
     if !out.status.success() {

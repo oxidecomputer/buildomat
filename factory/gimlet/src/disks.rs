@@ -121,7 +121,7 @@ pub fn list_disks() -> Result<Disks> {
                            slice: u32|
      -> Result<Option<devinfo::DevLink>> {
         let mut paths = links
-            .links_for_path(&device)?
+            .links_for_path(device)?
             .into_iter()
             .filter(|l| {
                 l.linktype() == devinfo::DevLinkType::Primary
@@ -193,13 +193,13 @@ pub fn list_disks() -> Result<Disks> {
                  */
                 let device = m.devfs_path()?;
 
-                Ok((0..=8)
+                (0..=8)
                     .map(|num| {
                         Ok(slice_from_path(&device, num)?.map(|link| {
                             (num, m.spec_type(), link.path().to_owned())
                         }))
                     })
-                    .collect::<Result<Vec<_>>>()?)
+                    .collect::<Result<Vec<_>>>()
             })
             .collect::<Result<Vec<_>>>()?
             .into_iter()
