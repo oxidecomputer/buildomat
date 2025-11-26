@@ -314,36 +314,30 @@ async fn factory_worker_one(
                 );
 
                 // Start agent for this instance
-                if testbed.is_local() {
-                    match executor.start_local(&i, testbed).await {
-                        Ok(handle) => {
-                            info!(
-                                log,
-                                "started local agent for instance {}",
-                                i.id()
-                            );
-                            tracker.add(handle).await;
-                            c.db.instance_mark_running(&i)?;
-                        }
-                        Err(e) => {
-                            error!(
-                                log,
-                                "failed to start agent for instance {}: {:?}",
-                                i.id(),
-                                e
-                            );
-                            // Mark instance for destruction
-                            c.db.instance_destroy(&i)?;
-                        }
-                    }
+                let start_result = if testbed.is_local() {
+                    info!(log, "starting local agent"; "instance" => i.id());
+                    executor.start_local(&i, testbed).await
                 } else {
-                    // SSH mode - not yet implemented
-                    warn!(
-                        log,
-                        "SSH execution not yet implemented for testbed {}",
-                        testbed.name
-                    );
-                    c.db.instance_destroy(&i)?;
+                    info!(log, "starting SSH agent"; "instance" => i.id(), "host" => &testbed.host);
+                    executor.start_ssh(&i, testbed).await
+                };
+
+                match start_result {
+                    Ok(handle) => {
+                        info!(log, "agent started for instance {}", i.id());
+                        tracker.add(handle).await;
+                        c.db.instance_mark_running(&i)?;
+                    }
+                    Err(e) => {
+                        error!(
+                            log,
+                            "failed to start agent for instance {}: {:?}",
+                            i.id(),
+                            e
+                        );
+                        // Mark instance for destruction
+                        c.db.instance_destroy(&i)?;
+                    }
                 }
             } else {
                 warn!(

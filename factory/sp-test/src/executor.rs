@@ -9,8 +9,8 @@
 //!
 //! # Execution Modes
 //!
-//! - **Local**: Agent runs directly on the factory host (for development)
-//! - **SSH**: Agent runs on a remote testbed host via SSH (for production)
+//! - **Local**: Agent runs directly on the factory host (for development on illumos)
+//! - **SSH**: Agent runs on a remote testbed host via SSH (for cross-platform dev)
 //!
 //! # Local Mode
 //!
@@ -20,12 +20,21 @@
 //! 3. Runs `buildomat-agent run` in the background
 //! 4. Monitors the process for completion
 //! 5. Cleans up the working directory
+//!
+//! # SSH Mode
+//!
+//! In SSH mode, the factory:
+//! 1. SSHes to the remote host and creates work directory
+//! 2. Runs `buildomat-agent install` over SSH
+//! 3. Runs `buildomat-agent run` over SSH (keeping SSH session as monitored process)
+//! 4. When SSH session exits, agent has completed
+//! 5. Cleans up remote work directory
 
 use std::path::PathBuf;
 use std::process::Stdio;
 
 use anyhow::{Context, Result, bail};
-use slog::{Logger, debug, info};
+use slog::{Logger, debug, info, warn};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
@@ -139,6 +148,84 @@ impl Executor {
         Executor { config, log }
     }
 
+    /// SSH options for secure but non-interactive connections.
+    fn ssh_options() -> Vec<String> {
+        vec![
+            "StrictHostKeyChecking=no".to_string(),
+            "UserKnownHostsFile=/dev/null".to_string(),
+            "ConnectTimeout=10".to_string(),
+            "LogLevel=error".to_string(),
+            "BatchMode=yes".to_string(),
+        ]
+    }
+
+    /// Execute a command over SSH and wait for completion.
+    async fn ssh_exec(
+        &self,
+        host: &str,
+        user: &str,
+        script: &str,
+    ) -> Result<String> {
+        let mut cmd = Command::new("ssh");
+
+        for opt in Self::ssh_options() {
+            cmd.arg("-o").arg(opt);
+        }
+
+        cmd.arg(format!("{}@{}", user, host));
+        cmd.arg(script);
+
+        let output = cmd
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .with_context(|| format!("ssh to {}@{}", user, host))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!(
+                "ssh {}@{} {:?} failed: {}",
+                user,
+                host,
+                script,
+                stderr.trim()
+            );
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    /// Spawn a long-running SSH command (returns Child handle).
+    async fn ssh_spawn(
+        &self,
+        host: &str,
+        user: &str,
+        script: &str,
+    ) -> Result<Child> {
+        let mut cmd = Command::new("ssh");
+
+        for opt in Self::ssh_options() {
+            cmd.arg("-o").arg(opt);
+        }
+
+        // Use -t -t for force pseudo-terminal allocation to ensure remote
+        // process is killed when SSH connection drops
+        cmd.arg("-t").arg("-t");
+        cmd.arg(format!("{}@{}", user, host));
+        cmd.arg(script);
+
+        let child = cmd
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| {
+            format!("spawning ssh to {}@{}", user, host)
+        })?;
+
+        Ok(child)
+    }
+
     /// Start an agent for the given instance on the given testbed.
     ///
     /// This creates a working directory, installs the agent, and starts it
@@ -231,6 +318,119 @@ impl Executor {
             "instance" => &instance_id,
             "pid" => child.id()
         );
+
+        Ok(AgentHandle {
+            instance_id,
+            testbed_name: testbed.name.clone(),
+            work_dir,
+            child: Mutex::new(Some(child)),
+            log: self.log.clone(),
+        })
+    }
+
+    /// Start an agent on a remote testbed via SSH.
+    ///
+    /// This SSHes to the testbed host, creates directories, installs and runs
+    /// the agent. The SSH session remains open as the monitored process.
+    pub async fn start_ssh(
+        &self,
+        instance: &Instance,
+        testbed: &TestbedInfo,
+    ) -> Result<AgentHandle> {
+        let instance_id = instance.id();
+        let host = testbed.host.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("testbed {} has no host configured", testbed.name)
+        })?;
+
+        // Default to root user (can be made configurable)
+        let user = "root";
+
+        info!(
+            self.log,
+            "starting SSH agent for instance {} on testbed {} ({})",
+            instance_id,
+            testbed.name,
+            host
+        );
+
+        // Remote work directory path
+        let remote_work_dir =
+            format!("/tmp/buildomat-sp-test/{}", instance_id.replace('/', "_"));
+
+        // Step 1: Create remote directories
+        info!(self.log, "creating remote work directory";
+            "instance" => &instance_id,
+            "path" => &remote_work_dir
+        );
+
+        let mkdir_script = format!(
+            "mkdir -p {d}/opt/buildomat/etc {d}/opt/buildomat/lib {d}/input {d}/work",
+            d = remote_work_dir
+        );
+        self.ssh_exec(host, user, &mkdir_script).await?;
+
+        // Step 2: Install agent on remote host
+        info!(self.log, "installing agent via SSH"; "instance" => &instance_id);
+
+        // The install script sets up agent config and registers with server
+        let install_script = format!(
+            "cd {d} && \
+             HOME={d} \
+             BUILDOMAT_OPT={d}/opt/buildomat \
+             buildomat-agent install -N {nodename} {baseurl} {bootstrap}",
+            d = remote_work_dir,
+            nodename = testbed.name,
+            baseurl = self.config.baseurl,
+            bootstrap = instance.bootstrap
+        );
+
+        match self.ssh_exec(host, user, &install_script).await {
+            Ok(_) => {
+                info!(self.log, "agent installed successfully via SSH";
+                    "instance" => &instance_id
+                );
+            }
+            Err(e) => {
+                // Try to clean up remote directory on failure
+                warn!(self.log, "agent install failed, cleaning up";
+                    "instance" => &instance_id,
+                    "error" => %e
+                );
+                let cleanup = format!("rm -rf {}", remote_work_dir);
+                let _ = self.ssh_exec(host, user, &cleanup).await;
+                return Err(e);
+            }
+        }
+
+        // Step 3: Start agent run via SSH (keep session open)
+        info!(self.log, "starting agent run via SSH"; "instance" => &instance_id);
+
+        // The run script executes the agent and stays connected
+        let run_script = format!(
+            "cd {d} && \
+             HOME={d} \
+             BUILDOMAT_OPT={d}/opt/buildomat \
+             BUILDOMAT_INPUT={d}/input \
+             BUILDOMAT_WORK={d}/work \
+             buildomat-agent run",
+            d = remote_work_dir
+        );
+
+        let child = self.ssh_spawn(host, user, &run_script).await?;
+
+        info!(
+            self.log,
+            "SSH agent started";
+            "instance" => &instance_id,
+            "pid" => child.id(),
+            "host" => host
+        );
+
+        // Use a local work_dir path for tracking (even though actual work is remote)
+        let work_dir = self
+            .config
+            .work_base
+            .join(format!("ssh-{}", instance_id.replace('/', "_")));
 
         Ok(AgentHandle {
             instance_id,
