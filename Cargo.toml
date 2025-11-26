@@ -11,6 +11,7 @@ members = [
 	"factory/gimlet",
 	"factory/lab",
 	"factory/propolis",
+	"factory/sp-test",
 	"github/client",
 	"github/database",
 	"github/dbtool",

@@ -1,0 +1,57 @@
+# SP-Test Factory Configuration Example
+#
+# This file configures the SP-Test factory for buildomat integration.
+# Copy to config.toml and adjust for your environment.
+
+[general]
+# URL of the buildomat server
+baseurl = "http://localhost:8000"
+
+[factory]
+# Factory authentication token (get from buildomat admin)
+token = "your-factory-token-here"
+
+# Testbed definitions
+# Each testbed is a hardware test station with attached SP/ROT hardware.
+# The testbed name should match your sp-runner configuration.
+
+[testbed.grapefruit-7f495641]
+# SP type for this testbed
+sp_type = "grapefruit"
+
+# Buildomat targets this testbed can serve
+targets = ["sp-grapefruit"]
+
+# For local execution, omit 'host'
+# For remote execution via SSH:
+# host = "testbed-host.local"
+
+# Path to sp-runner (default: "sp-runner")
+sp_runner_path = "cargo run -p sp-runner --"
+
+# Path to sp-runner config (default: "~/Oxide/ci/config.toml")
+sp_runner_config = "~/Oxide/ci/config.toml"
+
+# Baseline firmware version (default: "v16")
+baseline = "v16"
+
+# Enable/disable this testbed (default: true)
+enabled = true
+
+[testbed.gimlet-a1b2c3d4]
+sp_type = "gimlet"
+targets = ["sp-gimlet", "sp-gimlet-attestation"]
+# Remote testbed example:
+# host = "gimlet-testbed.local"
+enabled = false  # Disabled until configured
+
+# Target definitions
+# These are the buildomat targets that jobs can request.
+# Targets are matched to testbeds via the testbed's "targets" list.
+
+[target.sp-grapefruit]
+# Currently no target-specific configuration needed
+
+[target.sp-gimlet]
+
+[target.sp-gimlet-attestation]

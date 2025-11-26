@@ -886,6 +886,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "buildomat-factory-sp-test"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "buildomat-client",
+ "buildomat-common",
+ "buildomat-database",
+ "buildomat-types",
+ "chrono",
+ "getopts",
+ "sea-query",
+ "serde",
+ "slog",
+ "slog-term",
+ "strum",
+ "tokio",
+ "toml 0.8.20",
+ "usdt",
+]
+
+[[package]]
 name = "buildomat-github-client"
 version = "0.0.0"
 dependencies = [
