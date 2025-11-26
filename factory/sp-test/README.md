@@ -144,9 +144,34 @@ cargo build -p buildomat-factory-sp-test
     -d /path/to/data.sqlite3
 ```
 
+## Platform Requirements
+
+The buildomat-agent requires **illumos** (specifically SMF - Service Management
+Framework). The factory itself is cross-platform, but agent execution only works
+on illumos hosts.
+
+**Development options:**
+1. **Local mode on illumos**: Factory and agent on same illumos host
+2. **SSH mode**: Factory on any platform, SSH to illumos testbed host for agent execution
+
+## Testing Status
+
+The following has been verified:
+
+1. **Factory polling**: Successfully connects to buildomat-server, requests leases
+2. **Job acquisition**: Factory receives jobs targeting configured targets
+3. **Worker creation**: Creates workers, instances, and database records
+4. **Instance lifecycle**: State machine (Created → Running → Destroying → Destroyed)
+5. **Cleanup**: Orphaned workers and completed instances cleaned up properly
+
+**Pending verification** (requires illumos testbed):
+- Agent execution completing successfully
+- sp-runner invocation via job script
+- Results uploaded to buildomat-server
+
 ## Future Work
 
-- **SSH execution mode**: Run agents on remote testbed hosts via SSH
+- **SSH execution mode**: Run agents on remote testbed hosts via SSH (in progress)
 - **Target name resolution**: Look up target IDs by name at startup
 - **Inventron integration**: Dynamic testbed discovery and allocation
 - **Health monitoring**: Detect and recover from stuck agents

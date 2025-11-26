@@ -2,12 +2,22 @@
 
 This guide describes how to set up and configure the SP-Test factory for buildomat integration.
 
+## Platform Requirements
+
+The buildomat-agent requires **illumos** (specifically SMF). Choose one of:
+
+1. **Local mode on illumos**: Factory and agent run on the same illumos host
+2. **SSH mode**: Factory runs anywhere, SSHes to illumos testbed host for agent
+
+For development on non-illumos systems, use SSH mode with an illumos testbed.
+
 ## Prerequisites
 
 1. **Buildomat Server** - A running buildomat-server instance
 2. **Factory Token** - Admin-generated factory authentication token
 3. **Testbed Hardware** - At least one configured SP/ROT testbed
-4. **sp-runner** - Installed and configured
+4. **illumos Host** - For agent execution (local or via SSH)
+5. **sp-runner** - Installed and configured
    [`sp-runner`](https://github.com/oxidecomputer/sp-tools) with testbed access
 
 ## Directory Structure
