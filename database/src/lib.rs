@@ -462,6 +462,7 @@ impl Sqlite {
         let mut setup = jmclib::sqlite::SqliteSetup::new();
         setup.schema(schema.as_ref());
         setup.log(log.clone());
+        setup.create(true);
 
         /*
          * Disable integrity checking for the moment, because it takes _a very
