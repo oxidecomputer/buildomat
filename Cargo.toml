@@ -4,6 +4,7 @@ members = [
 	"bin",
 	"bunyan",
 	"client",
+	"client/sp-runner",
 	"common",
 	"database",
 	"download",

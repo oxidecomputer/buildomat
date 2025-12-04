@@ -37,6 +37,9 @@ pub struct TestbedInfo {
     /// SSH host for remote execution (None = local)
     pub host: Option<String>,
 
+    /// SSH user for remote execution (default: current user)
+    pub ssh_user: Option<String>,
+
     /// Path to sp-runner binary
     pub sp_runner_path: String,
 
@@ -48,6 +51,12 @@ pub struct TestbedInfo {
 
     /// Whether testbed is enabled for CI
     pub enabled: bool,
+
+    /// HTTP URL for sp-runner service (enables HTTP dispatch mode).
+    ///
+    /// When set, the factory dispatches jobs to sp-runner's buildomat-service
+    /// API instead of running buildomat-agent directly.
+    pub sp_runner_url: Option<String>,
 }
 
 impl TestbedInfo {
@@ -56,7 +65,18 @@ impl TestbedInfo {
         self.enabled && self.targets.iter().any(|t| t == target)
     }
 
-    /// Check if this testbed runs locally (no SSH).
+    /// Check if this testbed uses HTTP dispatch mode.
+    ///
+    /// HTTP dispatch mode sends jobs to sp-runner's buildomat-service API
+    /// instead of running buildomat-agent directly.
+    pub fn uses_http_dispatch(&self) -> bool {
+        self.sp_runner_url.is_some()
+    }
+
+    /// Check if this testbed runs locally (no SSH) in agent mode.
+    ///
+    /// This only applies to agent-based execution. For HTTP dispatch mode,
+    /// use [`uses_http_dispatch`](TestbedInfo::uses_http_dispatch).
     pub fn is_local(&self) -> bool {
         self.host.is_none()
     }
@@ -87,10 +107,12 @@ impl TestbedManager {
                 sp_type: cfg.sp_type.clone(),
                 targets: cfg.targets.clone(),
                 host: cfg.host.clone(),
+                ssh_user: cfg.ssh_user.clone(),
                 sp_runner_path: cfg.sp_runner_path.clone(),
                 sp_runner_config: cfg.sp_runner_config.clone(),
                 baseline: cfg.baseline.clone(),
                 enabled: cfg.enabled,
+                sp_runner_url: cfg.sp_runner_url.clone(),
             };
 
             testbeds.insert(name.clone(), info);
@@ -157,10 +179,12 @@ mod tests {
                 sp_type: "grapefruit".to_string(),
                 targets: vec!["sp-grapefruit".to_string()],
                 host: None,
+                ssh_user: None,
                 sp_runner_path: "sp-runner".to_string(),
                 sp_runner_config: "config.toml".to_string(),
                 baseline: "v16".to_string(),
                 enabled: true,
+                sp_runner_url: Some("http://localhost:9090".to_string()),
             },
         );
         config.insert(
@@ -172,10 +196,12 @@ mod tests {
                     "sp-gimlet-attestation".to_string(),
                 ],
                 host: Some("testbed.local".to_string()),
+                ssh_user: Some("testuser".to_string()),
                 sp_runner_path: "sp-runner".to_string(),
                 sp_runner_config: "config.toml".to_string(),
                 baseline: "v16".to_string(),
                 enabled: true,
+                sp_runner_url: None, // Uses agent mode
             },
         );
         config

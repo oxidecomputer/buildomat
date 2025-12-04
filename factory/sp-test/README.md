@@ -7,9 +7,9 @@ A buildomat factory for hardware-in-the-loop (HIL) testing of SP/ROT firmware on
 The SP-Test factory enables automated CI testing of Hubris SP and ROT firmware on real hardware. It integrates with buildomat to:
 
 1. Poll for jobs targeting SP/ROT hardware tests
-2. Allocate available testbeds to jobs
-3. Execute tests via [`sp-runner`](https://github.com/oxidecomputer/sp-tools) on testbed hardware
-4. Report results back to buildomat
+2. Download artifacts from buildomat storage
+3. Dispatch tests to sp-runner service via HTTP API
+4. Upload results back to buildomat
 
 ## Architecture
 
@@ -20,97 +20,80 @@ The SP-Test factory enables automated CI testing of Hubris SP and ROT firmware o
 │  - Stores artifacts from upstream build jobs                        │
 └─────────────────────────────────────────────────────────────────────┘
                               ▲
-                              │ HTTP polling (every 7 seconds)
+                              │ HTTP polling (factory protocol)
                               ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    SP-TEST FACTORY (this crate)                     │
+│            TESTBED HOST (e.g., voidstar.lan)                        │
 │                                                                     │
-│  Responsibilities:                                                  │
-│  - Poll buildomat-server for jobs matching configured targets       │
-│  - Track testbed availability via local database                    │
-│  - Create workers and associate with testbed instances              │
-│  - Start buildomat-agent to execute jobs                            │
-│  - Clean up after job completion                                    │
-│                                                                     │
-│  Does NOT know:                                                     │
-│  - How to run tests (that's sp-runner's job)                        │
-│  - Test orchestration logic                                         │
-│  - Firmware update protocols                                        │
-└─────────────────────────────────────────────────────────────────────┘
-                              │
-                              │ Spawns buildomat-agent per job
-                              ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    BUILDOMAT AGENT                                  │
-│  - Downloads job artifacts from server                              │
-│  - Executes job script (which invokes sp-runner)                    │
-│  - Uploads results back to server                                   │
-└─────────────────────────────────────────────────────────────────────┘
-                              │
-                              │ Job script invokes
-                              ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                    SP-RUNNER                                        │
-│  - Loads testbed configuration                                      │
-│  - Runs sp-test against hardware                                    │
-│  - Writes results to output directory                               │
+│  ┌───────────────────────────────────────────────────────────────┐  │
+│  │              SP-TEST FACTORY (this crate)                     │  │
+│  │                                                               │  │
+│  │  - Polls buildomat-server for jobs                            │  │
+│  │  - Downloads artifacts to local input_dir                     │  │
+│  │  - Dispatches to sp-runner service via HTTP                   │  │
+│  │  - Uploads results from output_dir                            │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+│                              │                                      │
+│                              │ HTTP API (localhost)                 │
+│                              ▼                                      │
+│  ┌───────────────────────────────────────────────────────────────┐  │
+│  │              SP-RUNNER SERVICE                                │  │
+│  │                                                               │  │
+│  │  - Receives job requests with local paths                     │  │
+│  │  - Manages testbed state and allocation                       │  │
+│  │  - Runs sp-test as subprocess                                 │  │
+│  │  - Writes results to output_dir                               │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+│                              │                                      │
+│                              │ subprocess                           │
+│                              ▼                                      │
+│  ┌───────────────────────────────────────────────────────────────┐  │
+│  │              SP-TEST                                          │  │
+│  │  - Hardware communication via MGS protocol                    │  │
+│  │  - Firmware update and validation                             │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+│                              │                                      │
+│                              ▼                                      │
+│                      [ Hardware Testbed ]                           │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Design Principles
 
-1. **Factory owns coordination** - All testbed allocation and status tracking happens in the factory, not in sp-runner.
+1. **Factory owns buildomat protocol** - All buildomat communication (polling, artifact download, result upload) happens in the factory.
 
-2. **sp-runner stays simple** - sp-runner has no knowledge of buildomat, job scheduling, or testbed allocation. It just runs tests on hardware it's pointed at.
+2. **sp-runner owns test execution** - sp-runner manages testbed state and runs tests. It has no knowledge of buildomat.
 
-3. **File-based testbed config** - Testbed configuration comes from a local TOML file. This can later be replaced with an Inventron backend if dynamic allocation is needed.
+3. **Shared filesystem** - Factory and sp-runner run on the same host, using local paths for artifact exchange.
 
-4. **Local-first development** - The factory supports local execution (no SSH) for development, with SSH support planned for production.
+4. **HTTP dispatch** - Factory communicates with sp-runner via HTTP API, enabling clean separation and easy debugging.
 
-## Components
+## Quick Start
 
-### `main.rs`
-Entry point. Parses CLI arguments, loads configuration, initializes database, and starts the factory worker task.
+### Prerequisites
 
-### `config.rs`
-TOML configuration parsing. Defines testbed and target configuration structures.
+1. **sp-runner service running** on the testbed host:
+   ```bash
+   sp-runner -c ~/Oxide/ci/config.toml buildomat service --listen 127.0.0.1:9090
+   ```
 
-### `testbed.rs`
-Testbed manager abstraction. Tracks which testbeds are configured, their capabilities (which targets they can serve), and availability.
+2. **Buildomat server** accessible from the testbed host
 
-### `worker.rs`
-The main factory polling loop:
-- Phase 0: Check for completed agents, clean up
-- Phase 1: Validate existing instances against server
-- Phase 2: Clean up orphaned workers
-- Phase 3: Request new work, create instances, start agents
+3. **Baseline firmware** cached on the testbed host
 
-### `executor.rs`
-Agent lifecycle management. Handles starting the buildomat-agent process, monitoring its status, and cleanup.
+### Start the Factory
 
-### `db/`
-SQLite database layer for instance state persistence. Tracks testbed assignments across factory restarts.
+```bash
+# Build
+cargo build -p buildomat-factory-sp-test
 
-## Instance State Machine
-
+# Run
+buildomat-factory-sp-test \
+    -f /path/to/config.toml \
+    -d /path/to/data.sqlite3
 ```
-Created ──────► Running ──────► Destroying ──────► Destroyed
-    │              │                 ▲
-    │              │                 │
-    └──────────────┴─────────────────┘
-         (on error or recycle)
-```
-
-- **Created**: Instance allocated, agent starting
-- **Running**: Agent is online and executing job
-- **Destroying**: Job complete or recycled, cleaning up
-- **Destroyed**: Fully cleaned up (historical record)
 
 ## Configuration
-
-See `doc/setup.md` for detailed configuration instructions.
-
-Example configuration:
 
 ```toml
 [general]
@@ -121,57 +104,108 @@ token = "factory-api-token"
 
 [testbed.grapefruit-7f495641]
 sp_type = "grapefruit"
-targets = ["01KAYPTX7HMFSPHN2PAAXRHESC"]  # Target ID (ULID)
-sp_runner_path = "sp-runner"
-sp_runner_config = "~/Oxide/ci/config.toml"
+targets = ["sp-grapefruit"]
 baseline = "v16"
+sp_runner_url = "http://localhost:9090"  # HTTP dispatch mode
 enabled = true
-
-[target.sp-grapefruit]
 ```
 
-**Note**: The buildomat API requires target IDs (ULIDs), not target names.
+### Configuration Options
 
-## Usage
+| Field | Description |
+|-------|-------------|
+| `baseurl` | Buildomat server URL |
+| `token` | Factory API authentication token |
+| `sp_type` | Hardware type (grapefruit, gimlet, etc.) |
+| `targets` | Buildomat target names this testbed handles |
+| `baseline` | Default baseline version (e.g., "v16") |
+| `sp_runner_url` | sp-runner service URL for HTTP dispatch |
+| `enabled` | Whether this testbed is available |
 
-```bash
-# Build
-cargo build -p buildomat-factory-sp-test
+## Job Execution Flow
 
-# Run
-./target/debug/buildomat-factory-sp-test \
-    -f /path/to/config.toml \
-    -d /path/to/data.sqlite3
-```
+1. **Factory polls** buildomat-server for pending jobs
+2. **Factory receives lease** for a job targeting configured testbed
+3. **Factory downloads artifacts** from buildomat storage to `input_dir`
+4. **Factory dispatches job** via HTTP:
+   ```
+   POST http://localhost:9090/job
+   {
+     "testbed": "grapefruit-7f495641",
+     "input_dir": "/tmp/buildomat/instance-123/input",
+     "output_dir": "/tmp/buildomat/instance-123/output",
+     "baseline": "v16",
+     "test_type": "update-rollback"
+   }
+   ```
+5. **Factory polls for completion**:
+   ```
+   GET http://localhost:9090/job/{job_id}/status
+   ```
+6. **Factory uploads results** from `output_dir` to buildomat storage
+7. **Factory reports completion** to buildomat-server
 
-## Platform Requirements
+## Components
 
-The buildomat-agent requires **illumos** (specifically SMF - Service Management
-Framework). The factory itself is cross-platform, but agent execution only works
-on illumos hosts.
-
-**Development options:**
-1. **Local mode on illumos**: Factory and agent on same illumos host
-2. **SSH mode**: Factory on any platform, SSH to illumos testbed host for agent execution
+| File | Description |
+|------|-------------|
+| `main.rs` | Entry point, CLI parsing, initialization |
+| `config.rs` | TOML configuration with `sp_runner_url` support |
+| `testbed.rs` | Testbed manager, capability tracking |
+| `worker.rs` | Main polling loop, job lifecycle |
+| `executor.rs` | HTTP dispatch to sp-runner service |
+| `db/` | SQLite persistence for instance state |
 
 ## Testing Status
 
-The following has been verified:
+**Verified working (2025-12-03):**
+- Factory polling buildomat-server
+- Artifact download via worker protocol
+- HTTP dispatch to sp-runner service
+- Job status polling
+- Result upload via worker protocol
+- End-to-end test on illumos: 42 tests, 61 seconds
 
-1. **Factory polling**: Successfully connects to buildomat-server, requests leases
-2. **Job acquisition**: Factory receives jobs targeting configured targets
-3. **Worker creation**: Creates workers, instances, and database records
-4. **Instance lifecycle**: State machine (Created → Running → Destroying → Destroyed)
-5. **Cleanup**: Orphaned workers and completed instances cleaned up properly
+## Deployment
 
-**Pending verification** (requires illumos testbed):
-- Agent execution completing successfully
-- sp-runner invocation via job script
-- Results uploaded to buildomat-server
+For detailed deployment instructions, see:
+- [BUILDOMAT-FACTORY-SETUP.md](https://github.com/oxidecomputer/sp-tools/blob/main/doc/ci-integration/BUILDOMAT-FACTORY-SETUP.md) in sp-tools
+- [buildomat-integration-testing.md](https://github.com/oxidecomputer/sp-tools/blob/main/doc/ci-integration/buildomat-integration-testing.md) for testing
 
-## Future Work
+### Deployment Scripts (in sp-tools)
 
-- **SSH execution mode**: Run agents on remote testbed hosts via SSH (in progress)
-- **Target name resolution**: Look up target IDs by name at startup
-- **Inventron integration**: Dynamic testbed discovery and allocation
-- **Health monitoring**: Detect and recover from stuck agents
+```bash
+# Sync and build on illumos host
+./scripts/rsync-and-install-to-illumos voidstar.lan --buildomat
+
+# Start services on remote host
+./scripts/buildomat-remote-start.sh --reset
+```
+
+## Troubleshooting
+
+### Factory not receiving jobs
+
+1. Check factory is registered with buildomat-server
+2. Verify target names match job configuration
+3. Check factory logs for polling errors
+
+### Tests failing
+
+1. Check sp-runner service is running: `curl http://localhost:9090/health`
+2. Check testbed is available: `curl http://localhost:9090/testbeds`
+3. Review sp-runner logs for test execution errors
+
+### Testbed stuck in busy state
+
+Recover via sp-runner API:
+```bash
+curl -X POST http://localhost:9090/testbed/grapefruit-7f495641/recover \
+  -H 'Content-Type: application/json' -d '{"force": false}'
+```
+
+## Related Documentation
+
+- **sp-tools**: https://github.com/oxidecomputer/sp-tools
+- **sp-runner CLI**: `sp-runner --help` or sp-tools CLI-REFERENCE.md
+- **Buildomat**: https://github.com/oxidecomputer/buildomat

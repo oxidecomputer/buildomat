@@ -894,12 +894,15 @@ dependencies = [
  "buildomat-common",
  "buildomat-database",
  "buildomat-types",
+ "bytes",
  "chrono",
+ "futures",
  "getopts",
  "sea-query",
  "serde",
  "slog",
  "slog-term",
+ "sp-runner-client",
  "strum",
  "tokio",
  "toml 0.8.20",
@@ -4173,6 +4176,17 @@ checksum = "233504af464074f9d066d7b5416c5f9b894a5862a6506e306f7b816cdd6f1807"
 dependencies = [
  "libc",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "sp-runner-client"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

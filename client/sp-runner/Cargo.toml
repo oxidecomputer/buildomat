@@ -1,0 +1,16 @@
+[package]
+name = "sp-runner-client"
+version = "0.0.0"
+edition = "2021"
+license = "MPL-2.0"
+description = "HTTP client for sp-runner buildomat-service API"
+
+[dependencies]
+anyhow = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

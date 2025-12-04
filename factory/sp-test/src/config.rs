@@ -17,6 +17,13 @@
 //! [testbed.grapefruit-7f495641]
 //! sp_type = "grapefruit"
 //! targets = ["sp-grapefruit"]
+//! # HTTP dispatch mode - factory dispatches to sp-runner service
+//! sp_runner_url = "http://localhost:9090"
+//!
+//! [testbed.gimlet-agent-mode]
+//! sp_type = "gimlet"
+//! targets = ["sp-gimlet"]
+//! # Agent mode (no sp_runner_url) - runs buildomat-agent directly
 //! # Optional: SSH to remote host (omit for local execution)
 //! # host = "testbed-host.local"
 //!
@@ -68,6 +75,10 @@ pub struct ConfigFileTestbed {
     #[serde(default)]
     pub host: Option<String>,
 
+    /// SSH user for remote execution (default: current user)
+    #[serde(default)]
+    pub ssh_user: Option<String>,
+
     /// Path to sp-runner on testbed host
     #[serde(default = "default_sp_runner_path")]
     pub sp_runner_path: String,
@@ -83,6 +94,18 @@ pub struct ConfigFileTestbed {
     /// Whether this testbed is enabled for CI
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+
+    /// HTTP URL for sp-runner service (enables HTTP dispatch mode).
+    ///
+    /// When set, the factory dispatches jobs to sp-runner's buildomat-service
+    /// API via HTTP instead of running buildomat-agent directly.
+    ///
+    /// Example: "http://localhost:9090"
+    ///
+    /// If not set (None), the factory uses the traditional agent-based
+    /// execution mode (either local or SSH depending on `host`).
+    #[serde(default)]
+    pub sp_runner_url: Option<String>,
 }
 
 fn default_sp_runner_path() -> String {

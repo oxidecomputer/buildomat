@@ -9,7 +9,7 @@
 //! 2. Cleans up orphaned workers
 //! 3. Acquires new jobs when testbeds are available
 //! 4. Creates instances and associates them with workers
-//! 5. Starts agent processes for new instances
+//! 5. Starts jobs (via HTTP dispatch or agent processes)
 
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -22,7 +22,7 @@ use tokio::sync::Mutex;
 
 use crate::Central;
 use crate::db::InstanceSeq;
-use crate::executor::{AgentHandle, Executor, ExecutorConfig};
+use crate::executor::{AgentHandle, Executor, ExecutorConfig, HttpJobHandle};
 
 /// Parse instance ID from worker private field.
 ///
@@ -92,22 +92,90 @@ impl AgentTracker {
     }
 }
 
+/// Tracks running HTTP-dispatched jobs across factory iterations.
+pub struct HttpJobTracker {
+    /// Map from instance ID to job handle
+    jobs: Mutex<HashMap<String, HttpJobHandle>>,
+}
+
+impl HttpJobTracker {
+    pub fn new() -> Self {
+        HttpJobTracker { jobs: Mutex::new(HashMap::new()) }
+    }
+
+    /// Add a running HTTP job.
+    pub async fn add(&self, handle: HttpJobHandle) {
+        let mut jobs = self.jobs.lock().await;
+        jobs.insert(handle.instance_id.clone(), handle);
+    }
+
+    /// Check if we have an HTTP job for this instance.
+    pub async fn has(&self, instance_id: &str) -> bool {
+        let jobs = self.jobs.lock().await;
+        jobs.contains_key(instance_id)
+    }
+
+    /// Remove and return an HTTP job handle.
+    pub async fn remove(&self, instance_id: &str) -> Option<HttpJobHandle> {
+        let mut jobs = self.jobs.lock().await;
+        jobs.remove(instance_id)
+    }
+
+    /// Check all HTTP jobs and return IDs of those that have completed.
+    pub async fn check_completed(&self) -> Vec<String> {
+        let jobs = self.jobs.lock().await;
+        let mut completed = Vec::new();
+
+        for (id, handle) in jobs.iter() {
+            if !handle.is_running().await {
+                completed.push(id.clone());
+            }
+        }
+
+        completed
+    }
+}
+
 /// Single iteration of the factory worker loop.
 async fn factory_worker_one(
     log: &Logger,
     c: &Central,
     executor: &Executor,
-    tracker: &AgentTracker,
+    agent_tracker: &AgentTracker,
+    http_tracker: &HttpJobTracker,
 ) -> Result<()> {
     //
-    // Phase 0: Check for completed agents
+    // Phase 0a: Check for completed agents (process-based)
     //
-    for instance_id in tracker.check_exited().await {
+    for instance_id in agent_tracker.check_exited().await {
         info!(log, "agent exited for instance {}", instance_id);
 
-        if let Some(handle) = tracker.remove(&instance_id).await {
+        if let Some(handle) = agent_tracker.remove(&instance_id).await {
             // Clean up the agent
             executor.cleanup(&handle).await?;
+
+            // Parse instance ID to mark as destroying
+            if let Ok((testbed_name, seq)) = parse_instance_id(&instance_id) {
+                if let Some(i) = c.db.instance_get(&testbed_name, seq)? {
+                    info!(
+                        log,
+                        "marking instance {} for destruction", instance_id
+                    );
+                    c.db.instance_destroy(&i)?;
+                }
+            }
+        }
+    }
+
+    //
+    // Phase 0b: Check for completed HTTP jobs
+    //
+    for instance_id in http_tracker.check_completed().await {
+        info!(log, "HTTP job completed for instance {}", instance_id);
+
+        if let Some(handle) = http_tracker.remove(&instance_id).await {
+            // Clean up the HTTP job (get results, upload to buildomat)
+            executor.cleanup_http(&handle, &c.client).await?;
 
             // Parse instance ID to mark as destroying
             if let Ok((testbed_name, seq)) = parse_instance_id(&instance_id) {
@@ -127,11 +195,18 @@ async fn factory_worker_one(
     //
     for i in c.db.active_instances()? {
         if i.should_teardown() {
-            // Instance is being torn down - make sure agent is stopped
-            if tracker.has(&i.id()).await {
-                if let Some(handle) = tracker.remove(&i.id()).await {
+            // Instance is being torn down - make sure job is stopped
+            // Check both agent and HTTP trackers
+            if agent_tracker.has(&i.id()).await {
+                if let Some(handle) = agent_tracker.remove(&i.id()).await {
                     info!(log, "stopping agent for teardown"; "instance" => i.id());
                     executor.cleanup(&handle).await?;
+                }
+            }
+            if http_tracker.has(&i.id()).await {
+                if let Some(handle) = http_tracker.remove(&i.id()).await {
+                    info!(log, "stopping HTTP job for teardown"; "instance" => i.id());
+                    handle.kill().await?;
                 }
             }
             // Mark as fully destroyed
@@ -313,30 +388,58 @@ async fn factory_worker_one(
                     w.id
                 );
 
-                // Start agent for this instance
-                let start_result = if testbed.is_local() {
-                    info!(log, "starting local agent"; "instance" => i.id());
-                    executor.start_local(&i, testbed).await
-                } else {
-                    info!(log, "starting SSH agent"; "instance" => i.id(), "host" => &testbed.host);
-                    executor.start_ssh(&i, testbed).await
-                };
+                // Start job for this instance
+                // Use HTTP dispatch if configured, otherwise agent mode
+                if testbed.uses_http_dispatch() {
+                    info!(log, "starting HTTP dispatch";
+                        "instance" => i.id(),
+                        "url" => &testbed.sp_runner_url);
 
-                match start_result {
-                    Ok(handle) => {
-                        info!(log, "agent started for instance {}", i.id());
-                        tracker.add(handle).await;
-                        c.db.instance_mark_running(&i)?;
+                    match executor.start_http(&i, testbed, &c.client).await {
+                        Ok(handle) => {
+                            info!(
+                                log,
+                                "HTTP job started for instance {}",
+                                i.id()
+                            );
+                            http_tracker.add(handle).await;
+                            c.db.instance_mark_running(&i)?;
+                        }
+                        Err(e) => {
+                            error!(
+                                log,
+                                "failed to start HTTP job for instance {}: {:?}",
+                                i.id(),
+                                e
+                            );
+                            c.db.instance_destroy(&i)?;
+                        }
                     }
-                    Err(e) => {
-                        error!(
-                            log,
-                            "failed to start agent for instance {}: {:?}",
-                            i.id(),
-                            e
-                        );
-                        // Mark instance for destruction
-                        c.db.instance_destroy(&i)?;
+                } else {
+                    // Agent mode (local or SSH)
+                    let start_result = if testbed.is_local() {
+                        info!(log, "starting local agent"; "instance" => i.id());
+                        executor.start_local(&i, testbed).await
+                    } else {
+                        info!(log, "starting SSH agent"; "instance" => i.id(), "host" => &testbed.host);
+                        executor.start_ssh(&i, testbed).await
+                    };
+
+                    match start_result {
+                        Ok(handle) => {
+                            info!(log, "agent started for instance {}", i.id());
+                            agent_tracker.add(handle).await;
+                            c.db.instance_mark_running(&i)?;
+                        }
+                        Err(e) => {
+                            error!(
+                                log,
+                                "failed to start agent for instance {}: {:?}",
+                                i.id(),
+                                e
+                            );
+                            c.db.instance_destroy(&i)?;
+                        }
                     }
                 }
             } else {
@@ -359,15 +462,23 @@ pub async fn factory_worker(c: Arc<Central>) -> Result<()> {
 
     let delay = Duration::from_secs(7);
 
-    // Create executor and tracker
+    // Create executor and trackers
     let executor_config = ExecutorConfig::from_central(&c);
     let executor = Executor::new(executor_config, log.clone());
-    let tracker = AgentTracker::new();
+    let agent_tracker = AgentTracker::new();
+    let http_tracker = HttpJobTracker::new();
 
     info!(log, "start factory worker task");
 
     loop {
-        if let Err(e) = factory_worker_one(&log, &c, &executor, &tracker).await
+        if let Err(e) = factory_worker_one(
+            &log,
+            &c,
+            &executor,
+            &agent_tracker,
+            &http_tracker,
+        )
+        .await
         {
             error!(log, "factory worker error: {:?}", e);
         }

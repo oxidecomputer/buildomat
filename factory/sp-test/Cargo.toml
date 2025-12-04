@@ -9,8 +9,11 @@ buildomat-common = { path = "../../common" }
 buildomat-database = { path = "../../database" }
 buildomat-client = { path = "../../client" }
 buildomat-types = { path = "../../types" }
+sp-runner-client = { path = "../../client/sp-runner" }
 
 anyhow = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
 chrono = { workspace = true }
 getopts = { workspace = true }
 sea-query = { workspace = true }

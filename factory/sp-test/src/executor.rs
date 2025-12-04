@@ -2,17 +2,25 @@
  * Copyright 2025 Oxide Computer Company
  */
 
-//! Agent Execution
+//! Job Execution
 //!
-//! This module handles starting and monitoring the buildomat-agent for
-//! test execution on testbeds.
+//! This module handles starting and monitoring test jobs on testbeds.
 //!
 //! # Execution Modes
 //!
-//! - **Local**: Agent runs directly on the factory host (for development on illumos)
-//! - **SSH**: Agent runs on a remote testbed host via SSH (for cross-platform dev)
+//! - **HTTP**: Dispatches to sp-runner service via HTTP API (preferred for production)
+//! - **Local**: Runs buildomat-agent directly on factory host (development on illumos)
+//! - **SSH**: Runs buildomat-agent on remote host via SSH (cross-platform dev)
 //!
-//! # Local Mode
+//! # HTTP Mode
+//!
+//! In HTTP mode, the factory:
+//! 1. Downloads artifacts from buildomat storage to local work directory
+//! 2. Calls sp-runner's HTTP API to submit the job
+//! 3. Polls for job completion via HTTP
+//! 4. Uploads results back to buildomat storage
+//!
+//! # Local Mode (Agent)
 //!
 //! In local mode, the factory:
 //! 1. Creates a temporary working directory for the agent
@@ -21,7 +29,7 @@
 //! 4. Monitors the process for completion
 //! 5. Cleans up the working directory
 //!
-//! # SSH Mode
+//! # SSH Mode (Agent)
 //!
 //! In SSH mode, the factory:
 //! 1. SSHes to the remote host and creates work directory
@@ -30,11 +38,14 @@
 //! 4. When SSH session exits, agent has completed
 //! 5. Cleans up remote work directory
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use anyhow::{Context, Result, bail};
-use slog::{Logger, debug, info, warn};
+use buildomat_common::genkey;
+use futures::StreamExt;
+use slog::{Logger, debug, error, info, warn};
+use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
@@ -137,7 +148,71 @@ impl AgentHandle {
     }
 }
 
-/// Executor for running agents.
+/// Handle for an HTTP-dispatched job.
+///
+/// Unlike [`AgentHandle`] which monitors a child process, this handle
+/// tracks a job submitted to sp-runner's HTTP API. The job runs on
+/// sp-runner, and we poll for completion via HTTP.
+pub struct HttpJobHandle {
+    /// Instance this job is running for
+    pub instance_id: String,
+
+    /// Testbed name (kept for future logging/debugging)
+    #[allow(dead_code)]
+    pub testbed_name: String,
+
+    /// sp-runner job ID
+    pub job_id: String,
+
+    /// Working directory for this job (local to factory)
+    pub work_dir: PathBuf,
+
+    /// Buildomat job ID (for result uploads)
+    pub buildomat_job_id: Option<String>,
+
+    /// Worker token for buildomat API (for result uploads)
+    worker_token: String,
+
+    /// Buildomat server URL
+    baseurl: String,
+
+    /// sp-runner client for polling
+    client: sp_runner_client::Client,
+
+    /// Logger for this job
+    log: Logger,
+}
+
+impl HttpJobHandle {
+    /// Check if the job is still running by polling sp-runner.
+    pub async fn is_running(&self) -> bool {
+        match self.client.get_status(&self.job_id).await {
+            Ok(status) => !status.is_terminal(),
+            Err(e) => {
+                // Log error but treat as "not running" to trigger cleanup
+                debug!(self.log, "failed to poll job status";
+                    "job_id" => &self.job_id,
+                    "error" => %e);
+                false
+            }
+        }
+    }
+
+    /// Get the final result from sp-runner.
+    pub async fn get_result(
+        &self,
+    ) -> Result<sp_runner_client::JobResultResponse> {
+        self.client.get_result(&self.job_id).await
+    }
+
+    /// No-op kill for HTTP jobs - we don't have a way to cancel remotely yet.
+    pub async fn kill(&self) -> Result<()> {
+        // TODO: Add cancel endpoint to sp-runner API
+        Ok(())
+    }
+}
+
+/// Executor for running jobs.
 pub struct Executor {
     config: ExecutorConfig,
     log: Logger,
@@ -268,14 +343,25 @@ impl Executor {
             "instance" => &instance_id
         );
 
+        // Step 0: Clean up any leftover ZFS datasets from previous runs
+        // The agent creates rpool/input and will fail if it already exists
+        debug!(self.log, "cleaning up ZFS datasets"; "instance" => &instance_id);
+        let _ = Command::new("pfexec")
+            .args(["zfs", "destroy", "-r", "rpool/input"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await;
+
         // Step 1: Install the agent
         // The agent install command registers with the server and creates config
         info!(self.log, "installing agent"; "instance" => &instance_id);
 
-        let install_status = Command::new(&self.config.agent_path)
+        // Use pfexec for privilege elevation - agent needs root for /usr/bin/bmat
+        // Skip -N nodename setting since it's optional
+        let install_status = Command::new("pfexec")
+            .arg(&self.config.agent_path)
             .arg("install")
-            .arg("-N")
-            .arg(&testbed.name) // Use testbed name as nodename
             .arg(&self.config.baseurl)
             .arg(&instance.bootstrap)
             .env("HOME", &work_dir)
@@ -298,9 +384,11 @@ impl Executor {
         info!(self.log, "agent installed successfully"; "instance" => &instance_id);
 
         // Step 2: Start the agent running
+        // Use pfexec for privilege elevation - agent may need root
         info!(self.log, "starting agent run"; "instance" => &instance_id);
 
-        let child = Command::new(&self.config.agent_path)
+        let child = Command::new("pfexec")
+            .arg(&self.config.agent_path)
             .arg("run")
             .env("HOME", &work_dir)
             .env("BUILDOMAT_OPT", opt_dir.to_str().unwrap_or("/opt/buildomat"))
@@ -342,8 +430,18 @@ impl Executor {
             anyhow::anyhow!("testbed {} has no host configured", testbed.name)
         })?;
 
-        // Default to root user (can be made configurable)
-        let user = "root";
+        // SSH user - from testbed config, environment, or error if not set
+        let user: String = if let Some(u) = testbed.ssh_user.as_deref() {
+            u.to_string()
+        } else if let Ok(u) = std::env::var("USER") {
+            u
+        } else {
+            bail!(
+                "testbed {} has no ssh_user configured and USER env var is not set",
+                testbed.name
+            );
+        };
+        let user = user.as_str();
 
         info!(
             self.log,
@@ -373,9 +471,10 @@ impl Executor {
         info!(self.log, "installing agent via SSH"; "instance" => &instance_id);
 
         // The install script sets up agent config and registers with server
+        // Use pfexec for privilege elevation (agent needs to create /var/run/buildomat.sock)
         let install_script = format!(
             "cd {d} && \
-             HOME={d} \
+             pfexec env HOME={d} \
              BUILDOMAT_OPT={d}/opt/buildomat \
              buildomat-agent install -N {nodename} {baseurl} {bootstrap}",
             d = remote_work_dir,
@@ -406,9 +505,10 @@ impl Executor {
         info!(self.log, "starting agent run via SSH"; "instance" => &instance_id);
 
         // The run script executes the agent and stays connected
+        // Use pfexec for privilege elevation (agent needs /var/run/buildomat.sock)
         let run_script = format!(
             "cd {d} && \
-             HOME={d} \
+             pfexec env HOME={d} \
              BUILDOMAT_OPT={d}/opt/buildomat \
              BUILDOMAT_INPUT={d}/input \
              BUILDOMAT_WORK={d}/work \
@@ -452,6 +552,41 @@ impl Executor {
         // Kill process if still running
         handle.kill().await.ok();
 
+        // Clean up SMF service that agent install creates (illumos only)
+        // This prevents stale agents from respawning after factory teardown
+        debug!(self.log, "cleaning up SMF service"; "instance" => &handle.instance_id);
+        let _ = Command::new("pfexec")
+            .args([
+                "svcadm",
+                "disable",
+                "-s",
+                "svc:/site/buildomat/agent:default",
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await;
+        let _ = Command::new("pfexec")
+            .args(["svccfg", "delete", "svc:/site/buildomat/agent:default"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await;
+        let _ = Command::new("pfexec")
+            .args(["rm", "-f", "/var/svc/manifest/site/buildomat-agent.xml"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await;
+
+        // Clean up ZFS datasets for next run
+        let _ = Command::new("pfexec")
+            .args(["zfs", "destroy", "-r", "rpool/input"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await;
+
         // Optionally remove work directory
         // For now, keep it for debugging
         debug!(
@@ -459,6 +594,463 @@ impl Executor {
             "work directory preserved for debugging";
             "path" => %handle.work_dir.display()
         );
+
+        Ok(())
+    }
+
+    /// Start a job via HTTP dispatch to sp-runner service.
+    ///
+    /// This downloads artifacts from buildomat, submits a job to sp-runner's
+    /// HTTP API, and returns a handle for monitoring completion.
+    ///
+    /// # Arguments
+    ///
+    /// * `instance` - The buildomat instance (contains worker/bootstrap info)
+    /// * `testbed` - Testbed configuration (must have `sp_runner_url` set)
+    /// * `_buildomat_client` - Unused (artifacts downloaded via worker protocol)
+    ///
+    /// # Returns
+    ///
+    /// An `HttpJobHandle` that can be used to poll for completion.
+    pub async fn start_http(
+        &self,
+        instance: &Instance,
+        testbed: &TestbedInfo,
+        _buildomat_client: &buildomat_client::Client,
+    ) -> Result<HttpJobHandle> {
+        let instance_id = instance.id();
+        let sp_runner_url =
+            testbed.sp_runner_url.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "testbed {} does not have sp_runner_url configured",
+                    testbed.name
+                )
+            })?;
+
+        info!(
+            self.log,
+            "starting HTTP dispatch for instance {} on testbed {}",
+            instance_id,
+            testbed.name;
+            "sp_runner_url" => sp_runner_url
+        );
+
+        // Generate a worker token for buildomat API
+        let worker_token = genkey(64);
+
+        // Create work directory for this instance
+        let work_dir = self
+            .config
+            .work_base
+            .join(format!("http-{}", instance_id.replace('/', "_")));
+        let input_dir = work_dir.join("input");
+        let output_dir = work_dir.join("output");
+
+        tokio::fs::create_dir_all(&input_dir)
+            .await
+            .with_context(|| format!("creating input dir {:?}", input_dir))?;
+        tokio::fs::create_dir_all(&output_dir)
+            .await
+            .with_context(|| format!("creating output dir {:?}", output_dir))?;
+
+        info!(
+            self.log,
+            "created work directories";
+            "instance" => &instance_id,
+            "input" => %input_dir.display(),
+            "output" => %output_dir.display()
+        );
+
+        // Download artifacts from buildomat (acting as the worker)
+        let buildomat_job_id = self
+            .download_artifacts(
+                &self.config.baseurl,
+                &instance.bootstrap,
+                &worker_token,
+                &input_dir,
+            )
+            .await
+            .context("downloading artifacts")?;
+
+        // Create sp-runner client
+        let client = sp_runner_client::ClientBuilder::new(sp_runner_url)
+            .build()
+            .context("creating sp-runner client")?;
+
+        // Submit job to sp-runner
+        let request = sp_runner_client::JobSubmitRequest {
+            testbed: testbed.name.clone(),
+            input_dir: input_dir.to_string_lossy().to_string(),
+            output_dir: output_dir.to_string_lossy().to_string(),
+            baseline: testbed.baseline.clone(),
+            test_type: "update-rollback".to_string(),
+            disable_watchdog: false,
+        };
+
+        let job_id = client
+            .submit_job(&request)
+            .await
+            .context("submitting job to sp-runner")?;
+
+        info!(
+            self.log,
+            "submitted job to sp-runner";
+            "instance" => &instance_id,
+            "job_id" => &job_id,
+            "testbed" => &testbed.name,
+            "buildomat_job_id" => &buildomat_job_id
+        );
+
+        Ok(HttpJobHandle {
+            instance_id,
+            testbed_name: testbed.name.clone(),
+            job_id,
+            work_dir,
+            buildomat_job_id,
+            worker_token,
+            baseurl: self.config.baseurl.clone(),
+            client,
+            log: self.log.clone(),
+        })
+    }
+
+    /// Download job artifacts from buildomat storage.
+    ///
+    /// For HTTP dispatch mode, the factory acts as the worker to download
+    /// artifacts. This involves:
+    /// 1. Bootstrapping as the worker using the instance's bootstrap token
+    /// 2. Calling worker_ping() to get the job info and input list
+    /// 3. Downloading each input file via worker_job_input_download()
+    ///
+    /// # Arguments
+    ///
+    /// * `baseurl` - The buildomat server URL
+    /// * `bootstrap` - The bootstrap token from factory_worker_create
+    /// * `worker_token` - Token for authenticating subsequent worker API calls
+    /// * `dest` - Directory to download artifacts into
+    ///
+    /// # Returns
+    ///
+    /// The job ID assigned to this worker (needed for result uploads).
+    async fn download_artifacts(
+        &self,
+        baseurl: &str,
+        bootstrap: &str,
+        worker_token: &str,
+        dest: &Path,
+    ) -> Result<Option<String>> {
+        info!(
+            self.log,
+            "downloading artifacts";
+            "baseurl" => baseurl,
+            "dest" => %dest.display()
+        );
+
+        // Create unauthenticated client for bootstrap
+        let client = buildomat_client::ClientBuilder::new(baseurl)
+            .build()
+            .context("creating buildomat client for bootstrap")?;
+
+        // Bootstrap as the worker
+        let bootstrap_result = client
+            .worker_bootstrap()
+            .body_map(|body| body.bootstrap(bootstrap).token(worker_token))
+            .send()
+            .await
+            .context("worker bootstrap")?;
+
+        let worker_id = bootstrap_result.into_inner().id;
+        info!(self.log, "bootstrapped as worker"; "worker_id" => &worker_id);
+
+        // Create authenticated client for subsequent calls
+        let auth_client = buildomat_client::ClientBuilder::new(baseurl)
+            .bearer_token(worker_token)
+            .build()
+            .context("creating authenticated buildomat client")?;
+
+        // Ping to get job assignment
+        let ping_result =
+            auth_client.worker_ping().send().await.context("worker ping")?;
+        let ping = ping_result.into_inner();
+
+        // Check if we have a job assigned
+        let job = match ping.job {
+            Some(job) => job,
+            None => {
+                warn!(self.log, "no job assigned to worker"; "worker_id" => &worker_id);
+                return Ok(None);
+            }
+        };
+
+        let job_id = job.id.clone();
+        info!(
+            self.log,
+            "job assigned";
+            "job_id" => &job_id,
+            "job_name" => &job.name,
+            "input_count" => job.inputs.len()
+        );
+
+        // Download each input
+        for input in &job.inputs {
+            let input_path = dest.join(&input.name);
+            info!(
+                self.log,
+                "downloading input";
+                "name" => &input.name,
+                "id" => &input.id,
+                "path" => %input_path.display()
+            );
+
+            // Ensure parent directory exists
+            if let Some(parent) = input_path.parent() {
+                if parent != dest {
+                    tokio::fs::create_dir_all(parent).await.with_context(
+                        || format!("creating parent dir {:?}", parent),
+                    )?;
+                }
+            }
+
+            // Download the file
+            let resp = auth_client
+                .worker_job_input_download()
+                .job(&job_id)
+                .input(&input.id)
+                .send()
+                .await
+                .with_context(|| format!("downloading input {}", input.name))?;
+
+            let mut body = resp.into_inner();
+            let mut file = tokio::fs::File::create(&input_path)
+                .await
+                .with_context(|| format!("creating file {:?}", input_path))?;
+
+            let mut total_bytes = 0u64;
+            while let Some(chunk) = body.next().await {
+                let mut chunk = chunk.context("reading chunk")?;
+                total_bytes += chunk.len() as u64;
+                file.write_all_buf(&mut chunk)
+                    .await
+                    .context("writing chunk")?;
+            }
+
+            info!(
+                self.log,
+                "downloaded input";
+                "name" => &input.name,
+                "bytes" => total_bytes
+            );
+        }
+
+        info!(
+            self.log,
+            "artifact download complete";
+            "job_id" => &job_id,
+            "count" => job.inputs.len()
+        );
+
+        Ok(Some(job_id))
+    }
+
+    /// Clean up after an HTTP job has finished.
+    ///
+    /// Uploads results to buildomat storage and cleans up work directory.
+    pub async fn cleanup_http(
+        &self,
+        handle: &HttpJobHandle,
+        _buildomat_client: &buildomat_client::Client,
+    ) -> Result<()> {
+        info!(
+            self.log,
+            "cleaning up HTTP job";
+            "instance" => &handle.instance_id,
+            "job_id" => &handle.job_id
+        );
+
+        // Get job result from sp-runner
+        match handle.get_result().await {
+            Ok(result) => {
+                info!(
+                    self.log,
+                    "job completed";
+                    "instance" => &handle.instance_id,
+                    "outcome" => &result.outcome,
+                    "duration_secs" => result.duration_secs,
+                    "tests_run" => result.tests_run
+                );
+
+                // Upload result files to buildomat (if we have a buildomat job)
+                if let Some(ref buildomat_job_id) = handle.buildomat_job_id {
+                    let output_dir = handle.work_dir.join("output");
+                    if let Err(e) = self
+                        .upload_results(
+                            &handle.baseurl,
+                            &handle.worker_token,
+                            buildomat_job_id,
+                            &output_dir,
+                        )
+                        .await
+                    {
+                        error!(
+                            self.log,
+                            "failed to upload results";
+                            "instance" => &handle.instance_id,
+                            "error" => %e
+                        );
+                    }
+                } else {
+                    debug!(
+                        self.log,
+                        "no buildomat job ID, skipping result upload";
+                        "instance" => &handle.instance_id
+                    );
+                }
+            }
+            Err(e) => {
+                error!(
+                    self.log,
+                    "failed to get job result";
+                    "instance" => &handle.instance_id,
+                    "error" => %e
+                );
+            }
+        }
+
+        // Keep work directory for debugging
+        debug!(
+            self.log,
+            "work directory preserved for debugging";
+            "path" => %handle.work_dir.display()
+        );
+
+        Ok(())
+    }
+
+    /// Upload result files to buildomat storage.
+    ///
+    /// Uses the worker protocol to upload output files:
+    /// 1. Read file in chunks (5MB each)
+    /// 2. Upload each chunk via worker_job_upload_chunk()
+    /// 3. Register the file via worker_job_add_output()
+    ///
+    /// # Arguments
+    ///
+    /// * `baseurl` - Buildomat server URL
+    /// * `worker_token` - Token for worker API authentication
+    /// * `job_id` - Buildomat job ID
+    /// * `output_dir` - Directory containing output files
+    async fn upload_results(
+        &self,
+        baseurl: &str,
+        worker_token: &str,
+        job_id: &str,
+        output_dir: &Path,
+    ) -> Result<()> {
+        // Create authenticated client
+        let client = buildomat_client::ClientBuilder::new(baseurl)
+            .bearer_token(worker_token)
+            .build()
+            .context("creating buildomat client for uploads")?;
+
+        // Upload known result files
+        for name in ["test-report.json", "test-summary.json"] {
+            let path = output_dir.join(name);
+            if !path.exists() {
+                debug!(self.log, "result file not found, skipping"; "name" => name);
+                continue;
+            }
+
+            info!(self.log, "uploading result file"; "name" => name);
+
+            // Read file and get size
+            let metadata = tokio::fs::metadata(&path)
+                .await
+                .with_context(|| format!("stat {:?}", path))?;
+            let size = metadata.len();
+
+            // Read file in chunks and upload each
+            let mut file = tokio::fs::File::open(&path)
+                .await
+                .with_context(|| format!("open {:?}", path))?;
+
+            let chunk_size = 5 * 1024 * 1024; // 5MB chunks
+            let mut chunks = Vec::new();
+            let mut total_read = 0u64;
+
+            loop {
+                use tokio::io::AsyncReadExt;
+
+                let mut buf = vec![0u8; chunk_size];
+                let n = file
+                    .read(&mut buf)
+                    .await
+                    .with_context(|| format!("read {:?}", path))?;
+
+                if n == 0 {
+                    break;
+                }
+
+                buf.truncate(n);
+                total_read += n as u64;
+
+                // Upload chunk
+                let chunk_result = client
+                    .worker_job_upload_chunk()
+                    .job(job_id)
+                    .body(bytes::Bytes::from(buf))
+                    .send()
+                    .await
+                    .with_context(|| format!("uploading chunk for {}", name))?;
+
+                chunks.push(chunk_result.into_inner().id);
+            }
+
+            debug!(
+                self.log,
+                "uploaded chunks";
+                "name" => name,
+                "chunks" => chunks.len(),
+                "bytes" => total_read
+            );
+
+            // Register the output file (use random string for commit_id)
+            let commit_id = genkey(26);
+            let add_output = buildomat_client::types::WorkerAddOutput {
+                chunks,
+                path: name.to_string(),
+                size,
+                commit_id,
+            };
+
+            // Poll until complete
+            loop {
+                let result = client
+                    .worker_job_add_output()
+                    .job(job_id)
+                    .body(&add_output)
+                    .send()
+                    .await
+                    .with_context(|| format!("add_output for {}", name))?;
+
+                let result = result.into_inner();
+                if result.complete {
+                    if let Some(e) = result.error {
+                        warn!(
+                            self.log,
+                            "output file error";
+                            "name" => name,
+                            "error" => &e
+                        );
+                    } else {
+                        info!(self.log, "uploaded result file"; "name" => name);
+                    }
+                    break;
+                }
+
+                // Not complete yet, wait and retry
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            }
+        }
 
         Ok(())
     }
