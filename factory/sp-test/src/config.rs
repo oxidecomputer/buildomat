@@ -55,6 +55,26 @@ pub struct ConfigFile {
 #[derive(Deserialize, Debug, Clone)]
 pub struct ConfigFileGeneral {
     pub baseurl: String,
+
+    /// Base directory for agent work directories.
+    /// Defaults to /tmp/buildomat-sp-test or BUILDOMAT_WORK_DIR env var.
+    #[serde(default)]
+    pub work_dir: Option<String>,
+
+    /// Use privilege elevation (pfexec) for agent operations.
+    /// Default: true (for backwards compatibility)
+    ///
+    /// When true:
+    /// - Agent runs with pfexec for root access
+    /// - SMF service is created/cleaned up
+    /// - ZFS datasets are managed
+    ///
+    /// When false:
+    /// - Agent runs as current user
+    /// - All directories must be writable by current user
+    /// - No SMF or ZFS operations
+    #[serde(default = "default_true")]
+    pub use_privilege_elevation: bool,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -106,6 +126,10 @@ pub struct ConfigFileTestbed {
     /// execution mode (either local or SSH depending on `host`).
     #[serde(default)]
     pub sp_runner_url: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_sp_runner_path() -> String {

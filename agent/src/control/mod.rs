@@ -18,7 +18,25 @@ use protocol::{Decoder, FactoryInfo, Message, Payload};
 pub(crate) mod protocol;
 pub(crate) mod server;
 
-pub const SOCKET_PATH: &str = "/var/run/buildomat.sock";
+/// Default socket path for root mode.
+const DEFAULT_SOCKET_PATH: &str = "/var/run/buildomat.sock";
+
+/// Get the control socket path.
+/// In root mode, uses /var/run/buildomat.sock.
+/// In nonroot mode, uses $BUILDOMAT_OPT/run/buildomat.sock.
+pub fn socket_path() -> String {
+    if std::env::var("BUILDOMAT_NONROOT").map(|v| v == "1").unwrap_or(false) {
+        // Nonroot mode - use BUILDOMAT_OPT-based path
+        let opt_base = std::env::var("BUILDOMAT_OPT")
+            .unwrap_or_else(|_| "/opt/buildomat".to_string());
+        format!("{}/run/buildomat.sock", opt_base)
+    } else {
+        DEFAULT_SOCKET_PATH.to_string()
+    }
+}
+
+// Keep constant for backward compatibility but prefer socket_path() function
+pub const _SOCKET_PATH: &str = DEFAULT_SOCKET_PATH;
 
 struct Stuff {
     us: Option<UnixStream>,
@@ -28,7 +46,7 @@ struct Stuff {
 
 impl Stuff {
     async fn connect(&mut self) -> Result<()> {
-        self.us = Some(UnixStream::connect(SOCKET_PATH).await?);
+        self.us = Some(UnixStream::connect(&socket_path()).await?);
         self.dec = Some(Decoder::new());
         Ok(())
     }

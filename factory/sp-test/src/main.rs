@@ -33,6 +33,7 @@ use slog::{Logger, info};
 mod config;
 mod db;
 mod executor;
+mod paths;
 mod testbed;
 mod worker;
 

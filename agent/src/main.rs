@@ -44,15 +44,97 @@ struct Agent {
     log: Logger,
 }
 
-const CONFIG_PATH: &str = "/opt/buildomat/etc/agent.json";
-const JOB_PATH: &str = "/opt/buildomat/etc/job.json";
-const AGENT: &str = "/opt/buildomat/lib/agent";
+/// Default base directory for buildomat agent files.
+/// Can be overridden via BUILDOMAT_OPT environment variable.
+const DEFAULT_OPT_BASE: &str = "/opt/buildomat";
 const INPUT_PATH: &str = "/input";
 const CONTROL_PROGRAM: &str = "bmat";
+
+/// Check if running in non-root mode.
+/// Non-root mode is enabled by setting BUILDOMAT_NONROOT=1.
+/// In this mode, the agent skips operations that require root:
+/// - No /usr/bin/bmat installation (uses $BUILDOMAT_OPT/bin/bmat instead)
+/// - No ZFS dataset creation
+/// - No SMF/systemd service management
+/// - Jobs run as the current user, not root
+fn is_nonroot() -> bool {
+    env::var("BUILDOMAT_NONROOT").map(|v| v == "1").unwrap_or(false)
+}
+
+/// Get the path to the control program (bmat).
+/// In root mode, this is /usr/bin/bmat.
+/// In nonroot mode, this is $BUILDOMAT_OPT/bin/bmat.
+fn control_program_path() -> PathBuf {
+    if is_nonroot() {
+        opt_base().join("bin").join(CONTROL_PROGRAM)
+    } else {
+        PathBuf::from(format!("/usr/bin/{CONTROL_PROGRAM}"))
+    }
+}
+
+/// Get the base directory for buildomat agent files.
+/// Uses BUILDOMAT_OPT env var if set, otherwise defaults to /opt/buildomat.
+fn opt_base() -> PathBuf {
+    env::var("BUILDOMAT_OPT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(DEFAULT_OPT_BASE))
+}
+
+/// Path to the agent configuration file.
+fn config_path() -> PathBuf {
+    opt_base().join("etc/agent.json")
+}
+
+/// Path to the job state file (indicates job in progress).
+fn job_path() -> PathBuf {
+    opt_base().join("etc/job.json")
+}
+
+/// Path to the job completion marker file.
+fn job_done_path() -> PathBuf {
+    opt_base().join("etc/job-done.json")
+}
+
+/// Path to the agent binary.
+fn agent_path() -> PathBuf {
+    opt_base().join("lib/agent")
+}
+
+/// Mark job as complete by renaming job.json to job-done.json.
+/// This allows subsequent agent runs to detect that the previous job
+/// completed successfully rather than crashed.
+fn mark_job_done(log: &Logger) {
+    let job_file = job_path();
+    let done_file = job_done_path();
+
+    if job_file.exists() {
+        match std::fs::rename(&job_file, &done_file) {
+            Ok(()) => {
+                info!(log, "marked job as done";
+                    "from" => %job_file.display(),
+                    "to" => %done_file.display());
+            }
+            Err(e) => {
+                // Non-fatal - the job still completed
+                error!(log, "failed to mark job done";
+                    "from" => %job_file.display(),
+                    "to" => %done_file.display(),
+                    "error" => %e);
+            }
+        }
+    }
+}
+
 const SHADOW: &str = "/etc/shadow";
+
+/// Path to the SMF method script (illumos).
+#[cfg(target_os = "illumos")]
+fn method_path() -> PathBuf {
+    opt_base().join("lib/start.sh")
+}
+
 #[cfg(target_os = "illumos")]
 mod os_constants {
-    pub const METHOD: &str = "/opt/buildomat/lib/start.sh";
     pub const MANIFEST: &str = "/var/svc/manifest/site/buildomat-agent.xml";
     pub const INPUT_DATASET: &str = "rpool/input";
 }
@@ -642,9 +724,19 @@ impl ClientWrap {
          */
         cmd.env_clear();
 
-        cmd.env("HOME", "/root");
-        cmd.env("USER", "root");
-        cmd.env("LOGNAME", "root");
+        // In nonroot mode, use current user's environment instead of root
+        if is_nonroot() {
+            let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+            let user =
+                env::var("USER").unwrap_or_else(|_| "nobody".to_string());
+            cmd.env("HOME", &home);
+            cmd.env("USER", &user);
+            cmd.env("LOGNAME", &user);
+        } else {
+            cmd.env("HOME", "/root");
+            cmd.env("USER", "root");
+            cmd.env("LOGNAME", "root");
+        }
         cmd.env("TZ", "UTC");
         cmd.env(
             "PATH",
@@ -654,11 +746,13 @@ impl ClientWrap {
         cmd.env("LC_ALL", "en_US.UTF-8");
 
         /*
-         * Run the diagnostic script as root:
+         * Run the diagnostic script as root (skip uid/gid in nonroot mode):
          */
         cmd.current_dir("/");
-        cmd.uid(0);
-        cmd.gid(0);
+        if !is_nonroot() {
+            cmd.uid(0);
+            cmd.gid(0);
+        }
 
         match exec::run_diagnostic(cmd, name) {
             Ok(c) => Some(c),
@@ -1047,41 +1141,48 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
     }
 
     /*
-     * Write /opt/buildomat/etc/agent.json with this configuration.
+     * Write agent.json with this configuration.
+     * Path is based on BUILDOMAT_OPT env var or defaults to /opt/buildomat.
      */
-    make_dirs_for(CONFIG_PATH)?;
-    rmfile(CONFIG_PATH)?;
+    let cfg_path = config_path();
+    make_dirs_for(&cfg_path)?;
+    rmfile(&cfg_path)?;
     let cf = ConfigFile { baseurl, bootstrap, token: genkey(64) };
-    store(CONFIG_PATH, &cf)?;
+    store(&cfg_path, &cf)?;
 
     /*
      * Copy the agent binary into a permanent home.
      */
     let exe = env::current_exe()?;
-    make_dirs_for(AGENT)?;
-    rmfile(AGENT)?;
-    std::fs::copy(&exe, AGENT)?;
-    make_executable(AGENT)?;
+    let agent = agent_path();
+    make_dirs_for(&agent)?;
+    rmfile(&agent)?;
+    std::fs::copy(&exe, &agent)?;
+    make_executable(&agent)?;
 
     /*
      * Install the agent binary with the control program name in a location in
      * the default PATH so that job programs can find it.
+     * In nonroot mode, we install to $BUILDOMAT_OPT/bin/ instead of /usr/bin/.
      */
-    let cprog = format!("/usr/bin/{CONTROL_PROGRAM}");
+    let cprog = control_program_path();
+    make_dirs_for(&cprog)?;
     rmfile(&cprog)?;
     std::fs::copy(&exe, &cprog)?;
     make_executable(&cprog)?;
 
     #[cfg(target_os = "illumos")]
-    {
+    if !is_nonroot() {
         /*
          * Copy SMF method script and manifest into place.
+         * Skipped in nonroot mode as these require root privileges.
          */
-        let method = include_str!("../smf/start.sh");
-        make_dirs_for(METHOD)?;
-        rmfile(METHOD)?;
-        write_text(METHOD, method)?;
-        make_executable(METHOD)?;
+        let method_content = include_str!("../smf/start.sh");
+        let method = method_path();
+        make_dirs_for(&method)?;
+        rmfile(&method)?;
+        write_text(&method, method_content)?;
+        make_executable(&method)?;
 
         let manifest = include_str!("../smf/agent.xml");
         rmfile(MANIFEST)?;
@@ -1089,6 +1190,7 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
 
         /*
          * Create the input directory.
+         * Skipped in nonroot mode - input dir is provided via BUILDOMAT_INPUT.
          */
         let status = Command::new("/sbin/zfs")
             .arg("create")
@@ -1106,6 +1208,7 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
 
         /*
          * Import SMF service.
+         * Skipped in nonroot mode - agent is run directly by the factory.
          */
         let status = Command::new("/usr/sbin/svccfg")
             .arg("import")
@@ -1121,14 +1224,16 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
     }
 
     #[cfg(target_os = "linux")]
-    {
+    if !is_nonroot() {
         /*
          * Create the input directory.
+         * Skipped in nonroot mode - input dir is provided via BUILDOMAT_INPUT.
          */
         std::fs::create_dir_all(INPUT_PATH)?;
 
         /*
          * Write a systemd unit file for the agent service.
+         * Skipped in nonroot mode - agent is run directly by the factory.
          */
         let unit = include_str!("../systemd/agent.service");
         make_dirs_for(UNIT)?;
@@ -1170,8 +1275,8 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
         let binmd = std::fs::symlink_metadata("/bin")?;
         if binmd.is_dir() {
             std::os::unix::fs::symlink(
-                &format!("../usr/bin/{CONTROL_PROGRAM}"),
-                &format!("/bin/{CONTROL_PROGRAM}"),
+                format!("../usr/bin/{CONTROL_PROGRAM}"),
+                format!("/bin/{CONTROL_PROGRAM}"),
             )?;
         }
     }
@@ -1182,7 +1287,7 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
 async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
     no_args!(l);
 
-    let cf = load::<_, ConfigFile>(CONFIG_PATH)?;
+    let cf = load::<_, ConfigFile>(&config_path())?;
     let log = l.context().log.clone();
 
     info!(log, "agent starting"; "baseurl" => &cf.baseurl);
@@ -1235,9 +1340,24 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
      * general can really handle tasks being started a second time.  If we find
      * any evidence that we've done this before, we must report it to the
      * central server and do nothing else.
+     *
+     * Note: job-done.json indicates a completed job and can be safely ignored
+     * (it will be cleaned up when a new job starts). Only job.json indicates
+     * an incomplete job that crashed.
      */
-    if PathBuf::from(JOB_PATH).try_exists()? {
-        error!(log, "found previously assigned job; reporting failure");
+    let job_file = job_path();
+    let job_done_file = job_done_path();
+
+    // Clean up any stale job-done.json from previous completed jobs
+    if job_done_file.try_exists()? {
+        info!(log, "removing stale job-done.json from previous run";
+            "path" => %job_done_file.display());
+        let _ = std::fs::remove_file(&job_done_file);
+    }
+
+    if job_file.try_exists()? {
+        error!(log, "found previously assigned job; reporting failure";
+            "path" => %job_file.display());
 
         /*
          * Report this condition to the server:
@@ -1374,7 +1494,7 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                                     .create_new(true)
                                     .create(false)
                                     .write(true)
-                                    .open(JOB_PATH)?;
+                                    .open(&job_file)?;
                                 jf.write_all(&diag)?;
                                 jf.flush()?;
                                 jf.sync_all()?;
@@ -1599,11 +1719,21 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                     /*
                      * Absent a request for an entirely clean slate, we
                      * set a few specific environment variables.
-                     * XXX HOME/USER/LOGNAME should probably respect "uid"
+                     * In nonroot mode, use current user's values.
                      */
-                    cmd.env("HOME", "/root");
-                    cmd.env("USER", "root");
-                    cmd.env("LOGNAME", "root");
+                    if is_nonroot() {
+                        let home = env::var("HOME")
+                            .unwrap_or_else(|_| "/tmp".to_string());
+                        let user = env::var("USER")
+                            .unwrap_or_else(|_| "nobody".to_string());
+                        cmd.env("HOME", &home);
+                        cmd.env("USER", &user);
+                        cmd.env("LOGNAME", &user);
+                    } else {
+                        cmd.env("HOME", "/root");
+                        cmd.env("USER", "root");
+                        cmd.env("LOGNAME", "root");
+                    }
                     cmd.env("TZ", "UTC");
                     cmd.env(
                         "PATH",
@@ -1627,10 +1757,16 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                 /*
                  * Each task may be expected to run under a different user
                  * account or with a different working directory.
+                 *
+                 * In nonroot mode, we skip the uid/gid setting and run as the
+                 * current user. This allows testing on persistent testbeds
+                 * without requiring root privileges.
                  */
                 cmd.current_dir(&t.workdir);
-                cmd.uid(t.uid);
-                cmd.gid(t.gid);
+                if !is_nonroot() {
+                    cmd.uid(t.uid);
+                    cmd.gid(t.gid);
+                }
 
                 match exec::run(cmd) {
                     Ok(c) => {
@@ -1808,9 +1944,11 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                         stage = Stage::PostDiagnostics(c, None);
                     } else {
                         cw.diagnostics_complete(false).await;
+                        mark_job_done(&log);
                         stage = Stage::Complete;
                     }
                 } else {
+                    mark_job_done(&log);
                     stage = Stage::Complete;
                     continue;
                 }
@@ -1846,6 +1984,7 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                          */
                         cw.diagnostics_complete(failed.unwrap()).await;
 
+                        mark_job_done(&log);
                         stage = Stage::Complete;
                     }
                     None => {
@@ -1853,6 +1992,7 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                             .await;
                         cw.diagnostics_complete(false).await;
 
+                        mark_job_done(&log);
                         stage = Stage::Complete;
                     }
                 }

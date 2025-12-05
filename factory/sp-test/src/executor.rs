@@ -64,6 +64,10 @@ pub struct ExecutorConfig {
 
     /// Buildomat server URL
     pub baseurl: String,
+
+    /// Use privilege elevation (pfexec) for agent operations.
+    /// When false, agent runs as current user without root.
+    pub use_privilege_elevation: bool,
 }
 
 impl ExecutorConfig {
@@ -79,15 +83,23 @@ impl ExecutorConfig {
                     .unwrap_or_else(|| PathBuf::from("buildomat-agent"))
             });
 
-        // Work directory base
-        let work_base = std::env::var("BUILDOMAT_WORK_DIR")
+        // Work directory base - prefer config, then env var, then default
+        let work_base = c
+            .config
+            .general
+            .work_dir
+            .as_ref()
             .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("/tmp/buildomat-sp-test"));
+            .or_else(|| {
+                std::env::var("BUILDOMAT_WORK_DIR").ok().map(PathBuf::from)
+            })
+            .unwrap_or_else(|| PathBuf::from("/tmp/buildomat-sp-test"));
 
         ExecutorConfig {
             agent_path,
             work_base,
             baseurl: c.config.general.baseurl.clone(),
+            use_privilege_elevation: c.config.general.use_privilege_elevation,
         }
     }
 }
@@ -343,29 +355,61 @@ impl Executor {
             "instance" => &instance_id
         );
 
-        // Step 0: Clean up any leftover ZFS datasets from previous runs
-        // The agent creates rpool/input and will fail if it already exists
-        debug!(self.log, "cleaning up ZFS datasets"; "instance" => &instance_id);
-        let _ = Command::new("pfexec")
-            .args(["zfs", "destroy", "-r", "rpool/input"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await;
+        // Step 0: Clean up any leftover artifacts from previous runs
+        if self.config.use_privilege_elevation {
+            // With privilege elevation, clean up ZFS datasets
+            debug!(self.log, "cleaning up ZFS datasets"; "instance" => &instance_id);
+            let _ = Command::new("pfexec")
+                .args(["zfs", "destroy", "-r", "rpool/input"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .await;
+        }
+
+        // Clean up any leftover job.json from previous runs.
+        // The agent checks for this file and will report failure if it exists,
+        // assuming a previous agent crashed. On persistent machines (not VMs),
+        // this file persists between jobs and must be removed.
+        // Use the configured opt_dir, not hardcoded /opt/buildomat
+        let job_json = opt_dir.join("etc/job.json");
+        if job_json.exists() {
+            info!(self.log, "cleaning up stale job.json"; "instance" => &instance_id, "path" => %job_json.display());
+            let _ = tokio::fs::remove_file(&job_json).await;
+        }
+        // Also clean up job-done.json (completed job marker)
+        let job_done_json = opt_dir.join("etc/job-done.json");
+        if job_done_json.exists() {
+            debug!(self.log, "cleaning up job-done.json"; "instance" => &instance_id);
+            let _ = tokio::fs::remove_file(&job_done_json).await;
+        }
 
         // Step 1: Install the agent
         // The agent install command registers with the server and creates config
         info!(self.log, "installing agent"; "instance" => &instance_id);
 
-        // Use pfexec for privilege elevation - agent needs root for /usr/bin/bmat
-        // Skip -N nodename setting since it's optional
-        let install_status = Command::new("pfexec")
-            .arg(&self.config.agent_path)
+        // Conditionally use pfexec for privilege elevation
+        let mut install_cmd = if self.config.use_privilege_elevation {
+            let mut cmd = Command::new("pfexec");
+            cmd.arg(&self.config.agent_path);
+            cmd
+        } else {
+            Command::new(&self.config.agent_path)
+        };
+
+        // Set up environment for agent install
+        install_cmd.env("HOME", &work_dir);
+        install_cmd.env("BUILDOMAT_OPT", opt_dir.to_str().unwrap());
+
+        // In non-root mode, tell agent to skip root-requiring operations
+        if !self.config.use_privilege_elevation {
+            install_cmd.env("BUILDOMAT_NONROOT", "1");
+        }
+
+        let install_status = install_cmd
             .arg("install")
             .arg(&self.config.baseurl)
             .arg(&instance.bootstrap)
-            .env("HOME", &work_dir)
-            .env("BUILDOMAT_OPT", opt_dir.to_str().unwrap_or("/opt/buildomat"))
             .current_dir(&work_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -384,16 +428,30 @@ impl Executor {
         info!(self.log, "agent installed successfully"; "instance" => &instance_id);
 
         // Step 2: Start the agent running
-        // Use pfexec for privilege elevation - agent may need root
         info!(self.log, "starting agent run"; "instance" => &instance_id);
 
-        let child = Command::new("pfexec")
-            .arg(&self.config.agent_path)
+        // Conditionally use pfexec for privilege elevation
+        let mut run_cmd = if self.config.use_privilege_elevation {
+            let mut cmd = Command::new("pfexec");
+            cmd.arg(&self.config.agent_path);
+            cmd
+        } else {
+            Command::new(&self.config.agent_path)
+        };
+
+        // Set up environment for agent run
+        run_cmd.env("HOME", &work_dir);
+        run_cmd.env("BUILDOMAT_OPT", opt_dir.to_str().unwrap());
+        run_cmd.env("BUILDOMAT_INPUT", input_dir.to_str().unwrap());
+        run_cmd.env("BUILDOMAT_WORK", output_dir.to_str().unwrap());
+
+        // In non-root mode, tell agent to skip root-requiring operations
+        if !self.config.use_privilege_elevation {
+            run_cmd.env("BUILDOMAT_NONROOT", "1");
+        }
+
+        let child = run_cmd
             .arg("run")
-            .env("HOME", &work_dir)
-            .env("BUILDOMAT_OPT", opt_dir.to_str().unwrap_or("/opt/buildomat"))
-            .env("BUILDOMAT_INPUT", input_dir.to_str().unwrap_or("/input"))
-            .env("BUILDOMAT_WORK", output_dir.to_str().unwrap_or("/work"))
             .current_dir(&work_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -552,40 +610,46 @@ impl Executor {
         // Kill process if still running
         handle.kill().await.ok();
 
-        // Clean up SMF service that agent install creates (illumos only)
-        // This prevents stale agents from respawning after factory teardown
-        debug!(self.log, "cleaning up SMF service"; "instance" => &handle.instance_id);
-        let _ = Command::new("pfexec")
-            .args([
-                "svcadm",
-                "disable",
-                "-s",
-                "svc:/site/buildomat/agent:default",
-            ])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await;
-        let _ = Command::new("pfexec")
-            .args(["svccfg", "delete", "svc:/site/buildomat/agent:default"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await;
-        let _ = Command::new("pfexec")
-            .args(["rm", "-f", "/var/svc/manifest/site/buildomat-agent.xml"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await;
+        // Clean up SMF service and ZFS datasets only when using privilege elevation
+        // These operations require root and are only used in VM-based execution
+        if self.config.use_privilege_elevation {
+            debug!(self.log, "cleaning up SMF service"; "instance" => &handle.instance_id);
+            let _ = Command::new("pfexec")
+                .args([
+                    "svcadm",
+                    "disable",
+                    "-s",
+                    "svc:/site/buildomat/agent:default",
+                ])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .await;
+            let _ = Command::new("pfexec")
+                .args(["svccfg", "delete", "svc:/site/buildomat/agent:default"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .await;
+            let _ = Command::new("pfexec")
+                .args([
+                    "rm",
+                    "-f",
+                    "/var/svc/manifest/site/buildomat-agent.xml",
+                ])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .await;
 
-        // Clean up ZFS datasets for next run
-        let _ = Command::new("pfexec")
-            .args(["zfs", "destroy", "-r", "rpool/input"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await;
+            // Clean up ZFS datasets for next run
+            let _ = Command::new("pfexec")
+                .args(["zfs", "destroy", "-r", "rpool/input"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .await;
+        }
 
         // Optionally remove work directory
         // For now, keep it for debugging

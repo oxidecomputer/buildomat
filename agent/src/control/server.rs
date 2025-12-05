@@ -16,8 +16,8 @@ use tokio::{
 };
 
 use super::{
-    SOCKET_PATH,
     protocol::{Decoder, Message, Payload},
+    socket_path,
 };
 
 #[derive(Debug)]
@@ -48,17 +48,24 @@ impl Request {
 pub fn listen() -> Result<Receiver<Request>> {
     /*
      * Create the UNIX socket that the control program will use to contact the
-     * agent.
+     * agent. The socket path is configurable via BUILDOMAT_NONROOT env var.
      */
-    std::fs::remove_file(SOCKET_PATH).ok();
-    let ul = UnixListener::bind(SOCKET_PATH)?;
+    let sock_path = socket_path();
+
+    // Create parent directory if it doesn't exist (needed for nonroot mode)
+    if let Some(parent) = std::path::Path::new(&sock_path).parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+
+    std::fs::remove_file(&sock_path).ok();
+    let ul = UnixListener::bind(&sock_path)?;
 
     /*
      * Allow everyone to connect:
      */
-    let mut perm = std::fs::metadata(SOCKET_PATH)?.permissions();
+    let mut perm = std::fs::metadata(&sock_path)?.permissions();
     perm.set_mode(0o777);
-    std::fs::set_permissions(SOCKET_PATH, perm)?;
+    std::fs::set_permissions(&sock_path, perm)?;
 
     /*
      * Create channel to hand requests back to the main loop.
