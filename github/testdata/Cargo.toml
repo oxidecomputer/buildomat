@@ -10,6 +10,7 @@ doctest = false
 [dependencies]
 buildomat-common = { path = "../../common" }
 buildomat-github-database = { path = "../database" }
+buildomat-jobsh = { path = "../../jobsh" }
 
 anyhow = { workspace = true }
 serde = { workspace = true }

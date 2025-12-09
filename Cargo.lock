@@ -1041,6 +1041,7 @@ dependencies = [
  "anyhow",
  "buildomat-common",
  "buildomat-github-database",
+ "buildomat-jobsh",
  "serde",
  "serde_json",
  "toml",

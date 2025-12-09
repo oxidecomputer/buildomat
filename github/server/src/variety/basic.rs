@@ -8,7 +8,9 @@ use buildomat_client::types::{DependSubmit, JobOutput};
 use buildomat_common::*;
 use buildomat_download::PotentialRange;
 use buildomat_github_database::{types::*, Database};
-use buildomat_jobsh::variety::basic::{output_sse, output_table, BasicConfig};
+use buildomat_jobsh::variety::basic::{
+    output_sse, output_table, BasicConfig, BasicConfigPublish,
+};
 use chrono::SecondsFormat;
 use dropshot::Body;
 use futures::{FutureExt, StreamExt, TryStreamExt};
@@ -1315,6 +1317,7 @@ pub(crate) async fn cancel(
 pub mod test {
     use super::*;
     use buildomat_github_testdata::*;
+    use buildomat_jobsh::jobfile::JobFile;
 
     #[test]
     fn basic_parse_basic() -> Result<()> {
