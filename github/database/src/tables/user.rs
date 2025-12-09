@@ -123,4 +123,34 @@ mod test {
             assert_eq!(UserType::from_str(s).unwrap(), *e);
         }
     }
+
+    /*
+     * Test conversion from GitHub API strings.
+     */
+    const GITHUB_USER_TYPES: &[(&str, UserType)] = &[
+        ("User", UserType::User),
+        ("Bot", UserType::Bot),
+        ("Organization", UserType::Organisation),
+    ];
+
+    #[test]
+    fn user_type_from_github_str() {
+        for (s, e) in GITHUB_USER_TYPES {
+            assert_eq!(UserType::from_github_str(s).unwrap(), *e);
+        }
+    }
+
+    #[test]
+    fn user_type_from_github_str_invalid() {
+        let invalid_types = &["user", "bot", "org", "Invalid", "", "Org"];
+        for invalid in invalid_types {
+            let err = UserType::from_github_str(invalid).unwrap_err();
+            assert!(
+                err.to_string().contains("invalid user type"),
+                "expected invalid user type error for {:?}, got: {}",
+                invalid,
+                err
+            );
+        }
+    }
 }

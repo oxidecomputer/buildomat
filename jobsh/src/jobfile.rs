@@ -280,3 +280,282 @@ impl JobFileSet {
         Ok(jobfiles)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn make_job(name: &str) -> String {
+        format!(
+            "#!/bin/bash\n\
+            #: name = \"{name}\"\n\
+            #: variety = \"basic\"\n\
+            echo hello\n"
+        )
+    }
+
+    fn make_job_with_dep(name: &str, dep_name: &str, dep_job: &str) -> String {
+        format!(
+            "#!/bin/bash\n\
+            #: name = \"{name}\"\n\
+            #: variety = \"basic\"\n\
+            #: [dependencies.{dep_name}]\n\
+            #: job = \"{dep_job}\"\n\
+            echo hello\n"
+        )
+    }
+
+    #[test]
+    fn jobfileset_single_job() {
+        let mut jfs = JobFileSet::new(10);
+        jfs.load(&make_job("test-job"), "jobs/test.sh").unwrap();
+        let jobs = jfs.complete().unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].name, "test-job");
+    }
+
+    #[test]
+    fn jobfileset_multiple_jobs() {
+        let mut jfs = JobFileSet::new(10);
+        jfs.load(&make_job("job-a"), "jobs/a.sh").unwrap();
+        jfs.load(&make_job("job-b"), "jobs/b.sh").unwrap();
+        jfs.load(&make_job("job-c"), "jobs/c.sh").unwrap();
+        let jobs = jfs.complete().unwrap();
+        assert_eq!(jobs.len(), 3);
+        // Jobs should be sorted by name
+        assert_eq!(jobs[0].name, "job-a");
+        assert_eq!(jobs[1].name, "job-b");
+        assert_eq!(jobs[2].name, "job-c");
+    }
+
+    #[test]
+    fn jobfileset_duplicate_names() {
+        let mut jfs = JobFileSet::new(10);
+        jfs.load(&make_job("same-name"), "jobs/a.sh").unwrap();
+        jfs.load(&make_job("same-name"), "jobs/b.sh").unwrap();
+        let err = jfs.complete().unwrap_err();
+        assert!(
+            err.to_string().contains("used in more than one file"),
+            "expected duplicate name error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn jobfileset_valid_dependency() {
+        let mut jfs = JobFileSet::new(10);
+        jfs.load(&make_job("first-job"), "jobs/first.sh").unwrap();
+        jfs.load(
+            &make_job_with_dep("second-job", "needs", "first-job"),
+            "jobs/second.sh",
+        )
+        .unwrap();
+        let jobs = jfs.complete().unwrap();
+        assert_eq!(jobs.len(), 2);
+    }
+
+    #[test]
+    fn jobfileset_missing_dependency() {
+        let mut jfs = JobFileSet::new(10);
+        jfs.load(
+            &make_job_with_dep("my-job", "needs", "nonexistent-job"),
+            "jobs/my.sh",
+        )
+        .unwrap();
+        let err = jfs.complete().unwrap_err();
+        assert!(
+            err.to_string().contains("not present in the plan"),
+            "expected missing dependency error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn jobfileset_self_dependency_cycle() {
+        // A job that depends on itself
+        let content = "\
+            #!/bin/bash\n\
+            #: name = \"self-ref\"\n\
+            #: variety = \"basic\"\n\
+            #: [dependencies.me]\n\
+            #: job = \"self-ref\"\n\
+            echo hello\n";
+        let mut jfs = JobFileSet::new(10);
+        jfs.load(content, "jobs/self.sh").unwrap();
+        let err = jfs.complete().unwrap_err();
+        assert!(
+            err.to_string().contains("dependency cycle"),
+            "expected cycle error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn jobfileset_two_job_cycle() {
+        // A -> B -> A
+        let job_a = "\
+            #!/bin/bash\n\
+            #: name = \"job-a\"\n\
+            #: variety = \"basic\"\n\
+            #: [dependencies.needs_b]\n\
+            #: job = \"job-b\"\n\
+            echo a\n";
+        let job_b = "\
+            #!/bin/bash\n\
+            #: name = \"job-b\"\n\
+            #: variety = \"basic\"\n\
+            #: [dependencies.needs_a]\n\
+            #: job = \"job-a\"\n\
+            echo b\n";
+        let mut jfs = JobFileSet::new(10);
+        jfs.load(job_a, "jobs/a.sh").unwrap();
+        jfs.load(job_b, "jobs/b.sh").unwrap();
+        let err = jfs.complete().unwrap_err();
+        assert!(
+            err.to_string().contains("dependency cycle"),
+            "expected cycle error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn jobfileset_diamond_dependency_ok() {
+        // Diamond: D depends on B and C, both depend on A
+        // This is NOT a cycle and should succeed
+        let job_a = make_job("job-a");
+        let job_b = make_job_with_dep("job-b", "needs", "job-a");
+        let job_c = make_job_with_dep("job-c", "needs", "job-a");
+        let job_d = "\
+            #!/bin/bash\n\
+            #: name = \"job-d\"\n\
+            #: variety = \"basic\"\n\
+            #: [dependencies.needs_b]\n\
+            #: job = \"job-b\"\n\
+            #: [dependencies.needs_c]\n\
+            #: job = \"job-c\"\n\
+            echo d\n";
+
+        let mut jfs = JobFileSet::new(10);
+        jfs.load(&job_a, "jobs/a.sh").unwrap();
+        jfs.load(&job_b, "jobs/b.sh").unwrap();
+        jfs.load(&job_c, "jobs/c.sh").unwrap();
+        jfs.load(job_d, "jobs/d.sh").unwrap();
+        let jobs = jfs.complete().unwrap();
+        assert_eq!(jobs.len(), 4);
+    }
+
+    #[test]
+    fn jobfileset_non_sh_extension() {
+        let mut jfs = JobFileSet::new(10);
+        let err = jfs.load(&make_job("test"), "jobs/test.txt").unwrap_err();
+        assert!(
+            err.to_string().contains("unexpected item"),
+            "expected extension error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn jobfileset_too_many_jobs() {
+        let mut jfs = JobFileSet::new(2);
+        jfs.load(&make_job("job-1"), "jobs/1.sh").unwrap();
+        jfs.load(&make_job("job-2"), "jobs/2.sh").unwrap();
+        jfs.load(&make_job("job-3"), "jobs/3.sh").unwrap();
+        let err = jfs.load(&make_job("job-4"), "jobs/4.sh").unwrap_err();
+        assert!(
+            err.to_string().contains("too many job files"),
+            "expected too many jobs error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn jobfile_missing_shebang() {
+        let content = "\
+            #: name = \"test\"\n\
+            #: variety = \"basic\"\n\
+            echo hello\n";
+        let err = JobFile::parse_content_at_path(content, "test.sh").unwrap_err();
+        assert!(
+            err.to_string().contains("interpreter line"),
+            "expected shebang error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn jobfile_misspelled_enable_enabled() {
+        let content = "\
+            #!/bin/bash\n\
+            #: name = \"test\"\n\
+            #: variety = \"basic\"\n\
+            #: enabled = true\n\
+            echo hello\n";
+        let err = JobFile::parse_content_at_path(content, "test.sh").unwrap_err();
+        assert!(
+            err.to_string().contains("use \"enable\""),
+            "expected misspelling error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn jobfile_misspelled_enable_disabled() {
+        let content = "\
+            #!/bin/bash\n\
+            #: name = \"test\"\n\
+            #: variety = \"basic\"\n\
+            #: disabled = true\n\
+            echo hello\n";
+        let err = JobFile::parse_content_at_path(content, "test.sh").unwrap_err();
+        assert!(
+            err.to_string().contains("use \"enable\""),
+            "expected misspelling error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn jobfile_with_dependencies() {
+        let content = "\
+            #!/bin/bash\n\
+            #: name = \"dependent-job\"\n\
+            #: variety = \"basic\"\n\
+            #: [dependencies.build]\n\
+            #: job = \"build-job\"\n\
+            #: [dependencies.test]\n\
+            #: job = \"test-job\"\n\
+            echo hello\n";
+        let jf = JobFile::parse_content_at_path(content, "test.sh")
+            .unwrap()
+            .unwrap();
+        assert_eq!(jf.dependencies.len(), 2);
+        assert_eq!(jf.dependencies.get("build").unwrap().job, "build-job");
+        assert_eq!(jf.dependencies.get("test").unwrap().job, "test-job");
+    }
+
+    #[test]
+    fn jobfile_empty_content() {
+        // Empty file has no lines, so lines.next() returns None and
+        // TOML parsing fails due to missing required fields
+        let content = "";
+        let err = JobFile::parse_content_at_path(content, "test.sh").unwrap_err();
+        assert!(
+            err.to_string().contains("TOML front matter"),
+            "expected TOML parsing error for empty file, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn jobfile_only_shebang() {
+        // Just a shebang with no frontmatter should fail TOML parsing
+        let content = "#!/bin/bash\n";
+        let err = JobFile::parse_content_at_path(content, "test.sh").unwrap_err();
+        assert!(
+            err.to_string().contains("TOML front matter"),
+            "expected TOML parsing error, got: {}",
+            err
+        );
+    }
+}

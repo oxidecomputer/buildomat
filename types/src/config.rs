@@ -342,6 +342,10 @@ mod test {
         Some(Inheritable::Inherit(ConfigFileInherit { inherit: false }))
     }
 
+    fn yes_inherit() -> Option<Inheritable> {
+        Some(Inheritable::Inherit(ConfigFileInherit { inherit: true }))
+    }
+
     #[test]
     fn base_with_removals() -> Result<()> {
         let base = ConfigFileDiag {
@@ -374,6 +378,93 @@ mod test {
             pre_job_diagnostic_script: None,
             post_job_diagnostic_script: None,
             rpool_disable_sync: None,
+        });
+
+        assert_eq!(loaded, expect);
+        Ok(())
+    }
+
+    #[test]
+    fn explicit_inherit_true() -> Result<()> {
+        // When "inherit: true" is specified, values should be inherited from base
+        let base = ConfigFileDiag {
+            root_password_hash: Some(Inheritable::String("password".into())),
+            root_authorized_keys: Some(Inheritable::String("keys".into())),
+            dump_to_rpool: Some(Inheritable::Num(100)),
+            pre_job_diagnostic_script: Some(Inheritable::String("pre".into())),
+            post_job_diagnostic_script: Some(Inheritable::String(
+                "post".into(),
+            )),
+            rpool_disable_sync: Some(Inheritable::Bool(true)),
+        };
+
+        let over = ConfigFileDiag {
+            root_password_hash: yes_inherit(),
+            root_authorized_keys: yes_inherit(),
+            dump_to_rpool: yes_inherit(),
+            pre_job_diagnostic_script: yes_inherit(),
+            post_job_diagnostic_script: yes_inherit(),
+            rpool_disable_sync: yes_inherit(),
+        };
+
+        let loaded = base.apply_overrides(&over).build()?;
+
+        // inherit: true should pass through base values
+        let expect = FactoryMetadata::V1(FactoryMetadataV1 {
+            addresses: Default::default(),
+            root_password_hash: Some("password".to_string()),
+            root_authorized_keys: Some("keys".to_string()),
+            dump_to_rpool: Some(100),
+            pre_job_diagnostic_script: Some("pre".to_string()),
+            post_job_diagnostic_script: Some("post".to_string()),
+            rpool_disable_sync: Some(true),
+        });
+
+        assert_eq!(loaded, expect);
+        Ok(())
+    }
+
+    #[test]
+    fn mixed_inherit_and_override() -> Result<()> {
+        // Some fields inherit, some override, some block inheritance
+        let base = ConfigFileDiag {
+            root_password_hash: Some(Inheritable::String("base-password".into())),
+            root_authorized_keys: Some(Inheritable::String("base-keys".into())),
+            dump_to_rpool: Some(Inheritable::Num(100)),
+            pre_job_diagnostic_script: Some(Inheritable::String("base-pre".into())),
+            post_job_diagnostic_script: Some(Inheritable::String(
+                "base-post".into(),
+            )),
+            rpool_disable_sync: Some(Inheritable::Bool(false)),
+        };
+
+        let over = ConfigFileDiag {
+            // Explicitly inherit from base
+            root_password_hash: yes_inherit(),
+            // Override with new value
+            root_authorized_keys: Some(Inheritable::String("new-keys".into())),
+            // Block inheritance (no value)
+            dump_to_rpool: no_inherit(),
+            // Implicit inherit (None = inherit from base)
+            pre_job_diagnostic_script: None,
+            // Override with new value
+            post_job_diagnostic_script: Some(Inheritable::String(
+                "new-post".into(),
+            )),
+            // Override boolean
+            rpool_disable_sync: Some(Inheritable::Bool(true)),
+        };
+
+        let loaded = base.apply_overrides(&over).build()?;
+
+        let expect = FactoryMetadata::V1(FactoryMetadataV1 {
+            addresses: Default::default(),
+            root_password_hash: Some("base-password".to_string()), // inherited
+            root_authorized_keys: Some("new-keys".to_string()),    // overridden
+            dump_to_rpool: None,                                   // blocked
+            pre_job_diagnostic_script: Some("base-pre".to_string()), // implicit inherit
+            post_job_diagnostic_script: Some("new-post".to_string()), // overridden
+            rpool_disable_sync: Some(true),                        // overridden
         });
 
         assert_eq!(loaded, expect);

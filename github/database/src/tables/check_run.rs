@@ -216,7 +216,7 @@ impl CheckRunDependency {
  */
 #[cfg(test)]
 mod test {
-    use super::CheckRunVariety;
+    use super::*;
     use std::str::FromStr;
 
     const CHECK_RUN_VARIETIES: &'static [(&'static str, CheckRunVariety)] = &[
@@ -238,5 +238,76 @@ mod test {
         for (s, e) in CHECK_RUN_VARIETIES {
             assert_eq!(CheckRunVariety::from_str(s).unwrap(), *e);
         }
+    }
+
+    fn make_check_run(dependencies: Option<serde_json::Value>) -> CheckRun {
+        CheckRun {
+            id: CheckRunId::generate(),
+            check_suite: CheckSuiteId::generate(),
+            name: "test-run".to_string(),
+            variety: CheckRunVariety::Basic,
+            content: None,
+            config: None,
+            private: None,
+            active: true,
+            flushed: false,
+            github_id: None,
+            dependencies: dependencies.map(JsonValue),
+        }
+    }
+
+    #[test]
+    fn check_run_get_dependencies_none() {
+        let cr = make_check_run(None);
+        let deps = cr.get_dependencies().unwrap();
+        assert!(deps.is_empty());
+    }
+
+    #[test]
+    fn check_run_get_dependencies_empty() {
+        let cr = make_check_run(Some(serde_json::json!({})));
+        let deps = cr.get_dependencies().unwrap();
+        assert!(deps.is_empty());
+    }
+
+    #[test]
+    fn check_run_get_dependencies_single() {
+        let cr = make_check_run(Some(serde_json::json!({
+            "build": {
+                "job": "build-job",
+                "config": {}
+            }
+        })));
+        let deps = cr.get_dependencies().unwrap();
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps.get("build").unwrap().job(), "build-job");
+    }
+
+    #[test]
+    fn check_run_get_dependencies_multiple() {
+        let cr = make_check_run(Some(serde_json::json!({
+            "build": {
+                "job": "build-job",
+                "config": {"copy_outputs": true}
+            },
+            "test": {
+                "job": "test-job",
+                "config": {}
+            }
+        })));
+        let deps = cr.get_dependencies().unwrap();
+        assert_eq!(deps.len(), 2);
+        assert_eq!(deps.get("build").unwrap().job(), "build-job");
+        assert_eq!(deps.get("test").unwrap().job(), "test-job");
+
+        // Verify we can extract config from dependency
+        #[derive(serde::Deserialize)]
+        struct DepConfig {
+            #[serde(default)]
+            copy_outputs: bool,
+        }
+        let build_config: DepConfig =
+            deps.get("build").unwrap().get_config().unwrap();
+        assert!(build_config.copy_outputs);
     }
 }
