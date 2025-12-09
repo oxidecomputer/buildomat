@@ -2361,7 +2361,7 @@ impl Database {
          */
         let max_val_count = 100;
         let max_val_kib = 10;
-        if value.as_bytes().len() > max_val_kib * 1024 {
+        if value.len() > max_val_kib * 1024 {
             conflict!("maximum value size is {max_val_kib}KiB");
         }
 

@@ -163,10 +163,8 @@ pub(crate) async fn worker_cleanup(log: Logger, c: Arc<Central>) -> Result<()> {
                 info!(log, "starting worker liveness checks");
                 liveness_checks = true;
             }
-        } else {
-            if let Err(e) = worker_liveness_one(&log, &c).await {
-                error!(log, "worker liveness task error: {:?}", e);
-            }
+        } else if let Err(e) = worker_liveness_one(&log, &c).await {
+            error!(log, "worker liveness task error: {:?}", e);
         }
 
         tokio::time::sleep(delay).await;

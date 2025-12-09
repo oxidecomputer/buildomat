@@ -23,10 +23,7 @@ fn spawn_reader<T>(
 where
     T: Read + Send + 'static,
 {
-    let stream = match stream {
-        Some(stream) => stream,
-        None => return None,
-    };
+    let stream = stream?;
 
     Some(std::thread::spawn(move || {
         let mut r = BufReader::new(stream);
@@ -297,7 +294,7 @@ fn run_common(
                  * process.
                  */
                 if ab.bgproc.is_none() {
-                    tx.blocking_send(ab.exit(&start, &end, std::i32::MAX))
+                    tx.blocking_send(ab.exit(&start, &end, i32::MAX))
                         .unwrap();
                 }
 
@@ -332,7 +329,7 @@ fn run_common(
                 let code = if let Some(code) = es.code() {
                     code
                 } else {
-                    std::i32::MAX
+                    i32::MAX
                 };
                 tx.blocking_send(ab.exit(&start, &end, code)).unwrap();
                 stdio_warning

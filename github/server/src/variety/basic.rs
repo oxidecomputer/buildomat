@@ -678,11 +678,11 @@ pub(crate) async fn run(
          * We pass several GitHub-specific environment variables to tasks in the
          * job:
          */
-        tb.env("GITHUB_REPOSITORY", &format!("{}/{}", repo.owner, repo.name));
+        tb.env("GITHUB_REPOSITORY", format!("{}/{}", repo.owner, repo.name));
         tb.env("GITHUB_SHA", &cs.head_sha);
         if let Some(branch) = cs.head_branch.as_deref() {
             tb.env("GITHUB_BRANCH", branch);
-            tb.env("GITHUB_REF", &format!("refs/heads/{}", branch));
+            tb.env("GITHUB_REF", format!("refs/heads/{}", branch));
         }
 
         let app0 = app.clone();
@@ -1046,7 +1046,7 @@ pub(crate) async fn artefact(
                     .header(hyper::header::CONTENT_TYPE, "text/html")
                     .header(hyper::header::CONTENT_LENGTH, md.len())
                     .body(Body::wrap(StreamBody::new(
-                        stream.map_ok(|b| Frame::data(b)),
+                        stream.map_ok(Frame::data),
                     )))?,
             ));
         }
@@ -1110,7 +1110,7 @@ pub(crate) async fn artefact(
                     .header(hyper::header::CONTENT_TYPE, ct)
                     .header(hyper::header::CONTENT_LENGTH, cl)
                     .body(Body::wrap(StreamBody::new(
-                        backend.into_inner_stream().map_ok(|b| Frame::data(b)),
+                        backend.into_inner_stream().map_ok(Frame::data),
                     )))?,
             ));
         }
@@ -1257,7 +1257,7 @@ pub(crate) async fn details(
             &bm,
             &job,
             local_time,
-            format!("./{}/live", cr.id.to_string()),
+            format!("./{}/live", cr.id),
         )
         .await?;
     }

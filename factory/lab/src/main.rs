@@ -2,6 +2,8 @@
  * Copyright 2023 Oxide Computer Company
  */
 
+#![allow(dead_code)]
+
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},

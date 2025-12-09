@@ -4,6 +4,7 @@
 
 #![allow(clippy::many_single_char_names)]
 #![allow(clippy::too_many_arguments)]
+#![allow(dead_code)]
 
 use std::collections::VecDeque;
 use std::io::{Seek, Write};

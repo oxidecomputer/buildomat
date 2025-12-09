@@ -70,7 +70,7 @@ impl Instance {
                     .try_into()
                     .unwrap();
 
-                (if when <= now { now - when } else { 0 }) / 1000
+                now.saturating_sub(when) / 1000
             })
             .unwrap_or(0)
     }
@@ -188,7 +188,7 @@ async fn create_instance(
 
     let mut instances = res
         .instances()
-        .into_iter()
+        .iter()
         .map(|i| Instance::from((i, config.aws.tag.as_str())))
         .collect::<Vec<_>>();
 
@@ -218,13 +218,12 @@ async fn instances(
     Ok(res
         .reservations()
         .iter()
-        .map(|r| {
+        .flat_map(|r| {
             r.instances().iter().map(|i| {
                 let i = Instance::from((i, tag));
                 (i.id.to_string(), i)
             })
         })
-        .flatten()
         .collect())
 }
 
@@ -421,7 +420,7 @@ async fn aws_worker_one(
              * There is a record of a particular instance ID for this worker.
              * Check to see if that instance exists.
              */
-            if let Some(i) = insts.get(&instance_id.to_string()) {
+            if let Some(i) = insts.get(instance_id) {
                 if i.state == "terminated" {
                     /*
                      * The instance exists, but is terminated.  Delete the

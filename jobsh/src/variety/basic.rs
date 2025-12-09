@@ -95,7 +95,7 @@ pub async fn output_table(
 
         for ev in page {
             minseq = ev.seq + 1;
-            payload_size += ev.payload.as_bytes().len();
+            payload_size += ev.payload.len();
             events.push(ev);
 
             if payload_size > PAYLOAD_SIZE_MAX {
