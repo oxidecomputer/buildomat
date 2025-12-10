@@ -42,6 +42,8 @@ use exec::ExitDetails;
 
 struct Agent {
     log: Logger,
+    /// Path to the config file. Set via -c flag.
+    config_path: PathBuf,
 }
 
 /// Path to the agent configuration file.
@@ -58,9 +60,12 @@ fn job_path() -> PathBuf {
 fn agent_path() -> PathBuf {
     PathBuf::from("/opt/buildomat/lib/agent")
 }
+
 const INPUT_PATH: &str = "/input";
 const CONTROL_PROGRAM: &str = "bmat";
 const SHADOW: &str = "/etc/shadow";
+/// Default config file path.
+const DEFAULT_CONFIG_PATH: &str = "/opt/buildomat/etc/agent.json";
 #[cfg(target_os = "illumos")]
 mod os_constants {
     pub const METHOD: &str = "/opt/buildomat/lib/start.sh";
@@ -1164,9 +1169,12 @@ enum Stage {
 async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
     l.usage_args(Some("BASEURL BOOTSTRAP_TOKEN"));
     l.optopt("N", "", "set nodename of machine", "NODENAME");
+    l.optopt("", "opt-base", "base directory for agent files", "PATH");
+    l.optflag("", "persistent", "persistent mode (skip SMF/systemd/ZFS setup)");
 
     let a = args!(l);
     let log = l.context().log.clone();
+    let config_path = l.context().config_path.clone();
 
     if a.args().len() < 2 {
         bad_args!(l, "specify base URL and bootstrap token value");
@@ -1178,6 +1186,8 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
      */
     let baseurl = a.args()[0].to_string();
     let bootstrap = a.args()[1].to_string();
+    let persistent = a.opts().opt_present("persistent");
+    let opt_base = a.opts().opt_str("opt-base");
 
     if let Some(nodename) = a.opts().opt_str("N") {
         if let Err(e) = set_nodename(&nodename) {
@@ -1186,19 +1196,19 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
     }
 
     /*
-     * Write /opt/buildomat/etc/agent.json with this configuration.
+     * Write the agent configuration file.
      */
-    make_dirs_for(config_path())?;
-    rmfile(config_path())?;
+    make_dirs_for(&config_path)?;
+    rmfile(&config_path)?;
     let cf = ConfigFile {
         version: 2,
         baseurl,
         bootstrap,
         token: genkey(64),
-        opt_base: None,
-        persistent: false,
+        opt_base,
+        persistent,
     };
-    store(config_path(), &cf)?;
+    store(&config_path, &cf)?;
 
     /*
      * Copy the agent binary into a permanent home.
@@ -2007,6 +2017,32 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
     }
 }
 
+/// Parse the -c CONFIG_PATH option from command line arguments.
+/// Returns the config path and the remaining arguments with -c removed.
+fn parse_config_path_arg() -> (PathBuf, Vec<String>) {
+    let args: Vec<String> = std::env::args().collect();
+    let mut config_path = PathBuf::from(DEFAULT_CONFIG_PATH);
+    let mut filtered_args = Vec::new();
+    let mut skip_next = false;
+
+    for (i, arg) in args.iter().enumerate() {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if arg == "-c" {
+            if let Some(path) = args.get(i + 1) {
+                config_path = PathBuf::from(path);
+                skip_next = true;
+            }
+        } else {
+            filtered_args.push(arg.clone());
+        }
+    }
+
+    (config_path, filtered_args)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cmdname = std::env::args().next().as_deref().and_then(|s| {
@@ -2027,10 +2063,17 @@ async fn main() -> Result<()> {
             /*
              * Assume that any name other than the name for the control
              * entrypoint is the regular agent.
+             *
+             * Parse the -c option before hiercmd takes over.
+             * This allows: agent -c /path/to/config.json install ...
              */
+            let (config_path, _filtered_args) = parse_config_path_arg();
+
             let log = make_log("buildomat-agent");
-            let mut l =
-                Level::new("buildomat-agent", Agent { log: log.clone() });
+            let mut l = Level::new(
+                "buildomat-agent",
+                Agent { log: log.clone(), config_path },
+            );
 
             l.cmd("install", "install the agent", cmd!(cmd_install))?;
             l.cmd("run", "run the agent", cmd!(cmd_run))?;
