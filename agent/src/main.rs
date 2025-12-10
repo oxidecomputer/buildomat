@@ -56,11 +56,6 @@ fn job_path() -> PathBuf {
     PathBuf::from("/opt/buildomat/etc/job.json")
 }
 
-/// Path to the agent binary.
-fn agent_path() -> PathBuf {
-    PathBuf::from("/opt/buildomat/lib/agent")
-}
-
 const INPUT_PATH: &str = "/input";
 const CONTROL_PROGRAM: &str = "bmat";
 const SHADOW: &str = "/etc/shadow";
@@ -68,7 +63,6 @@ const SHADOW: &str = "/etc/shadow";
 const DEFAULT_CONFIG_PATH: &str = "/opt/buildomat/etc/agent.json";
 #[cfg(target_os = "illumos")]
 mod os_constants {
-    pub const METHOD: &str = "/opt/buildomat/lib/start.sh";
     pub const MANIFEST: &str = "/var/svc/manifest/site/buildomat-agent.xml";
     pub const INPUT_DATASET: &str = "rpool/input";
 }
@@ -1214,30 +1208,35 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
      * Copy the agent binary into a permanent home.
      */
     let exe = env::current_exe()?;
-    make_dirs_for(agent_path())?;
-    rmfile(agent_path())?;
-    std::fs::copy(&exe, agent_path())?;
-    make_executable(agent_path())?;
+    let agent_path = cf.agent_path();
+    make_dirs_for(&agent_path)?;
+    rmfile(&agent_path)?;
+    std::fs::copy(&exe, &agent_path)?;
+    make_executable(&agent_path)?;
 
     /*
      * Install the agent binary with the control program name in a location in
      * the default PATH so that job programs can find it.
+     * In persistent mode, we install to opt_base/bin/ instead of /usr/bin/.
      */
-    let cprog = format!("/usr/bin/{CONTROL_PROGRAM}");
+    let cprog = cf.control_program_path();
+    make_dirs_for(&cprog)?;
     rmfile(&cprog)?;
     std::fs::copy(&exe, &cprog)?;
     make_executable(&cprog)?;
 
     #[cfg(target_os = "illumos")]
-    {
+    if !cf.persistent() {
         /*
          * Copy SMF method script and manifest into place.
+         * Skipped in persistent mode as these require root privileges.
          */
-        let method = include_str!("../smf/start.sh");
-        make_dirs_for(METHOD)?;
-        rmfile(METHOD)?;
-        write_text(METHOD, method)?;
-        make_executable(METHOD)?;
+        let method_content = include_str!("../smf/start.sh");
+        let method = cf.method_path();
+        make_dirs_for(&method)?;
+        rmfile(&method)?;
+        write_text(&method, method_content)?;
+        make_executable(&method)?;
 
         let manifest = include_str!("../smf/agent.xml");
         rmfile(MANIFEST)?;
@@ -1245,6 +1244,7 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
 
         /*
          * Create the input directory.
+         * Skipped in persistent mode - input dir is provided externally.
          */
         let status = Command::new("/sbin/zfs")
             .arg("create")
@@ -1262,6 +1262,7 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
 
         /*
          * Import SMF service.
+         * Skipped in persistent mode - agent is run directly by the factory.
          */
         let status = Command::new("/usr/sbin/svccfg")
             .arg("import")
@@ -1277,14 +1278,16 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
     }
 
     #[cfg(target_os = "linux")]
-    {
+    if !cf.persistent() {
         /*
          * Create the input directory.
+         * Skipped in persistent mode - input dir is provided externally.
          */
         std::fs::create_dir_all(INPUT_PATH)?;
 
         /*
          * Write a systemd unit file for the agent service.
+         * Skipped in persistent mode - agent is run directly by the factory.
          */
         let unit = include_str!("../systemd/agent.service");
         make_dirs_for(UNIT)?;
