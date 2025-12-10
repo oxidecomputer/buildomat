@@ -682,7 +682,7 @@ pub(crate) async fn run(
         tb.env("GITHUB_SHA", &cs.head_sha);
         if let Some(branch) = cs.head_branch.as_deref() {
             tb.env("GITHUB_BRANCH", branch);
-            tb.env("GITHUB_REF", format!("refs/heads/{}", branch));
+            tb.env("GITHUB_REF", format!("refs/heads/{branch}"));
         }
 
         let app0 = app.clone();
