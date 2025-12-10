@@ -578,3 +578,13 @@ async fn cmd_factory_private(mut l: Level<Stuff>) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_socket_path_value() {
+        assert_eq!(SOCKET_PATH, "/var/run/buildomat.sock");
+    }
+}
