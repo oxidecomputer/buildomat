@@ -17,7 +17,7 @@ use tokio::{
 
 use super::{
     protocol::{Decoder, Message, Payload},
-    SOCKET_PATH,
+    socket_path,
 };
 
 #[derive(Debug)]
@@ -50,15 +50,16 @@ pub fn listen() -> Result<Receiver<Request>> {
      * Create the UNIX socket that the control program will use to contact the
      * agent.
      */
-    std::fs::remove_file(SOCKET_PATH).ok();
-    let ul = UnixListener::bind(SOCKET_PATH)?;
+    let path = socket_path();
+    std::fs::remove_file(&path).ok();
+    let ul = UnixListener::bind(&path)?;
 
     /*
      * Allow everyone to connect:
      */
-    let mut perm = std::fs::metadata(SOCKET_PATH)?.permissions();
+    let mut perm = std::fs::metadata(&path)?.permissions();
     perm.set_mode(0o777);
-    std::fs::set_permissions(SOCKET_PATH, perm)?;
+    std::fs::set_permissions(&path, perm)?;
 
     /*
      * Create channel to hand requests back to the main loop.

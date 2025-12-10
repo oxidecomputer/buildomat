@@ -18,7 +18,10 @@ use protocol::{Decoder, FactoryInfo, Message, Payload};
 pub(crate) mod protocol;
 pub(crate) mod server;
 
-pub const SOCKET_PATH: &str = "/var/run/buildomat.sock";
+/// Get the control socket path.
+pub fn socket_path() -> String {
+    "/var/run/buildomat.sock".to_string()
+}
 
 struct Stuff {
     us: Option<UnixStream>,
@@ -28,7 +31,7 @@ struct Stuff {
 
 impl Stuff {
     async fn connect(&mut self) -> Result<()> {
-        self.us = Some(UnixStream::connect(SOCKET_PATH).await?);
+        self.us = Some(UnixStream::connect(socket_path()).await?);
         self.dec = Some(Decoder::new());
         Ok(())
     }
@@ -585,6 +588,6 @@ mod tests {
 
     #[test]
     fn test_socket_path_value() {
-        assert_eq!(SOCKET_PATH, "/var/run/buildomat.sock");
+        assert_eq!(socket_path(), "/var/run/buildomat.sock");
     }
 }
