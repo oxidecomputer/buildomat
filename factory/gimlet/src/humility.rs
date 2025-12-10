@@ -17,7 +17,6 @@ use slog::{info, warn, Logger};
 use crate::pipe::*;
 use buildomat_common::OutputExt;
 
-#[allow(clippy::wrong_self_convention)]
 pub trait ValueExt {
     fn is_unit(&self) -> bool;
     fn from_hex(&self) -> Result<u64>;
