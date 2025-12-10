@@ -27,7 +27,6 @@ const BUF_COUNT: usize = 10;
  * assessed against the actual file size and a partial (206) response will be
  * returned, for both GET and HEAD.
  */
-#[allow(clippy::too_many_arguments)]
 pub async fn stream_from_url(
     log: &Logger,
     info: String,
