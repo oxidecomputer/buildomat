@@ -44,9 +44,20 @@ struct Agent {
     log: Logger,
 }
 
-const CONFIG_PATH: &str = "/opt/buildomat/etc/agent.json";
-const JOB_PATH: &str = "/opt/buildomat/etc/job.json";
-const AGENT: &str = "/opt/buildomat/lib/agent";
+/// Path to the agent configuration file.
+fn config_path() -> PathBuf {
+    PathBuf::from("/opt/buildomat/etc/agent.json")
+}
+
+/// Path to the job state file.
+fn job_path() -> PathBuf {
+    PathBuf::from("/opt/buildomat/etc/job.json")
+}
+
+/// Path to the agent binary.
+fn agent_path() -> PathBuf {
+    PathBuf::from("/opt/buildomat/lib/agent")
+}
 const INPUT_PATH: &str = "/input";
 const CONTROL_PROGRAM: &str = "bmat";
 const SHADOW: &str = "/etc/shadow";
@@ -1049,19 +1060,19 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
     /*
      * Write /opt/buildomat/etc/agent.json with this configuration.
      */
-    make_dirs_for(CONFIG_PATH)?;
-    rmfile(CONFIG_PATH)?;
+    make_dirs_for(config_path())?;
+    rmfile(config_path())?;
     let cf = ConfigFile { baseurl, bootstrap, token: genkey(64) };
-    store(CONFIG_PATH, &cf)?;
+    store(config_path(), &cf)?;
 
     /*
      * Copy the agent binary into a permanent home.
      */
     let exe = env::current_exe()?;
-    make_dirs_for(AGENT)?;
-    rmfile(AGENT)?;
-    std::fs::copy(&exe, AGENT)?;
-    make_executable(AGENT)?;
+    make_dirs_for(agent_path())?;
+    rmfile(agent_path())?;
+    std::fs::copy(&exe, agent_path())?;
+    make_executable(agent_path())?;
 
     /*
      * Install the agent binary with the control program name in a location in
@@ -1182,7 +1193,7 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
 async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
     no_args!(l);
 
-    let cf = load::<_, ConfigFile>(CONFIG_PATH)?;
+    let cf = load::<_, ConfigFile>(config_path())?;
     let log = l.context().log.clone();
 
     info!(log, "agent starting"; "baseurl" => &cf.baseurl);
@@ -1236,7 +1247,7 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
      * any evidence that we've done this before, we must report it to the
      * central server and do nothing else.
      */
-    if PathBuf::from(JOB_PATH).try_exists()? {
+    if job_path().try_exists()? {
         error!(log, "found previously assigned job; reporting failure");
 
         /*
@@ -1374,7 +1385,7 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                                     .create_new(true)
                                     .create(false)
                                     .write(true)
-                                    .open(JOB_PATH)?;
+                                    .open(job_path())?;
                                 jf.write_all(&diag)?;
                                 jf.flush()?;
                                 jf.sync_all()?;
@@ -1904,17 +1915,17 @@ mod tests {
 
     #[test]
     fn test_config_path_value() {
-        assert_eq!(CONFIG_PATH, "/opt/buildomat/etc/agent.json");
+        assert_eq!(config_path(), PathBuf::from("/opt/buildomat/etc/agent.json"));
     }
 
     #[test]
     fn test_job_path_value() {
-        assert_eq!(JOB_PATH, "/opt/buildomat/etc/job.json");
+        assert_eq!(job_path(), PathBuf::from("/opt/buildomat/etc/job.json"));
     }
 
     #[test]
     fn test_agent_path_value() {
-        assert_eq!(AGENT, "/opt/buildomat/lib/agent");
+        assert_eq!(agent_path(), PathBuf::from("/opt/buildomat/lib/agent"));
     }
 
     #[cfg(target_os = "illumos")]
