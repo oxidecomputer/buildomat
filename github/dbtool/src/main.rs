@@ -69,7 +69,7 @@ impl Stuff {
         std::fs::DirBuilder::new().mode(0o700).recursive(true).create(&out)?;
         out.push(set);
         std::fs::DirBuilder::new().mode(0o700).recursive(true).create(&out)?;
-        out.push(format!("{}.json", file));
+        out.push(format!("{file}.json"));
         Ok(out)
     }
 }
