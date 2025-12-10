@@ -1897,3 +1897,38 @@ async fn main() -> Result<()> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_path_value() {
+        assert_eq!(CONFIG_PATH, "/opt/buildomat/etc/agent.json");
+    }
+
+    #[test]
+    fn test_job_path_value() {
+        assert_eq!(JOB_PATH, "/opt/buildomat/etc/job.json");
+    }
+
+    #[test]
+    fn test_agent_path_value() {
+        assert_eq!(AGENT, "/opt/buildomat/lib/agent");
+    }
+
+    #[cfg(target_os = "illumos")]
+    mod illumos_tests {
+        use super::*;
+
+        #[test]
+        fn test_method_path_value() {
+            assert_eq!(METHOD, "/opt/buildomat/lib/start.sh");
+        }
+
+        #[test]
+        fn test_manifest_path_value() {
+            assert_eq!(MANIFEST, "/var/svc/manifest/site/buildomat-agent.xml");
+        }
+    }
+}
