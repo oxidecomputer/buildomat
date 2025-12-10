@@ -98,28 +98,117 @@ struct ConfigFile {
 
 impl ConfigFile {
     /// Config file version.
+    #[allow(dead_code)]
     pub fn version(&self) -> u32 {
         self.version
     }
 
     /// Base URL for buildomat server.
+    #[allow(dead_code)]
     pub fn baseurl(&self) -> &str {
         &self.baseurl
     }
 
     /// Bootstrap token for initial registration.
+    #[allow(dead_code)]
     pub fn bootstrap(&self) -> &str {
         &self.bootstrap
     }
 
     /// Authentication token.
+    #[allow(dead_code)]
     pub fn token(&self) -> &str {
         &self.token
     }
 
     /// Whether running in persistent mode.
+    #[allow(dead_code)]
     pub fn persistent(&self) -> bool {
         self.persistent
+    }
+
+    /// Base directory for buildomat agent files.
+    #[allow(dead_code)]
+    fn opt_base(&self) -> PathBuf {
+        self.opt_base
+            .as_ref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/opt/buildomat"))
+    }
+
+    /// Path to the job state file (indicates job in progress).
+    #[allow(dead_code)]
+    pub fn job_path(&self) -> PathBuf {
+        self.opt_base().join("etc/job.json")
+    }
+
+    /// Path to the job completion marker file.
+    #[allow(dead_code)]
+    pub fn job_done_path(&self) -> PathBuf {
+        self.opt_base().join("etc/job-done.json")
+    }
+
+    /// Path to the agent binary.
+    #[allow(dead_code)]
+    pub fn agent_path(&self) -> PathBuf {
+        self.opt_base().join("lib/agent")
+    }
+
+    /// Path to the control program (bmat).
+    /// In persistent mode, installed under opt_base.
+    /// In normal mode, installed to /usr/bin.
+    #[allow(dead_code)]
+    pub fn control_program_path(&self) -> PathBuf {
+        if self.persistent {
+            self.opt_base().join("bin").join(CONTROL_PROGRAM)
+        } else {
+            PathBuf::from(format!("/usr/bin/{CONTROL_PROGRAM}"))
+        }
+    }
+
+    /// Path to the control socket.
+    /// In persistent mode, under opt_base/run.
+    /// In normal mode, /var/run/buildomat.sock.
+    #[allow(dead_code)]
+    pub fn socket_path(&self) -> PathBuf {
+        if self.persistent {
+            self.opt_base().join("run/buildomat.sock")
+        } else {
+            PathBuf::from("/var/run/buildomat.sock")
+        }
+    }
+
+    /// Path to the SMF method script (illumos only).
+    #[cfg(target_os = "illumos")]
+    #[allow(dead_code)]
+    pub fn method_path(&self) -> PathBuf {
+        self.opt_base().join("lib/start.sh")
+    }
+
+    /// Mark job as complete by renaming job.json to job-done.json.
+    /// This allows subsequent agent runs to detect that the previous job
+    /// completed successfully rather than crashed.
+    #[allow(dead_code)]
+    pub fn mark_job_done(&self, log: &Logger) {
+        let job_file = self.job_path();
+        let done_file = self.job_done_path();
+
+        if job_file.exists() {
+            match std::fs::rename(&job_file, &done_file) {
+                Ok(()) => {
+                    info!(log, "marked job as done";
+                        "from" => %job_file.display(),
+                        "to" => %done_file.display());
+                }
+                Err(e) => {
+                    // Non-fatal - the job still completed
+                    error!(log, "failed to mark job done";
+                        "from" => %job_file.display(),
+                        "to" => %done_file.display(),
+                        "error" => %e);
+                }
+            }
+        }
     }
 
     fn make_client(&self, log: Logger) -> ClientWrap {
@@ -1959,19 +2048,133 @@ async fn main() -> Result<()> {
 mod tests {
     use super::*;
 
+    /// Helper to create a test ConfigFile with defaults.
+    fn test_config() -> ConfigFile {
+        ConfigFile {
+            version: 2,
+            baseurl: "http://test".to_string(),
+            bootstrap: "bootstrap".to_string(),
+            token: "token".to_string(),
+            opt_base: None,
+            persistent: false,
+        }
+    }
+
+    /// Helper to create a test ConfigFile with custom opt_base.
+    fn test_config_with_opt_base(opt_base: &str) -> ConfigFile {
+        ConfigFile {
+            version: 2,
+            baseurl: "http://test".to_string(),
+            bootstrap: "bootstrap".to_string(),
+            token: "token".to_string(),
+            opt_base: Some(opt_base.to_string()),
+            persistent: false,
+        }
+    }
+
+    /// Helper to create a persistent test ConfigFile.
+    fn test_config_persistent() -> ConfigFile {
+        ConfigFile {
+            version: 2,
+            baseurl: "http://test".to_string(),
+            bootstrap: "bootstrap".to_string(),
+            token: "token".to_string(),
+            opt_base: None,
+            persistent: true,
+        }
+    }
+
     #[test]
     fn test_config_path_value() {
         assert_eq!(config_path(), PathBuf::from("/opt/buildomat/etc/agent.json"));
     }
 
     #[test]
-    fn test_job_path_value() {
-        assert_eq!(job_path(), PathBuf::from("/opt/buildomat/etc/job.json"));
+    fn test_job_path_default() {
+        let cf = test_config();
+        assert_eq!(cf.job_path(), PathBuf::from("/opt/buildomat/etc/job.json"));
     }
 
     #[test]
-    fn test_agent_path_value() {
-        assert_eq!(agent_path(), PathBuf::from("/opt/buildomat/lib/agent"));
+    fn test_job_path_custom_opt() {
+        let cf = test_config_with_opt_base("/custom/path");
+        assert_eq!(cf.job_path(), PathBuf::from("/custom/path/etc/job.json"));
+    }
+
+    #[test]
+    fn test_agent_path_default() {
+        let cf = test_config();
+        assert_eq!(cf.agent_path(), PathBuf::from("/opt/buildomat/lib/agent"));
+    }
+
+    #[test]
+    fn test_persistent_default() {
+        let cf = test_config();
+        assert!(!cf.persistent());
+    }
+
+    #[test]
+    fn test_persistent_enabled() {
+        let cf = test_config_persistent();
+        assert!(cf.persistent());
+    }
+
+    #[test]
+    fn test_job_done_path_default() {
+        let cf = test_config();
+        assert_eq!(
+            cf.job_done_path(),
+            PathBuf::from("/opt/buildomat/etc/job-done.json")
+        );
+    }
+
+    #[test]
+    fn test_control_program_path_normal_mode() {
+        let cf = test_config();
+        assert_eq!(cf.control_program_path(), PathBuf::from("/usr/bin/bmat"));
+    }
+
+    #[test]
+    fn test_control_program_path_persistent_mode() {
+        let cf = test_config_persistent();
+        assert_eq!(
+            cf.control_program_path(),
+            PathBuf::from("/opt/buildomat/bin/bmat")
+        );
+    }
+
+    #[test]
+    fn test_control_program_path_persistent_custom_opt() {
+        let cf = ConfigFile {
+            version: 2,
+            baseurl: "http://test".to_string(),
+            bootstrap: "bootstrap".to_string(),
+            token: "token".to_string(),
+            opt_base: Some("/custom/path".to_string()),
+            persistent: true,
+        };
+        assert_eq!(
+            cf.control_program_path(),
+            PathBuf::from("/custom/path/bin/bmat")
+        );
+    }
+
+    #[test]
+    fn test_socket_path_normal_mode() {
+        let cf = test_config();
+        assert_eq!(
+            cf.socket_path(),
+            PathBuf::from("/var/run/buildomat.sock")
+        );
+    }
+
+    #[test]
+    fn test_socket_path_persistent_mode() {
+        let cf = test_config_persistent();
+        assert_eq!(
+            cf.socket_path(),
+            PathBuf::from("/opt/buildomat/run/buildomat.sock")
+        );
     }
 
     #[test]
@@ -1998,8 +2201,12 @@ mod tests {
         use super::*;
 
         #[test]
-        fn test_method_path_value() {
-            assert_eq!(METHOD, "/opt/buildomat/lib/start.sh");
+        fn test_method_path_default() {
+            let cf = test_config();
+            assert_eq!(
+                cf.method_path(),
+                PathBuf::from("/opt/buildomat/lib/start.sh")
+            );
         }
 
         #[test]
