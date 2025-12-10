@@ -75,14 +75,53 @@ use os_constants::*;
 
 use crate::control::protocol::StoreEntry;
 
+fn default_version() -> u32 {
+    1
+}
+
 #[derive(Serialize, Deserialize)]
 struct ConfigFile {
+    /// Config file version. Missing field defaults to 1 for backward
+    /// compatibility.
+    #[serde(default = "default_version")]
+    version: u32,
     baseurl: String,
     bootstrap: String,
     token: String,
+    /// Base directory for agent files. Defaults to /opt/buildomat.
+    #[serde(default)]
+    opt_base: Option<String>,
+    /// Persistent mode - skip SMF/systemd/ZFS setup, run as current user.
+    #[serde(default)]
+    persistent: bool,
 }
 
 impl ConfigFile {
+    /// Config file version.
+    pub fn version(&self) -> u32 {
+        self.version
+    }
+
+    /// Base URL for buildomat server.
+    pub fn baseurl(&self) -> &str {
+        &self.baseurl
+    }
+
+    /// Bootstrap token for initial registration.
+    pub fn bootstrap(&self) -> &str {
+        &self.bootstrap
+    }
+
+    /// Authentication token.
+    pub fn token(&self) -> &str {
+        &self.token
+    }
+
+    /// Whether running in persistent mode.
+    pub fn persistent(&self) -> bool {
+        self.persistent
+    }
+
     fn make_client(&self, log: Logger) -> ClientWrap {
         let client = buildomat_client::ClientBuilder::new(&self.baseurl)
             .bearer_token(&self.token)
@@ -1062,7 +1101,14 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
      */
     make_dirs_for(config_path())?;
     rmfile(config_path())?;
-    let cf = ConfigFile { baseurl, bootstrap, token: genkey(64) };
+    let cf = ConfigFile {
+        version: 2,
+        baseurl,
+        bootstrap,
+        token: genkey(64),
+        opt_base: None,
+        persistent: false,
+    };
     store(config_path(), &cf)?;
 
     /*
@@ -1926,6 +1972,25 @@ mod tests {
     #[test]
     fn test_agent_path_value() {
         assert_eq!(agent_path(), PathBuf::from("/opt/buildomat/lib/agent"));
+    }
+
+    #[test]
+    fn test_version_default_deserialization() {
+        // Test that missing version field defaults to 1
+        let json = r#"{"baseurl":"http://test","bootstrap":"b","token":"t"}"#;
+        let cf: ConfigFile = serde_json::from_str(json).unwrap();
+        assert_eq!(cf.version(), 1);
+        assert!(!cf.persistent());
+        assert!(cf.opt_base.is_none());
+    }
+
+    #[test]
+    fn test_version_2_deserialization() {
+        let json = r#"{"version":2,"baseurl":"http://test","bootstrap":"b","token":"t","persistent":true,"opt_base":"/custom"}"#;
+        let cf: ConfigFile = serde_json::from_str(json).unwrap();
+        assert_eq!(cf.version(), 2);
+        assert!(cf.persistent());
+        assert_eq!(cf.opt_base.as_deref(), Some("/custom"));
     }
 
     #[cfg(target_os = "illumos")]
