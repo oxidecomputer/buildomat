@@ -26,6 +26,10 @@ members = [
 ]
 resolver = "2"
 
+[workspace.lints.clippy]
+too_many_arguments = "allow"
+wrong_self_convention = "allow"
+
 [workspace.dependencies]
 ansi-to-html = { version = "0.2", features =  [ "lazy-init" ] }
 anyhow = "1"
