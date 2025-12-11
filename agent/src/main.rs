@@ -46,16 +46,6 @@ struct Agent {
     config_path: PathBuf,
 }
 
-/// Path to the agent configuration file.
-fn config_path() -> PathBuf {
-    PathBuf::from("/opt/buildomat/etc/agent.json")
-}
-
-/// Path to the job state file.
-fn job_path() -> PathBuf {
-    PathBuf::from("/opt/buildomat/etc/job.json")
-}
-
 const INPUT_PATH: &str = "/input";
 const CONTROL_PROGRAM: &str = "bmat";
 const SHADOW: &str = "/etc/shadow";
@@ -103,31 +93,26 @@ impl ConfigFile {
     }
 
     /// Base URL for buildomat server.
-    #[allow(dead_code)]
     pub fn baseurl(&self) -> &str {
         &self.baseurl
     }
 
     /// Bootstrap token for initial registration.
-    #[allow(dead_code)]
     pub fn bootstrap(&self) -> &str {
         &self.bootstrap
     }
 
     /// Authentication token.
-    #[allow(dead_code)]
     pub fn token(&self) -> &str {
         &self.token
     }
 
     /// Whether running in persistent mode.
-    #[allow(dead_code)]
     pub fn persistent(&self) -> bool {
         self.persistent
     }
 
     /// Base directory for buildomat agent files.
-    #[allow(dead_code)]
     fn opt_base(&self) -> PathBuf {
         self.opt_base
             .as_ref()
@@ -136,19 +121,16 @@ impl ConfigFile {
     }
 
     /// Path to the job state file (indicates job in progress).
-    #[allow(dead_code)]
     pub fn job_path(&self) -> PathBuf {
         self.opt_base().join("etc/job.json")
     }
 
     /// Path to the job completion marker file.
-    #[allow(dead_code)]
     pub fn job_done_path(&self) -> PathBuf {
         self.opt_base().join("etc/job-done.json")
     }
 
     /// Path to the agent binary.
-    #[allow(dead_code)]
     pub fn agent_path(&self) -> PathBuf {
         self.opt_base().join("lib/agent")
     }
@@ -156,7 +138,6 @@ impl ConfigFile {
     /// Path to the control program (bmat).
     /// In persistent mode, installed under opt_base.
     /// In normal mode, installed to /usr/bin.
-    #[allow(dead_code)]
     pub fn control_program_path(&self) -> PathBuf {
         if self.persistent {
             self.opt_base().join("bin").join(CONTROL_PROGRAM)
@@ -168,7 +149,6 @@ impl ConfigFile {
     /// Path to the control socket.
     /// In persistent mode, under opt_base/run.
     /// In normal mode, /var/run/buildomat.sock.
-    #[allow(dead_code)]
     pub fn socket_path(&self) -> PathBuf {
         if self.persistent {
             self.opt_base().join("run/buildomat.sock")
@@ -179,15 +159,65 @@ impl ConfigFile {
 
     /// Path to the SMF method script (illumos only).
     #[cfg(target_os = "illumos")]
-    #[allow(dead_code)]
     pub fn method_path(&self) -> PathBuf {
         self.opt_base().join("lib/start.sh")
+    }
+
+    /// Compute the HOME environment variable for task execution.
+    /// In persistent mode, uses current user's HOME; otherwise /root.
+    pub fn task_home(&self) -> String {
+        if self.persistent {
+            env::var("HOME").unwrap_or_else(|_| "/tmp".to_string())
+        } else {
+            "/root".to_string()
+        }
+    }
+
+    /// Compute the USER/LOGNAME environment variable for task execution.
+    /// In persistent mode, uses current user; otherwise root.
+    pub fn task_user(&self) -> String {
+        if self.persistent {
+            env::var("USER").unwrap_or_else(|_| "nobody".to_string())
+        } else {
+            "root".to_string()
+        }
+    }
+
+    /// Compute the working directory for task execution.
+    /// In persistent mode, uses user's home directory (writable).
+    /// In normal mode, uses "/" (ephemeral VM, doesn't matter).
+    pub fn task_cwd(&self) -> PathBuf {
+        if self.persistent {
+            PathBuf::from(self.task_home())
+        } else {
+            PathBuf::from("/")
+        }
+    }
+
+    /// Compute the PATH environment variable for task execution.
+    /// In persistent mode, prepends opt_base/bin so bmat is findable.
+    pub fn task_path(&self) -> String {
+        let mut paths: Vec<String> = Vec::new();
+
+        if self.persistent {
+            paths.push(self.opt_base().join("bin").to_string_lossy().to_string());
+        }
+
+        paths.extend([
+            "/usr/bin".to_string(),
+            "/bin".to_string(),
+            "/usr/sbin".to_string(),
+            "/sbin".to_string(),
+            "/opt/ooce/bin".to_string(),
+            "/opt/ooce/sbin".to_string(),
+        ]);
+
+        paths.join(":")
     }
 
     /// Mark job as complete by renaming job.json to job-done.json.
     /// This allows subsequent agent runs to detect that the previous job
     /// completed successfully rather than crashed.
-    #[allow(dead_code)]
     pub fn mark_job_done(&self, log: &Logger) {
         let job_file = self.job_path();
         let done_file = self.job_done_path();
@@ -228,7 +258,19 @@ impl ConfigFile {
             rx,
         ));
 
-        ClientWrap { log, client, job: None, tx: None, worker_tx }
+        ClientWrap {
+            log,
+            client,
+            job: None,
+            tx: None,
+            worker_tx,
+            persistent: self.persistent,
+            socket_path: self.socket_path().to_string_lossy().to_string(),
+            task_path: self.task_path(),
+            task_home: self.task_home(),
+            task_user: self.task_user(),
+            task_cwd: self.task_cwd(),
+        }
     }
 }
 
@@ -422,6 +464,18 @@ pub(crate) struct ClientWrap {
     job: Option<Arc<WorkerPingJob>>,
     tx: Option<mpsc::Sender<AppendJobEntry>>,
     worker_tx: mpsc::Sender<AppendWorkerEntry>,
+    /// Whether running in persistent mode.
+    persistent: bool,
+    /// Path to the socket (for setting BUILDOMAT_SOCKET env var).
+    socket_path: String,
+    /// PATH environment variable for task execution.
+    task_path: String,
+    /// HOME environment variable for task execution.
+    task_home: String,
+    /// USER/LOGNAME environment variable for task execution.
+    task_user: String,
+    /// Working directory for task execution.
+    task_cwd: PathBuf,
 }
 
 impl ClientWrap {
@@ -780,23 +834,23 @@ impl ClientWrap {
          */
         cmd.env_clear();
 
-        cmd.env("HOME", "/root");
-        cmd.env("USER", "root");
-        cmd.env("LOGNAME", "root");
+        cmd.env("HOME", &self.task_home);
+        cmd.env("USER", &self.task_user);
+        cmd.env("LOGNAME", &self.task_user);
         cmd.env("TZ", "UTC");
-        cmd.env(
-            "PATH",
-            "/usr/bin:/bin:/usr/sbin:/sbin:/opt/ooce/bin:/opt/ooce/sbin",
-        );
+        cmd.env("PATH", &self.task_path);
         cmd.env("LANG", "en_US.UTF-8");
         cmd.env("LC_ALL", "en_US.UTF-8");
+        cmd.env("BUILDOMAT_SOCKET", &self.socket_path);
 
         /*
-         * Run the diagnostic script as root:
+         * Run the diagnostic script as root (skip uid/gid in persistent mode):
          */
-        cmd.current_dir("/");
-        cmd.uid(0);
-        cmd.gid(0);
+        cmd.current_dir(&self.task_cwd);
+        if !self.persistent {
+            cmd.uid(0);
+            cmd.gid(0);
+        }
 
         match exec::run_diagnostic(cmd, name) {
             Ok(c) => Some(c),
@@ -1341,17 +1395,18 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
 async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
     no_args!(l);
 
-    let cf = load::<_, ConfigFile>(config_path())?;
+    let config_path = l.context().config_path.clone();
+    let cf = load::<_, ConfigFile>(&config_path)?;
     let log = l.context().log.clone();
 
-    info!(log, "agent starting"; "baseurl" => &cf.baseurl);
+    info!(log, "agent starting"; "baseurl" => cf.baseurl());
     let mut cw = cf.make_client(log.clone());
 
     let res = loop {
         let res = cw
             .client
             .worker_bootstrap()
-            .body_map(|body| body.bootstrap(&cf.bootstrap).token(&cf.token))
+            .body_map(|body| body.bootstrap(cf.bootstrap()).token(cf.token()))
             .send()
             .await;
 
@@ -1395,7 +1450,7 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
      * any evidence that we've done this before, we must report it to the
      * central server and do nothing else.
      */
-    if job_path().try_exists()? {
+    if cf.job_path().try_exists()? {
         error!(log, "found previously assigned job; reporting failure");
 
         /*
@@ -1533,7 +1588,7 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                                     .create_new(true)
                                     .create(false)
                                     .write(true)
-                                    .open(job_path())?;
+                                    .open(cf.job_path())?;
                                 jf.write_all(&diag)?;
                                 jf.flush()?;
                                 jf.sync_all()?;
@@ -1758,21 +1813,17 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                     /*
                      * Absent a request for an entirely clean slate, we
                      * set a few specific environment variables.
-                     * XXX HOME/USER/LOGNAME should probably respect "uid"
                      */
-                    cmd.env("HOME", "/root");
-                    cmd.env("USER", "root");
-                    cmd.env("LOGNAME", "root");
+                    cmd.env("HOME", &cw.task_home);
+                    cmd.env("USER", &cw.task_user);
+                    cmd.env("LOGNAME", &cw.task_user);
                     cmd.env("TZ", "UTC");
-                    cmd.env(
-                        "PATH",
-                        "/usr/bin:/bin:/usr/sbin:/sbin:\
-                            /opt/ooce/bin:/opt/ooce/sbin",
-                    );
+                    cmd.env("PATH", &cw.task_path);
                     cmd.env("LANG", "en_US.UTF-8");
                     cmd.env("LC_ALL", "en_US.UTF-8");
                     cmd.env("BUILDOMAT_JOB_ID", cw.job_id().unwrap());
                     cmd.env("BUILDOMAT_TASK_ID", t.id.to_string());
+                    cmd.env("BUILDOMAT_SOCKET", &cw.socket_path);
                 }
                 for (k, v) in t.env.iter() {
                     /*
@@ -1786,10 +1837,16 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                 /*
                  * Each task may be expected to run under a different user
                  * account or with a different working directory.
+                 *
+                 * In persistent mode, we skip the uid/gid setting and run as
+                 * the current user. This allows testing on persistent testbeds
+                 * without requiring root privileges.
                  */
                 cmd.current_dir(&t.workdir);
-                cmd.uid(t.uid);
-                cmd.gid(t.gid);
+                if !cw.persistent {
+                    cmd.uid(t.uid);
+                    cmd.gid(t.gid);
+                }
 
                 match exec::run(cmd) {
                     Ok(c) => {
@@ -1967,9 +2024,11 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                         stage = Stage::PostDiagnostics(c, None);
                     } else {
                         cw.diagnostics_complete(false).await;
+                        cf.mark_job_done(&log);
                         stage = Stage::Complete;
                     }
                 } else {
+                    cf.mark_job_done(&log);
                     stage = Stage::Complete;
                     continue;
                 }
@@ -2005,6 +2064,7 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                          */
                         cw.diagnostics_complete(failed.unwrap()).await;
 
+                        cf.mark_job_done(&log);
                         stage = Stage::Complete;
                     }
                     None => {
@@ -2012,6 +2072,7 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                             .await;
                         cw.diagnostics_complete(false).await;
 
+                        cf.mark_job_done(&log);
                         stage = Stage::Complete;
                     }
                 }
@@ -2131,11 +2192,6 @@ mod tests {
     }
 
     #[test]
-    fn test_config_path_value() {
-        assert_eq!(config_path(), PathBuf::from("/opt/buildomat/etc/agent.json"));
-    }
-
-    #[test]
     fn test_job_path_default() {
         let cf = test_config();
         assert_eq!(cf.job_path(), PathBuf::from("/opt/buildomat/etc/job.json"));
@@ -2220,6 +2276,66 @@ mod tests {
         assert_eq!(
             cf.socket_path(),
             PathBuf::from("/opt/buildomat/run/buildomat.sock")
+        );
+    }
+
+    #[test]
+    fn test_task_path_normal_mode() {
+        let cf = test_config();
+        assert_eq!(
+            cf.task_path(),
+            "/usr/bin:/bin:/usr/sbin:/sbin:/opt/ooce/bin:/opt/ooce/sbin"
+        );
+    }
+
+    #[test]
+    fn test_task_path_persistent_mode() {
+        let cf = test_config_persistent();
+        assert_eq!(
+            cf.task_path(),
+            "/opt/buildomat/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/ooce/bin:/opt/ooce/sbin"
+        );
+    }
+
+    #[test]
+    fn test_task_home_normal_mode() {
+        let cf = test_config();
+        assert_eq!(cf.task_home(), "/root");
+    }
+
+    #[test]
+    fn test_task_user_normal_mode() {
+        let cf = test_config();
+        assert_eq!(cf.task_user(), "root");
+    }
+
+    #[test]
+    fn test_task_cwd_normal_mode() {
+        let cf = test_config();
+        assert_eq!(cf.task_cwd(), PathBuf::from("/"));
+    }
+
+    #[test]
+    fn test_task_cwd_persistent_mode() {
+        let cf = test_config_persistent();
+        // In persistent mode, task_cwd uses task_home which reads env var
+        // For this test, we just verify it's not "/"
+        assert_ne!(cf.task_cwd(), PathBuf::from("/"));
+    }
+
+    #[test]
+    fn test_task_path_persistent_custom_opt() {
+        let cf = ConfigFile {
+            version: 2,
+            baseurl: "http://test".to_string(),
+            bootstrap: "bootstrap".to_string(),
+            token: "token".to_string(),
+            opt_base: Some("/custom/path".to_string()),
+            persistent: true,
+        };
+        assert_eq!(
+            cf.task_path(),
+            "/custom/path/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/ooce/bin:/opt/ooce/sbin"
         );
     }
 
