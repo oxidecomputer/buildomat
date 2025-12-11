@@ -18,9 +18,14 @@ use protocol::{Decoder, FactoryInfo, Message, Payload};
 pub(crate) mod protocol;
 pub(crate) mod server;
 
-/// Get the control socket path.
-pub fn socket_path() -> String {
-    "/var/run/buildomat.sock".to_string()
+/// Default socket path.
+const DEFAULT_SOCKET_PATH: &str = "/var/run/buildomat.sock";
+
+/// Get the control socket path for client (bmat) connections.
+/// Uses BUILDOMAT_SOCKET env var if set (set by agent when running jobs),
+/// otherwise falls back to the default path.
+fn socket_path() -> String {
+    std::env::var("BUILDOMAT_SOCKET").unwrap_or_else(|_| DEFAULT_SOCKET_PATH.to_string())
 }
 
 struct Stuff {
@@ -587,7 +592,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_socket_path_value() {
+    fn test_socket_path_default() {
+        std::env::remove_var("BUILDOMAT_SOCKET");
         assert_eq!(socket_path(), "/var/run/buildomat.sock");
+    }
+
+    #[test]
+    fn test_socket_path_from_env() {
+        std::env::set_var("BUILDOMAT_SOCKET", "/custom/path/buildomat.sock");
+        assert_eq!(socket_path(), "/custom/path/buildomat.sock");
+        std::env::remove_var("BUILDOMAT_SOCKET");
     }
 }

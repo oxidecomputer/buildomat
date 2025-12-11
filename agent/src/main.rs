@@ -1374,7 +1374,7 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
     let mut pingfreq = tokio::time::interval(Duration::from_secs(5));
     pingfreq.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-    let mut control = control::server::listen()?;
+    let mut control = control::server::listen(&cf.socket_path())?;
     let mut creq: Option<control::server::Request> = None;
     let mut bgprocs = exec::BackgroundProcesses::new();
 

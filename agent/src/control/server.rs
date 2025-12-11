@@ -15,10 +15,7 @@ use tokio::{
     },
 };
 
-use super::{
-    protocol::{Decoder, Message, Payload},
-    socket_path,
-};
+use super::protocol::{Decoder, Message, Payload};
 
 #[derive(Debug)]
 pub struct Request {
@@ -45,21 +42,25 @@ impl Request {
     }
 }
 
-pub fn listen() -> Result<Receiver<Request>> {
+pub fn listen(socket_path: &std::path::Path) -> Result<Receiver<Request>> {
     /*
      * Create the UNIX socket that the control program will use to contact the
      * agent.
      */
-    let path = socket_path();
-    std::fs::remove_file(&path).ok();
-    let ul = UnixListener::bind(&path)?;
+    // Create parent directory if it doesn't exist (needed for persistent mode)
+    if let Some(parent) = socket_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+
+    std::fs::remove_file(socket_path).ok();
+    let ul = UnixListener::bind(socket_path)?;
 
     /*
      * Allow everyone to connect:
      */
-    let mut perm = std::fs::metadata(&path)?.permissions();
+    let mut perm = std::fs::metadata(socket_path)?.permissions();
     perm.set_mode(0o777);
-    std::fs::set_permissions(&path, perm)?;
+    std::fs::set_permissions(socket_path, perm)?;
 
     /*
      * Create channel to hand requests back to the main loop.
