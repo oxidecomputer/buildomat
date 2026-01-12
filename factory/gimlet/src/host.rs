@@ -98,7 +98,7 @@ impl Host {
     }
 
     pub fn write_rom(&self, os_dir: &str) -> Result<()> {
-        let file = format!("{os_dir}/rom");
+        let file = format!("{os_dir}/gimlet.rom");
         info!(&self.log, "writing ROM image {file:?}");
 
         let res = Command::new("/usr/bin/pfexec")
