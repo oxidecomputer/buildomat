@@ -31,3 +31,7 @@ CREATE TABLE instance_event (
 
     PRIMARY KEY (model, serial, instance, seq)
 );
+
+-- v 4
+ALTER TABLE instance ADD COLUMN
+    panicked        INTEGER NOT NULL    DEFAULT 0;

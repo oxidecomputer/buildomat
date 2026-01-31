@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 use super::sublude::*;
@@ -115,6 +115,7 @@ pub struct Instance {
     pub target: String,
     pub state: InstanceState,
     pub bootstrap: String,
+    pub panicked: bool,
 }
 
 impl FromRow for Instance {
@@ -128,6 +129,7 @@ impl FromRow for Instance {
             InstanceDef::Target,
             InstanceDef::State,
             InstanceDef::Bootstrap,
+            InstanceDef::Panicked,
         ]
         .into_iter()
         .map(|col| {
@@ -150,6 +152,7 @@ impl FromRow for Instance {
             target: row.get(5)?,
             state: row.get(6)?,
             bootstrap: row.get(7)?,
+            panicked: row.get(8)?,
         })
     }
 }
@@ -178,6 +181,7 @@ impl Instance {
                 self.target.clone().into(),
                 self.state.into(),
                 self.bootstrap.clone().into(),
+                self.panicked.into(),
             ])
             .to_owned()
     }
@@ -207,6 +211,7 @@ impl Instance {
             lease: ci.lease,
             target: ci.target,
             bootstrap: ci.bootstrap,
+            panicked: false,
         }
     }
 }

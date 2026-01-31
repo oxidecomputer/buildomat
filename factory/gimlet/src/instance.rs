@@ -179,6 +179,19 @@ async fn instance_worker_one(
             Ok(DoNext::Immediate)
         }
         InstanceState::Installed => {
+            if i.panicked {
+                if c.db.instance_next_event_to_upload(&i)?.is_some() {
+                    /*
+                     * Wait for all outstanding events to upload first.
+                     */
+                    return Ok(DoNext::Sleep);
+                }
+
+                info!(log, "instance {id} has panicked; destroying");
+                c.db.instance_new_state(id, InstanceState::Destroying)?;
+                return Ok(DoNext::Immediate);
+            }
+
             if let Some(panic) = hm.report_panic() {
                 info!(log, "reporting panic for instance {id}: {panic:?}");
                 let now = Utc::now();
@@ -188,6 +201,12 @@ async fn instance_worker_one(
                 for l in panic.lines {
                     c.db.instance_append(id, "panic", l.trim_end(), now)?;
                 }
+
+                /*
+                 * Mark the instance as panicked.  When the panic output has
+                 * been fully uploaded, we will start tearing down the instance.
+                 */
+                c.db.instance_mark_panicked(id)?;
             }
 
             Ok(DoNext::Sleep)

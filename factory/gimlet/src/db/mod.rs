@@ -108,6 +108,36 @@ impl Database {
         })
     }
 
+    pub fn instance_mark_panicked(&self, id: &InstanceId) -> DBResult<()> {
+        self.sql.tx_immediate(|h| {
+            /*
+             * Get the existing state of this instance:
+             */
+            let i: Instance = h.get_row(Instance::find(id))?;
+
+            match i.state {
+                InstanceState::Preinstall
+                | InstanceState::Installing
+                | InstanceState::Installed => {}
+                InstanceState::Destroying | InstanceState::Destroyed => {
+                    conflict!("instance {id} already tearing down");
+                }
+            }
+
+            let uc = h.exec_update(
+                Query::update()
+                    .table(InstanceDef::Table)
+                    .and_where(Expr::col(InstanceDef::Model).eq(id.model()))
+                    .and_where(Expr::col(InstanceDef::Serial).eq(id.serial()))
+                    .and_where(Expr::col(InstanceDef::Seq).eq(id.seq()))
+                    .value(InstanceDef::Panicked, true)
+                    .to_owned(),
+            )?;
+            assert_eq!(uc, 1);
+            Ok(())
+        })
+    }
+
     pub fn i_next_seq_for_instance(
         &self,
         i: &Instance,
