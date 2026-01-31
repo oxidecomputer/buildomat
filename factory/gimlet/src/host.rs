@@ -64,7 +64,12 @@ impl Host {
         }
 
         info!(&self.log, "powering off");
-        self.hiffy("Sequencer.set_state").arg("state", "A2").call()?.unit()?;
+        let res =
+            self.hiffy("Sequencer.set_state").arg("state", "A2").call()?;
+        if res.value.to_string().trim().to_string() != "Changed" {
+            bail!("unexpected power off result: {:?}", res.stdout);
+        }
+
         Ok(())
     }
 
@@ -75,7 +80,12 @@ impl Host {
         }
 
         info!(&self.log, "powering on");
-        self.hiffy("Sequencer.set_state").arg("state", "A0").call()?.unit()?;
+        let res =
+            self.hiffy("Sequencer.set_state").arg("state", "A0").call()?;
+        if res.value.to_string().trim().to_string() != "Changed" {
+            bail!("unexpected power on result: {:?}", res.stdout);
+        }
+
         Ok(())
     }
 
@@ -299,7 +309,7 @@ impl Host {
         let serial = humility::locate_term(
             &res.value,
             &[
-                PathStep::Name("VpdIdentity".into()),
+                PathStep::Name("OxideIdentity".into()),
                 PathStep::Map("serial".into()),
             ],
         )?
@@ -308,7 +318,7 @@ impl Host {
         let partno = humility::locate_term(
             &res.value,
             &[
-                PathStep::Name("VpdIdentity".into()),
+                PathStep::Name("OxideIdentity".into()),
                 PathStep::Map("part_number".into()),
             ],
         )?
@@ -317,7 +327,7 @@ impl Host {
         let revision = humility::locate_term(
             &res.value,
             &[
-                PathStep::Name("VpdIdentity".into()),
+                PathStep::Name("OxideIdentity".into()),
                 PathStep::Map("revision".into()),
             ],
         )?
