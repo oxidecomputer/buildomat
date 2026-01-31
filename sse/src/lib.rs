@@ -111,7 +111,7 @@ impl ServerSentEvents {
             ))))?)
     }
 
-    pub fn build_event(&self) -> EventBuilder {
+    pub fn build_event(&self) -> EventBuilder<'_> {
         EventBuilder { sse: self, id: None, event: None, data: None }
     }
 

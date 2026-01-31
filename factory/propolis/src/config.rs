@@ -93,7 +93,7 @@ impl ConfigFile {
         &self,
         slot: u32,
         id: &InstanceId,
-    ) -> Result<InstanceInSlot> {
+    ) -> Result<InstanceInSlot<'_>> {
         Ok(InstanceInSlot { config: self, slot, id: id.clone() })
     }
 

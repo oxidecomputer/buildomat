@@ -43,7 +43,7 @@ fn make_get_response<E>(
     rx: mpsc::Receiver<std::result::Result<Frame<Bytes>, E>>,
 ) -> Result<Response<Body>>
 where
-    E: Into<Box<(dyn std::error::Error + Send + Sync + 'static)>>
+    E: Into<Box<dyn std::error::Error + Send + Sync + 'static>>
         + Send
         + Sync
         + 'static,

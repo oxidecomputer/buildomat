@@ -40,7 +40,7 @@ chrono = { version = "0.4", features = [ "serde" ] }
 debug_parser = "0.1"
 devinfo = { version = "0.1", features = [ "private" ] }
 dirs-next = "2"
-dropshot = { git = "https://github.com/oxidecomputer/dropshot" }
+dropshot = "0.16"
 futures = "0.3"
 futures-core = "0.3"
 getopts = "0.2"
@@ -60,8 +60,8 @@ new_mime_guess = "4"
 octorust = { git = "https://github.com/oxidecomputer/third-party-api-clients", branch = "jclulow" }
 pem = "3"
 percent-encoding = "2.1"
-progenitor = { version = "0.9.1" }
-progenitor-client = { version = "0.9.1" }
+progenitor = { version = "0.11" }
+progenitor-client = { version = "0.11" }
 rand = "0.9"
 regex = "1"
 reqwest = { version = "0.12", features = [ "json", "stream" ] }
@@ -92,6 +92,6 @@ tokio = { version = "1", features = [ "full" ] }
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = [ "io" ] }
 toml = "0.8"
-usdt = "0.5"
+usdt = "0.6"
 uuid = { version = "1", features = [ "v4" ] }
 zone = { version = "0.3", features = [ "async" ], default-features = false }

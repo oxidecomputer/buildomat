@@ -26,11 +26,11 @@ mod config;
 
 trait FlagsExt {
     #[must_use]
-    fn add_flags(&mut self, name: &'static str) -> Flags;
+    fn add_flags(&mut self, name: &'static str) -> Flags<'_>;
 }
 
 impl FlagsExt for Row {
-    fn add_flags(&mut self, name: &'static str) -> Flags {
+    fn add_flags(&mut self, name: &'static str) -> Flags<'_> {
         Flags { row: self, name, out: String::new() }
     }
 }
