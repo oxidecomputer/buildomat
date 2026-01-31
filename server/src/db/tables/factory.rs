@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 use super::sublude::*;
@@ -22,6 +22,14 @@ pub struct Factory {
      * execution.
      */
     pub hold_workers: bool,
+
+    /**
+     * When workers are marked as held, they are kept for an indefinite period
+     * of time.  Some factories have limited available slots, or expensive
+     * time-based billing.  In those cases, we may only want to hold workers
+     * for a limited period of time before recycling them automatically.
+     */
+    pub max_hold_age: Option<Seconds>,
 }
 
 impl FromRow for Factory {
@@ -33,6 +41,7 @@ impl FromRow for Factory {
             FactoryDef::Lastping,
             FactoryDef::Enable,
             FactoryDef::HoldWorkers,
+            FactoryDef::MaxHoldAge,
         ]
         .into_iter()
         .map(|col| {
@@ -52,6 +61,7 @@ impl FromRow for Factory {
             lastping: row.get(3)?,
             enable: row.get(4)?,
             hold_workers: row.get(5)?,
+            max_hold_age: row.get(6)?,
         })
     }
 }
@@ -76,7 +86,12 @@ impl Factory {
                 self.lastping.into(),
                 self.enable.into(),
                 self.hold_workers.into(),
+                self.max_hold_age.into(),
             ])
             .to_owned()
+    }
+
+    pub fn max_hold_age(&self) -> Option<Duration> {
+        self.max_hold_age.map(|s| Duration::from_secs(s.0))
     }
 }

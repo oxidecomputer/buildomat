@@ -340,3 +340,7 @@ ALTER TABLE job ADD COLUMN
 -- v 57
 CREATE INDEX job_purging_queue ON job (id, complete, time_archived, time_purged)
     WHERE complete = true AND time_archived IS NOT NULL AND time_purged IS NULL;
+
+-- v 58
+ALTER TABLE factory ADD COLUMN
+    max_hold_age    INTEGER;

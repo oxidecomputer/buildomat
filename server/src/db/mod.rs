@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 use std::collections::HashMap;
@@ -29,6 +29,7 @@ mod types {
     sqlite_integer_new_type!(UnixUid, u32, Unsigned);
     sqlite_integer_new_type!(UnixGid, u32, Unsigned);
     sqlite_integer_new_type!(DataSize, u64, BigUnsigned);
+    sqlite_integer_new_type!(Seconds, u64, BigUnsigned);
 
     sqlite_ulid_new_type!(UserId);
     sqlite_ulid_new_type!(JobId);
@@ -2764,6 +2765,7 @@ impl Database {
             lastping: None,
             enable: true,
             hold_workers: false,
+            max_hold_age: None,
         };
 
         self.sql.tx(|h| h.exec_insert(f.insert()))?;
@@ -2804,6 +2806,7 @@ impl Database {
                 lastping: None,
                 enable: true,
                 hold_workers: false,
+                max_hold_age: None,
             });
         }
 

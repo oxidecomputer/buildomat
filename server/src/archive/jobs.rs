@@ -405,6 +405,7 @@ impl From<db::Factory> for ArchivedFactoryInfo {
             lastping: _,
             enable: _,
             hold_workers: _,
+            max_hold_age: _,
         } = input;
 
         ArchivedFactoryInfo { id: id.to_string(), name }

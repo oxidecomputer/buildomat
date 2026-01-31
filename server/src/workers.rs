@@ -58,6 +58,24 @@ async fn worker_cleanup_one(log: &Logger, c: &Central) -> Result<()> {
         }
 
         if w.is_held() {
+            if let Some(max) = c.db.factory(w.factory())?.max_hold_age() {
+                /*
+                 * This factory has an age limit for held workers.
+                 */
+                if let Some(when) = w.hold_time {
+                    if when.age() > max {
+                        info!(
+                            log,
+                            "recycling held worker {} after {} seconds",
+                            w.id,
+                            max.as_secs(),
+                        );
+                        c.db.worker_recycle(w.id)?;
+                        continue;
+                    }
+                }
+            }
+
             /*
              * If the worker is marked on hold, leave it and any related jobs
              * alone.
