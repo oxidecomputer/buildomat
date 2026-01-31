@@ -658,6 +658,8 @@ async fn poll_job(l: &Level<Stuff>, id: &str, json: bool) -> Result<()> {
                     println!("|T| {}", e.payload);
                 } else if e.stream == "console" {
                     println!("|C| {}", e.payload);
+                } else if e.stream == "panic" {
+                    println!("|!| {}", e.payload);
                 } else if e.stream.starts_with("bg.") {
                     let t = e.stream.split('.').collect::<Vec<_>>();
                     if t.len() == 3 {

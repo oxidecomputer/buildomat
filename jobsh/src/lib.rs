@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 use std::borrow::Cow;
@@ -16,7 +16,7 @@ pub mod variety;
  * which we send along with the generated HTML output.
  */
 const CSS_STREAM_CLASSES: &[&str] =
-    &["stdout", "stderr", "task", "worker", "control", "console"];
+    &["stdout", "stderr", "task", "worker", "control", "console", "panic"];
 
 pub trait JobEventEx {
     /**

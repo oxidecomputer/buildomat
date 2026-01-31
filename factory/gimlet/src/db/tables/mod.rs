@@ -1,12 +1,12 @@
 /*
- * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 mod sublude {
     pub use std::str::FromStr;
 
     pub use crate::db::types::*;
-    pub use buildomat_database::{rusqlite, sqlite_sql_enum, FromRow};
+    pub use buildomat_database::{rusqlite, sqlite_sql_enum, FromRow, IsoDate};
     pub use rusqlite::Row;
     pub use sea_query::{
         enum_def, ColumnRef, Expr, Iden, InsertStatement, Query, SeaRc,
@@ -15,5 +15,7 @@ mod sublude {
 }
 
 mod instance;
+mod instance_event;
 
 pub use instance::*;
+pub use instance_event::*;

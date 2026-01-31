@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
@@ -321,12 +321,63 @@ async fn factory_task_one(log: &Logger, c: &Arc<App>) -> Result<()> {
     Ok(())
 }
 
+async fn upload_task_one(log: &Logger, c: &Arc<App>) -> Result<()> {
+    'outer: for i in c.db.instances_active()? {
+        debug!(log, "upload worker processing {}...", i.id());
+
+        while let Some(ie) = c.db.instance_next_event_to_upload(&i)? {
+            debug!(
+                log,
+                "upload worker processing {} event #{}...",
+                i.id(),
+                ie.seq,
+            );
+
+            let res = c
+                .client
+                .factory_worker_append()
+                .worker(&i.worker)
+                .body_map(|body| {
+                    body.payload(&ie.payload).stream(&ie.stream).time(ie.time.0)
+                })
+                .send()
+                .await?;
+
+            if res.retry {
+                /*
+                 * The factory is not yet ready to receive this event record,
+                 * and has asked us to hold onto it and try again soon.
+                 */
+                debug!(
+                    log,
+                    "not ready to process {} event #{}",
+                    i.id(),
+                    ie.seq,
+                );
+                continue 'outer;
+            }
+
+            /*
+             * The record was accepted or ignored by the core API server and
+             * does not need to be uploaded again.
+             */
+            c.db.instance_mark_event_uploaded(&i, &ie)?;
+        }
+    }
+
+    Ok(())
+}
+
 pub(crate) async fn factory_task(c: Arc<App>) -> Result<()> {
     let log = c.log.new(o!("component" => "factory_task"));
 
     loop {
         if let Err(e) = factory_task_one(&log, &c).await {
             error!(log, "factory task error: {:?}", e);
+        }
+
+        if let Err(e) = upload_task_one(&log, &c).await {
+            error!(log, "upload events error: {:?}", e);
         }
 
         tokio::time::sleep(Duration::from_secs(1)).await;

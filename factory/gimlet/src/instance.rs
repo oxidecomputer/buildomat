@@ -1,10 +1,11 @@
 /*
- * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use anyhow::{bail, Result};
+use chrono::prelude::*;
 use slog::{error, info, o, Logger};
 
 use crate::{
@@ -177,7 +178,20 @@ async fn instance_worker_one(
             c.db.instance_new_state(id, InstanceState::Installed)?;
             Ok(DoNext::Immediate)
         }
-        InstanceState::Installed => Ok(DoNext::Sleep),
+        InstanceState::Installed => {
+            if let Some(panic) = hm.report_panic() {
+                info!(log, "reporting panic for instance {id}: {panic:?}");
+                let now = Utc::now();
+
+                c.db.instance_append(id, "panic", "host panic detected!", now)?;
+
+                for l in panic.lines {
+                    c.db.instance_append(id, "panic", l.trim_end(), now)?;
+                }
+            }
+
+            Ok(DoNext::Sleep)
+        }
         InstanceState::Destroying => {
             /*
              * Begin cleaning the machine, and wait for it to be ready.

@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 use std::{
@@ -38,6 +38,11 @@ pub struct ExecResult {
     pub out: String,
     #[allow(unused)]
     pub err: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LastPanic {
+    pub lines: Vec<String>,
 }
 
 impl Host {
@@ -128,6 +133,55 @@ impl Host {
         }
 
         Ok(())
+    }
+
+    pub fn reset_sp(&self) -> Result<()> {
+        info!(&self.log, "resetting SP");
+
+        let res = Command::new("/usr/bin/pfexec")
+            .env_clear()
+            .env("HUMILITY_ARCHIVE", &self.archive)
+            .env("HUMILITY_PROBE", &self.probe)
+            .arg(&self.tools.humility)
+            .arg("reset")
+            .output()?;
+
+        let e = String::from_utf8_lossy(&res.stderr).trim().to_string();
+        if !res.status.success() {
+            bail!("could not reset SP: {e}");
+        }
+
+        /*
+         * Give the SP time to start up before we get moving again.
+         */
+        std::thread::sleep(Duration::from_secs(5));
+
+        Ok(())
+    }
+
+    pub fn last_panic(&self) -> Result<Option<LastPanic>> {
+        info!(&self.log, "checking for host panic");
+
+        let res = Command::new("/usr/bin/pfexec")
+            .env_clear()
+            .env("HUMILITY_ARCHIVE", &self.archive)
+            .env("HUMILITY_PROBE", &self.probe)
+            .arg(&self.tools.humility)
+            .arg("host")
+            .arg("last-panic")
+            .output()?;
+
+        let e = String::from_utf8_lossy(&res.stderr).trim().to_string();
+        if !res.status.success() {
+            bail!("could not get last panic: {e}");
+        }
+
+        let o = String::from_utf8_lossy(&res.stdout).to_string();
+        if e.contains("panic information is empty") || o.trim().is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(LastPanic { lines: o.lines().map(str::to_string).collect() }))
     }
 
     pub fn boot_server(&self, os_dir: &str) -> Result<()> {
@@ -414,6 +468,7 @@ enum HostState {
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum CleaningState {
+    ClearPanic,
     WriteRom,
     Boot,
     BootWait,
@@ -423,6 +478,7 @@ enum CleaningState {
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum StartingState {
+    ClearPanic,
     WriteRom,
     Boot,
     BootWait,
@@ -481,6 +537,8 @@ pub struct Inner {
 struct Locked {
     goal: Option<HostGoal>,
     status: Option<HostStatus>,
+    panic: Option<LastPanic>,
+    panic_new: bool,
 }
 
 impl HostManager {
@@ -489,7 +547,12 @@ impl HostManager {
             host,
             tools,
             log,
-            locked: Mutex::new(Locked { goal: None, status: None }),
+            locked: Mutex::new(Locked {
+                goal: None,
+                status: None,
+                panic: None,
+                panic_new: false,
+            }),
         }));
 
         let hm = hm0.clone();
@@ -516,6 +579,20 @@ impl HostManager {
             .map(|eip| eip.with_gateway("extra", &self.host.config.gateway))
             .into_iter()
             .collect()
+    }
+
+    pub fn report_panic(&self) -> Option<LastPanic> {
+        let mut l = self.locked.lock().unwrap();
+
+        if l.panic_new {
+            l.panic_new = false;
+
+            if let Some(panic) = &l.panic {
+                return Some(panic.clone());
+            }
+        }
+
+        None
     }
 
     pub fn start(
@@ -595,14 +672,50 @@ impl HostManager {
 
     fn thread_noerr(&self) {
         let mut st = HostState::Unknown;
+        let mut last_check_panic = Instant::now();
 
         loop {
             if let Err(e) = self.thread(&mut st) {
                 error!(&self.log, "thread error: {e}");
             }
 
+            /*
+             * Regardless of host state, we will periodically check to see if a
+             * panic has been reported by the system.
+             */
+            if Instant::now()
+                .saturating_duration_since(last_check_panic)
+                .as_secs()
+                >= 30
+            {
+                if let Err(e) = self.thread_check_panic() {
+                    error!(self.log, "thread checking panic: {e}");
+                }
+
+                last_check_panic = Instant::now();
+            }
+
             std::thread::sleep(Duration::from_secs(1));
         }
+    }
+
+    fn thread_check_panic(&self) -> Result<()> {
+        let log = &self.log;
+        let sys = Host::open(self.log.clone(), &self.tools, &self.host)?;
+
+        let panic = sys.last_panic()?;
+
+        let mut l = self.locked.lock().unwrap();
+        if l.panic != panic {
+            if let Some(panic) = &panic {
+                info!(log, "detected new host panic: {panic:?}");
+            }
+
+            l.panic_new = true;
+            l.panic = panic;
+        }
+
+        Ok(())
     }
 
     fn thread(&self, st: &mut HostState) -> Result<()> {
@@ -620,6 +733,7 @@ impl HostManager {
                 match l.goal.take() {
                     Some(HostGoal::Clean) => {
                         info!(log, "cleaning host");
+                        l.panic_new = false;
                         *st = HostState::Cleaning(CleaningState::WriteRom);
                     }
                     Some(HostGoal::Start { .. }) => {
@@ -687,6 +801,7 @@ impl HostManager {
                         } else {
                             info!(log, "cleaning host from the ready state");
                             *st = HostState::Cleaning(CleaningState::WriteRom);
+                            l.panic_new = false;
                             l.status = None;
                         }
                     }
@@ -695,8 +810,10 @@ impl HostManager {
                             "url" => &hgs.url,
                             "os_dir" => &hgs.os_dir,
                         );
-                        *st = HostState::Starting(StartingState::WriteRom, hgs);
+                        *st =
+                            HostState::Starting(StartingState::ClearPanic, hgs);
                         l.status = None;
+                        l.panic_new = false;
                     }
                     None => {
                         /*
@@ -724,6 +841,7 @@ impl HostManager {
                         Some(HostGoal::Clean) => {
                             info!(log, "cleaning host from the starting state");
                             *st = HostState::Cleaning(CleaningState::WriteRom);
+                            l.panic_new = false;
                             return Ok(());
                         }
                         Some(HostGoal::Start { .. }) => {
@@ -764,6 +882,7 @@ impl HostManager {
                 match l.goal.take() {
                     Some(HostGoal::Clean) => {
                         l.status = None;
+                        l.panic_new = false;
                         info!(log, "cleaning host from the started state");
                         *st = HostState::Cleaning(CleaningState::WriteRom);
                     }
@@ -822,6 +941,21 @@ impl HostManager {
 
                 info!(log, "got cleanup output"; "info" => res.out);
 
+                *cst = CleaningState::ClearPanic;
+            }
+            CleaningState::ClearPanic => {
+                if let Some(panic) = sys.last_panic()? {
+                    info!(log, "found panic data while cleaning: {panic:?}");
+
+                    sys.reset_sp()?;
+
+                    /*
+                     * Go for another lap to make sure we were able to clean out
+                     * any previous panic state.
+                     */
+                    return Ok(());
+                }
+
                 *cst = CleaningState::Ready;
             }
             CleaningState::Ready => (),
@@ -839,6 +973,21 @@ impl HostManager {
         let sys = Host::open(self.log.clone(), &self.tools, &self.host)?;
 
         match sst {
+            StartingState::ClearPanic => {
+                if let Some(panic) = sys.last_panic()? {
+                    info!(log, "found old panic data: {panic:?}");
+
+                    sys.reset_sp()?;
+
+                    /*
+                     * Go for another lap to make sure we were able to clean out
+                     * any previous panic state.
+                     */
+                    return Ok(());
+                }
+
+                *sst = StartingState::WriteRom;
+            }
             StartingState::WriteRom => {
                 sys.power_off()?;
                 sys.pick_bsu(1)?;

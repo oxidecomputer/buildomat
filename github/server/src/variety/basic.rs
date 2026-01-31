@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 use crate::{App, FlushOut, FlushState};
@@ -411,10 +411,11 @@ pub(crate) async fn run(
 
                 let stdio = ev.stream == "stdout" || ev.stream == "stderr";
                 let console = ev.stream == "console";
+                let panic = ev.stream == "panic";
                 let worker = ev.stream == "worker";
                 let bgproc = ev.stream.starts_with("bg.");
 
-                if stdio || console {
+                if stdio || console || panic {
                     /*
                      * Some commands, like "cargo build --verbose", generate
                      * exceptionally long output lines, running into the
@@ -429,8 +430,14 @@ pub(crate) async fn run(
                      * Users will still be able to see the full output in our
                      * detailed view where we get to render the whole page.
                      */
-                    let mut line =
-                        if console { "|C| " } else { "| " }.to_string();
+                    let mut line = if console {
+                        "|C| "
+                    } else if panic {
+                        "|!|"
+                    } else {
+                        "| "
+                    }
+                    .to_string();
 
                     /*
                      * We support ANSI escapes in the log renderer, which means

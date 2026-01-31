@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 /*
@@ -62,6 +62,10 @@ tr.s_control {
 
 tr.s_console {
     background-color: #e7d1ff;
+}
+
+tr.s_panic {
+    background-color: #f0cccc;
 }
 
 tr.s_bgtask {
