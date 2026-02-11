@@ -16,6 +16,12 @@ use rusty_ulid::Ulid;
 use serde::{Deserialize, Serialize};
 use slog::{o, Drain, Logger};
 
+/// Size of chunks for file uploads (5MB).
+///
+/// Used by the agent (`agent/src/upload.rs`) and the persistent factory
+/// (`factory/persistent/src/worker_ops.rs`) when uploading output files.
+pub const UPLOAD_CHUNK_SIZE: usize = 5 * 1024 * 1024;
+
 pub fn read_toml<P: AsRef<Path>, T>(n: P) -> Result<T>
 where
     for<'de> T: Deserialize<'de>,

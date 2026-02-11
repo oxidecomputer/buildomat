@@ -9,7 +9,12 @@ buildomat-client = { path = "../../client" }
 buildomat-common = { path = "../../common" }
 
 anyhow = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
 getopts = { workspace = true }
+glob = { workspace = true }
+libc = { workspace = true }
+rusty_ulid = { workspace = true }
 serde = { workspace = true }
 slog = { workspace = true }
 slog-term = { workspace = true }

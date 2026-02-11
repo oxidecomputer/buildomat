@@ -10,21 +10,29 @@
 //! the external command, keeping this factory generic.
 
 mod config;
+mod factory;
+mod process;
+mod worker_ops;
 
 use std::time::Duration;
 
 use anyhow::{bail, Result};
 use buildomat_common::*;
 use getopts::Options;
-use slog::{error, info};
+use slog::{error, info, warn};
 use tokio::signal::unix::SignalKind;
 
 use config::ConfigFile;
+use factory::{factory_loop, shutdown, Central};
 
-/// Base sleep between main loop iterations on success.
+/// Maximum time to spend on graceful shutdown before giving up.
+/// Budget: ~10s graceful_kill + ~20s for network calls.
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Base sleep between factory_loop iterations on success.
 const LOOP_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Maximum sleep between main loop iterations on repeated errors.
+/// Maximum sleep between factory_loop iterations on repeated errors.
 const MAX_ERROR_BACKOFF: Duration = Duration::from_secs(60);
 
 #[tokio::main]
@@ -56,13 +64,14 @@ async fn main() -> Result<()> {
     info!(log, "persistent factory starting";
         "targets" => ?config.targets(),
         "command" => &config.execution.command,
-        "args" => ?config.execution.args,
         "job_dir" => %config.execution.job_dir.display(),
     );
 
     let client = buildomat_client::ClientBuilder::new(&config.general.baseurl)
         .bearer_token(&config.factory.token)
         .build()?;
+
+    let mut central = Central { log, client, config, instances: Vec::new() };
 
     let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())?;
     let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt())?;
@@ -73,25 +82,25 @@ async fn main() -> Result<()> {
     loop {
         tokio::select! {
             _ = sigterm.recv() => {
-                info!(log, "received SIGTERM, shutting down");
+                info!(central.log, "received SIGTERM, shutting down");
                 break;
             }
             _ = sigint.recv() => {
-                info!(log, "received SIGINT, shutting down");
+                info!(central.log, "received SIGINT, shutting down");
                 break;
             }
             _ = sighup.recv() => {
-                info!(log, "received SIGHUP, shutting down");
+                info!(central.log, "received SIGHUP, shutting down");
                 break;
             }
             _ = async {
-                match client.factory_ping().send().await {
-                    Ok(_) => {
+                match factory_loop(&mut central).await {
+                    Ok(()) => {
                         error_backoff = LOOP_INTERVAL;
                         tokio::time::sleep(LOOP_INTERVAL).await;
                     }
                     Err(e) => {
-                        error!(log, "factory ping error: {:?}", e;
+                        error!(central.log, "factory loop error: {:?}", e;
                             "retry_in" => ?error_backoff);
                         tokio::time::sleep(error_backoff).await;
                         error_backoff = (error_backoff * 2).min(MAX_ERROR_BACKOFF);
@@ -101,6 +110,27 @@ async fn main() -> Result<()> {
         }
     }
 
-    info!(log, "factory exited");
+    tokio::select! {
+        _ = shutdown(&mut central) => {}
+        _ = sigterm.recv() => {
+            warn!(central.log,
+                "received second signal during shutdown, forcing exit");
+        }
+        _ = sigint.recv() => {
+            warn!(central.log,
+                "received second signal during shutdown, forcing exit");
+        }
+        _ = sighup.recv() => {
+            warn!(central.log,
+                "received second signal during shutdown, forcing exit");
+        }
+        _ = tokio::time::sleep(SHUTDOWN_TIMEOUT) => {
+            warn!(central.log,
+                "shutdown timed out after {:?}, forcing exit",
+                SHUTDOWN_TIMEOUT);
+        }
+    }
+
+    info!(central.log, "factory exited");
     Ok(())
 }
