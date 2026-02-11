@@ -838,6 +838,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "buildomat-factory-persistent"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "buildomat-client",
+ "buildomat-common",
+ "getopts",
+ "serde",
+ "slog",
+ "slog-term",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "buildomat-factory-propolis"
 version = "0.0.0"
 dependencies = [
