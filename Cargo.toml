@@ -59,6 +59,7 @@ http = "1"
 http-body-util = "0.1"
 http-range = "0.1"
 hyper = "1"
+hyper-util = "0.1"
 iddqd = "0.3"
 ipnet = "2.8"
 jmclib = { git = "https://github.com/jclulow/rust-jmclib", features = ["sqlite"] }

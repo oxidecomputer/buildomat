@@ -14,6 +14,11 @@ mod factory;
 mod process;
 mod worker_ops;
 
+#[cfg(test)]
+mod test_support;
+#[cfg(test)]
+mod tests;
+
 use std::time::Duration;
 
 use anyhow::{bail, Result};

@@ -223,5 +223,5 @@ code lands.
 
 - [x] Configuration, signal handling, and main loop skeleton
 - [x] Factory loop and worker operations (lease, spawn, complete)
-- [ ] Unit and integration tests
+- [x] Unit and integration tests
 - [ ] End-to-end tests with runner stub
