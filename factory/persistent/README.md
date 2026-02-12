@@ -214,14 +214,3 @@ interface. It supports multiple modes (`--mode success|fail|slow|crash|
 no-output|large-output`) to test different lifecycle paths. See its source for
 the full interface contract and `factory/persistent/tests/stub-config.toml` for
 an example factory configuration that uses it.
-
-## Development Roadmap
-
-This factory is being built incrementally.  Each commit adds one coherent piece
-of functionality.  All items below will be checked off as the corresponding
-code lands.
-
-- [x] Configuration, signal handling, and main loop skeleton
-- [x] Factory loop and worker operations (lease, spawn, complete)
-- [x] Unit and integration tests
-- [x] End-to-end tests with runner stub
