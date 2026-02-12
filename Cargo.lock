@@ -1046,6 +1046,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "buildomat-persistent-runner-stub"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "buildomat-common",
+ "getopts",
+ "slog",
+ "slog-term",
+]
+
+[[package]]
 name = "buildomat-server"
 version = "0.0.0"
 dependencies = [

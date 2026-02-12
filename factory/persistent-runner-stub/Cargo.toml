@@ -1,0 +1,13 @@
+[package]
+name = "buildomat-persistent-runner-stub"
+version = "0.0.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+buildomat-common = { path = "../../common" }
+
+anyhow = { workspace = true }
+getopts = { workspace = true }
+slog = { workspace = true }
+slog-term = { workspace = true }

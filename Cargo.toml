@@ -12,6 +12,7 @@ members = [
 	"factory/gimlet",
 	"factory/lab",
 	"factory/persistent",
+	"factory/persistent-runner-stub",
 	"factory/propolis",
 	"github/client",
 	"github/database",

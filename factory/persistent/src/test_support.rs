@@ -26,7 +26,6 @@ pub(crate) fn test_logger() -> Logger {
 }
 
 /// Build a JSON response for mock servers.
-#[allow(dead_code)] // Used by e2e_tests, added in a later commit.
 pub(crate) fn json_response(
     status: StatusCode,
     body: serde_json::Value,

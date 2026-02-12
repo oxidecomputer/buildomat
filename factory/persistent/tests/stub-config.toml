@@ -1,0 +1,45 @@
+# Example factory configuration using the persistent-runner-stub.
+#
+# This config is meant for manual integration testing. To use it:
+#
+#   cargo build -p buildomat-persistent-runner-stub
+#   cargo run -p buildomat-factory-persistent -- -f factory/persistent/tests/stub-config.toml
+#
+# The factory will connect to the buildomat server, request leases, and
+# invoke the stub binary for each job. Switch modes by changing the args:
+#
+#   Mode          Args                        Tests
+#   ----          ----                        -----
+#   success       ["--mode", "success"]       Full lifecycle (default below)
+#   fail          ["--mode", "fail"]          Failure reporting
+#   slow          ["--mode", "slow",          Long-running, event streaming
+#                  "--duration", "30"]
+#   crash         ["--mode", "crash"]         Abrupt termination
+#   no-output     ["--mode", "no-output"]     require_match failure path
+#   large-output  ["--mode", "large-output"]  Chunked upload (>5MB)
+#
+# Output rules to pair with each mode (set on the job, not here):
+#
+#   success/fail/slow/large-output:
+#     rule = "*.log",  require_match = true
+#     rule = "*"
+#     rule = "*.tmp",  ignore = true
+#
+#   no-output:
+#     rule = "*.log",  require_match = true   # will fail — no files written
+#
+#   crash:
+#     rule = "*"                              # nothing to upload
+
+[general]
+baseurl = "http://127.0.0.1:9979"
+
+[factory]
+token = "INSERT_FACTORY_TOKEN_HERE"
+
+[execution]
+command = "target/debug/buildomat-persistent-runner-stub"
+args = ["--mode", "success"]
+job_dir = "/tmp/buildomat-stub-jobs"
+
+[target.stub-test]
