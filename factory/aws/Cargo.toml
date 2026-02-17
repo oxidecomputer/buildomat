@@ -5,6 +5,7 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
+buildomat-aws = { path = "../../aws" }
 buildomat-client = { path = "../../client" }
 buildomat-common = { path = "../../common" }
 buildomat-types = { path = "../../types" }

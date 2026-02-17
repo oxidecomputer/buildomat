@@ -39,6 +39,7 @@ mod files;
 mod jobs;
 mod workers;
 
+use buildomat_aws::AwsConfig;
 use db::{
     AuthUser, Job, JobEvent, JobFile, JobFileId, JobId, JobOutput,
     JobOutputAndFile, Worker, WorkerEvent,
@@ -1053,12 +1054,15 @@ async fn main() -> Result<()> {
     dbfile.push("data.sqlite3");
     let db = db::Database::new(log.clone(), dbfile, config.sqlite.cache_kb)?;
 
-    let awscfg = aws_config::ConfigLoader::default()
-        .region(config.storage.region())
-        .credentials_provider(config.storage.creds())
-        .behavior_version(aws_config::BehaviorVersion::v2026_01_12())
-        .load()
-        .await;
+    let awscfg = AwsConfig {
+        access_key_id: config.storage.access_key_id.clone(),
+        secret_access_key: config.storage.secret_access_key.clone(),
+        profile: config.storage.profile.clone(),
+        region: config.storage.region.clone(),
+    }
+    .into_sdk_config()
+    .await?;
+
     let s3 = aws_sdk_s3::Client::new(&awscfg);
 
     let files = files::Files::new(log.new(o!("component" => "files")));

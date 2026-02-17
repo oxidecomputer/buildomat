@@ -1,0 +1,9 @@
+[package]
+name = "buildomat-aws"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+aws-config = { workspace = true }
+aws-credential-types = { workspace = true }
+thiserror = { workspace = true }

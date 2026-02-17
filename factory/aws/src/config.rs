@@ -43,8 +43,9 @@ pub(crate) struct ConfigFileAwsTarget {
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ConfigFileAws {
-    pub access_key_id: String,
-    pub secret_access_key: String,
+    pub access_key_id: Option<String>,
+    pub secret_access_key: Option<String>,
+    pub profile: Option<String>,
     pub region: String,
     pub vpc: String,
     pub subnet: String,
