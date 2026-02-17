@@ -1811,6 +1811,53 @@
         }
       }
     },
+    "/0/worker/cache-upload/{upload_id}/complete": {
+      "post": {
+        "operationId": "worker_cache_put_complete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerCachePutCompleteBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Null",
+                  "type": "string",
+                  "enum": [
+                    null
+                  ]
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/0/worker/diagnostics/complete": {
       "post": {
         "operationId": "worker_diagnostics_complete",
@@ -1869,6 +1916,96 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/0/worker/job/{job}/cache/{name}": {
+      "get": {
+        "operationId": "worker_cache_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerCacheGetResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "worker_cache_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size_bytes",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerCachePutResult"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -3808,6 +3945,78 @@
         },
         "required": [
           "id"
+        ]
+      },
+      "WorkerCacheGetResponse": {
+        "type": "object",
+        "properties": {
+          "download_url": {
+            "nullable": true,
+            "type": "string"
+          }
+        }
+      },
+      "WorkerCachePutCompleteBody": {
+        "type": "object",
+        "properties": {
+          "uploaded_etags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "uploaded_etags"
+        ]
+      },
+      "WorkerCachePutResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "upload"
+                ]
+              },
+              "chunk_size_bytes": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "chunk_upload_urls": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "upload_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "action",
+              "chunk_size_bytes",
+              "chunk_upload_urls",
+              "upload_id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "skip"
+                ]
+              }
+            },
+            "required": [
+              "action"
+            ]
+          }
         ]
       },
       "WorkerCompleteDiagnostics": {

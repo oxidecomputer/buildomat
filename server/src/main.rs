@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 #![allow(clippy::many_single_char_names)]
@@ -41,7 +41,7 @@ mod workers;
 
 use db::{
     AuthUser, Job, JobEvent, JobFile, JobFileId, JobId, JobOutput,
-    JobOutputAndFile, Worker, WorkerEvent,
+    JobOutputAndFile, UserId, Worker, WorkerEvent,
 };
 
 pub(crate) trait MakeInternalError<T> {
@@ -101,6 +101,18 @@ impl<T> MakeInternalError<T> for serde_json::Result<T> {
     fn or_500(self) -> SResult<T, HttpError> {
         self.map_err(|e| {
             let msg = format!("serde JSON error: {:?}", e);
+            HttpError::for_internal_error(msg)
+        })
+    }
+}
+
+impl<T, E> MakeInternalError<T> for Result<T, aws_sdk_s3::error::SdkError<E>>
+where
+    E: std::fmt::Debug,
+{
+    fn or_500(self) -> SResult<T, HttpError> {
+        self.map_err(|e| {
+            let msg = format!("AWS error: {:?}", e);
             HttpError::for_internal_error(msg)
         })
     }
@@ -800,6 +812,10 @@ impl Central {
     ) -> Result<Vec<WorkerEvent>> {
         Ok(self.db.worker_events(worker.id, minseq, limit)?)
     }
+
+    fn cache_object_key(&self, owner: UserId, name: &str) -> String {
+        self.object_key("cache", &format!("{owner}/{name}"))
+    }
 }
 
 #[allow(dead_code)]
@@ -995,6 +1011,9 @@ async fn main() -> Result<()> {
     ad.register(api::worker::worker_fail)?;
     ad.register(api::worker::worker_diagnostics_enable)?;
     ad.register(api::worker::worker_diagnostics_complete)?;
+    ad.register(api::worker::worker_cache_get)?;
+    ad.register(api::worker::worker_cache_put)?;
+    ad.register(api::worker::worker_cache_put_complete)?;
     ad.register(api::worker::worker_append)?;
     ad.register(api::worker::worker_job_append)?;
     ad.register(api::worker::worker_job_append_one)?;
