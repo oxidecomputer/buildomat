@@ -2,7 +2,7 @@
  * Copyright 2026 Oxide Computer Company
  */
 
-use std::{io::Read, ops::Range, time::Duration};
+use std::{io::Read, ops::Range, path::PathBuf, time::Duration};
 
 use anyhow::{bail, Result};
 use bytes::BytesMut;
@@ -15,6 +15,7 @@ use tokio::{
 
 use protocol::{Decoder, FactoryInfo, Message, Payload};
 
+mod cache;
 pub(crate) mod protocol;
 pub(crate) mod server;
 
@@ -116,6 +117,7 @@ pub async fn main() -> Result<()> {
     l.cmd("address", "manage IP addresses for this job", cmd!(cmd_address))?;
     l.cmd("process", "manage background processes", cmd!(cmd_process))?;
     l.cmd("factory", "factory information for this worker", cmd!(cmd_factory))?;
+    l.cmd("cache", "save and restore caches", cmd!(cmd_cache))?;
     l.hcmd("eng", "for working on and testing buildomat", cmd!(cmd_eng))?;
 
     sel!(l).run().await
@@ -481,4 +483,45 @@ async fn cmd_factory_private(mut l: Level<Stuff>) -> Result<()> {
     println!("{fp}");
 
     Ok(())
+}
+
+async fn cmd_cache(mut l: Level<Stuff>) -> Result<()> {
+    l.context_mut().connect().await?;
+
+    l.cmd("save", "save files into the cache", cmd!(cmd_cache_save))?;
+    l.cmd("restore", "restore a cache", cmd!(cmd_cache_restore))?;
+
+    sel!(l).run().await
+}
+
+async fn cmd_cache_save(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("CACHE_NAME"));
+
+    let a = args!(l);
+    if a.args().len() != 1 {
+        bad_args!(l, "you need to provide a cache name");
+    }
+    let name = &a.args()[0];
+
+    let mut paths = Vec::new();
+    for line in std::io::stdin().lines() {
+        paths.push(PathBuf::from(line?));
+    }
+    if paths.is_empty() {
+        bad_args!(l, "you need to provide at least one path via stdin");
+    }
+
+    cache::save(l.context_mut(), name, paths).await
+}
+
+async fn cmd_cache_restore(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("CACHE_NAME"));
+
+    let a = args!(l);
+    if a.args().len() != 1 {
+        bad_args!(l, "you need to provide a cache name");
+    }
+    let name = &a.args()[0];
+
+    cache::restore(l.context_mut(), name).await
 }
