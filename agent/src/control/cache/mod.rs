@@ -2,6 +2,8 @@
  * Copyright 2026 Oxide Computer Company
  */
 
+pub mod rust;
+
 use std::borrow::BorrowMut as _;
 use std::fs::File;
 use std::io::SeekFrom;

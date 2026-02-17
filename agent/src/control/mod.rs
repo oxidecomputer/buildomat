@@ -2,7 +2,12 @@
  * Copyright 2026 Oxide Computer Company
  */
 
-use std::{io::Read, ops::Range, path::PathBuf, time::Duration};
+use std::{
+    io::Read,
+    ops::Range,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use anyhow::{bail, Result};
 use bytes::BytesMut;
@@ -489,8 +494,9 @@ async fn cmd_factory_private(mut l: Level<Stuff>) -> Result<()> {
 async fn cmd_cache(mut l: Level<Stuff>) -> Result<()> {
     l.context_mut().connect().await?;
 
-    l.cmd("save", "save files into the cache", cmd!(cmd_cache_save))?;
-    l.cmd("restore", "restore a cache", cmd!(cmd_cache_restore))?;
+    l.cmd("rust", "cache Rust target directories", cmd!(cmd_cache_rust))?;
+    l.cmd("save", "low level: save a cache", cmd!(cmd_cache_save))?;
+    l.cmd("restore", "low level: restore a cache", cmd!(cmd_cache_restore))?;
 
     sel!(l).run().await
 }
@@ -525,4 +531,43 @@ async fn cmd_cache_restore(mut l: Level<Stuff>) -> Result<()> {
     let name = &a.args()[0];
 
     cache::restore(l.context_mut(), name).await
+}
+
+async fn cmd_cache_rust(mut l: Level<Stuff>) -> Result<()> {
+    l.context_mut().connect().await?;
+
+    l.cmd("save", "save a cache", cmd!(cmd_cache_rust_save))?;
+    l.cmd("restore", "restore a cache", cmd!(cmd_cache_rust_restore))?;
+
+    sel!(l).run().await
+}
+
+async fn cmd_cache_rust_save(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("CARGO_TOML"));
+
+    let a = args!(l);
+    let cargo_toml = match a.args() {
+        [] => "Cargo.toml",
+        [arg] => arg,
+        _ => {
+            bad_args!(l, "only one Cargo.toml is supported");
+        }
+    };
+
+    cache::rust::save(l.context_mut(), Path::new(cargo_toml)).await
+}
+
+async fn cmd_cache_rust_restore(mut l: Level<Stuff>) -> Result<()> {
+    l.usage_args(Some("CARGO_TOML"));
+
+    let a = args!(l);
+    let cargo_toml = match a.args() {
+        [] => "Cargo.toml",
+        [arg] => arg,
+        _ => {
+            bad_args!(l, "only one Cargo.toml is supported");
+        }
+    };
+
+    cache::rust::restore(l.context_mut(), Path::new(cargo_toml)).await
 }
