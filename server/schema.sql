@@ -340,3 +340,29 @@ ALTER TABLE job ADD COLUMN
 -- v 57
 CREATE INDEX job_purging_queue ON job (id, complete, time_archived, time_purged)
     WHERE complete = true AND time_archived IS NOT NULL AND time_purged IS NULL;
+
+-- v 58
+CREATE TABLE cache_file (
+    id              TEXT                PRIMARY KEY,
+    owner           TEXT    NOT NULL,
+    name            TEXT    NOT NULL,
+    size_bytes      INTEGER NOT NULL,
+    time_upload     TEXT    NOT NULL,
+    time_last_use   TEXT,
+
+    UNIQUE (owner, name)
+);
+
+-- v 59
+CREATE TABLE cache_pending_upload (
+    id              TEXT                PRIMARY KEY,
+    s3_upload_id    TEXT    NOT NULL,
+    owner           TEXT    NOT NULL,
+    name            TEXT    NOT NULL,
+    worker          TEXT    NOT NULL,
+    size_bytes      INTEGER NOT NULL,
+    chunks          INTEGER NOT NULL,
+    etags           TEXT,
+    time_begin      TEXT    NOT NULL,
+    time_finish     TEXT
+);

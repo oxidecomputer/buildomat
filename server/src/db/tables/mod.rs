@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 use rusqlite::Row;
@@ -25,6 +25,8 @@ mod sublude {
     };
 }
 
+mod cache_file;
+mod cache_pending_upload;
 mod factory;
 mod job;
 mod job_depend;
@@ -44,6 +46,8 @@ mod user_privilege;
 mod worker;
 mod worker_event;
 
+pub use cache_file::*;
+pub use cache_pending_upload::*;
 pub use factory::*;
 pub use job::*;
 pub use job_depend::*;
