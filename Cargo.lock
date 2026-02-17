@@ -651,6 +651,7 @@ dependencies = [
  "chrono",
  "futures",
  "glob",
+ "hex",
  "hiercmd",
  "ipnet",
  "libc",
