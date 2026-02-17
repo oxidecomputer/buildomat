@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 #![allow(clippy::many_single_char_names)]
@@ -62,7 +62,7 @@ mod os_constants {
 }
 use os_constants::*;
 
-use crate::control::protocol::StoreEntry;
+use crate::control::protocol::{BeginCacheUpload, StoreEntry};
 
 #[derive(Serialize, Deserialize)]
 struct ConfigFile {
@@ -1465,6 +1465,63 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                         })
                     } else {
                         Payload::Error("factory info not available".into())
+                    }
+                }
+                Payload::CacheUrl(name) => {
+                    match cw
+                        .client
+                        .worker_cache_get()
+                        .job(cw.job_id().unwrap())
+                        .name(name)
+                        .send()
+                        .await
+                        .map(|res| res.into_inner())
+                    {
+                        Ok(resp) => {
+                            Payload::CacheUrlResponse(resp.download_url)
+                        }
+                        Err(e) => Payload::Error(e.to_string()),
+                    }
+                }
+                Payload::BeginCacheUpload { name, size_bytes } => {
+                    match cw
+                        .client
+                        .worker_cache_put()
+                        .job(cw.job_id().unwrap())
+                        .name(name)
+                        .size_bytes(*size_bytes)
+                        .send()
+                        .await
+                        .map(|res| res.into_inner())
+                    {
+                        Ok(WorkerCachePutResult::Upload {
+                            chunk_size_bytes,
+                            chunk_upload_urls,
+                            upload_id,
+                        }) => Payload::BeginCacheUploadOk(BeginCacheUpload {
+                            upload_id,
+                            chunk_size_bytes,
+                            chunk_upload_urls,
+                        }),
+                        Ok(WorkerCachePutResult::Skip) => {
+                            Payload::BeginCacheUploadSkip
+                        }
+                        Err(e) => Payload::Error(e.to_string()),
+                    }
+                }
+                Payload::CompleteCacheUpload { upload_id, uploaded_etags } => {
+                    match cw
+                        .client
+                        .worker_cache_put_complete()
+                        .upload_id(upload_id)
+                        .body(WorkerCachePutCompleteBody {
+                            uploaded_etags: uploaded_etags.clone(),
+                        })
+                        .send()
+                        .await
+                    {
+                        Ok(_) => Payload::Ack,
+                        Err(e) => Payload::Error(e.to_string()),
                     }
                 }
                 _ => Payload::Error("unexpected message type".to_string()),

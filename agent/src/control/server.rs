@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 use std::{io::ErrorKind, os::unix::prelude::PermissionsExt, sync::Arc};
@@ -205,7 +205,10 @@ async fn handle_client_turn(
                 | Payload::StorePut(..)
                 | Payload::MetadataAddresses
                 | Payload::ProcessStart { .. }
-                | Payload::FactoryInfo => {
+                | Payload::FactoryInfo
+                | Payload::CacheUrl(_)
+                | Payload::BeginCacheUpload { .. }
+                | Payload::CompleteCacheUpload { .. } => {
                     /*
                      * These are requests from the control program.  Pass them
                      * on to the main loop.
