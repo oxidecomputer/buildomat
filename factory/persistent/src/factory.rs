@@ -520,6 +520,20 @@ async fn setup_instance(
     };
 
     /*
+     * Write job metadata to the artifact directory so the external
+     * command can access task scripts and other server-provided
+     * information.  The reserved "buildomat/" prefix must not collide
+     * with dependency names used in job file `copy_outputs` directives.
+     */
+    if let Some(job) = &ping.job {
+        let meta_dir = paths.artifacts.join("buildomat");
+        std::fs::create_dir_all(&meta_dir)?;
+        let meta_path = meta_dir.join("job.json");
+        std::fs::write(&meta_path, serde_json::to_string_pretty(job)?)?;
+        info!(c.log, "wrote job metadata"; "path" => %meta_path.display());
+    }
+
+    /*
      * Extract diagnostic scripts from factory metadata.
      * If a post-job diagnostic script is configured, tell the server to
      * wait for diagnostics before recycling this worker.

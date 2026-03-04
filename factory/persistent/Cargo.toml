@@ -16,6 +16,7 @@ glob = { workspace = true }
 libc = { workspace = true }
 rusty_ulid = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 slog = { workspace = true }
 slog-term = { workspace = true }
 tokio = { workspace = true }
@@ -27,5 +28,4 @@ http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["server", "http1"] }
 hyper-util = { workspace = true, features = ["tokio"] }
 reqwest = { workspace = true }
-serde_json = { workspace = true }
 tempfile = { workspace = true }
