@@ -1,4 +1,4 @@
-use buildomat_github_database::types::{CheckRunVariety, JobFile};
+use buildomat_jobsh::jobfile::{JobFile, Variety};
 
 pub fn disabled0() -> (String, String) {
     let path = ".github/buildomat/jobs/disabled0.sh";
@@ -106,7 +106,7 @@ pub fn real0() -> (String, String, Option<JobFile>) {
     let expect = Some(JobFile {
         path: path.to_string(),
         name: "helios / build TUF repo".to_string(),
-        variety: CheckRunVariety::Basic,
+        variety: Variety::Basic,
         config: serde_json::json!({
             "access_repos": [
                 "oxidecomputer/amd-apcb",

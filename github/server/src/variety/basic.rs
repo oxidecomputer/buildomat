@@ -1322,6 +1322,8 @@ pub(crate) async fn cancel(
 pub mod test {
     use super::*;
     use buildomat_github_testdata::*;
+    use buildomat_jobsh::jobfile::JobFile;
+    use buildomat_jobsh::variety::basic::BasicConfigPublish;
 
     #[test]
     fn basic_parse_basic() -> Result<()> {

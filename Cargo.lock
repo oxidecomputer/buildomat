@@ -974,8 +974,7 @@ name = "buildomat-github-testdata"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "buildomat-common",
- "buildomat-github-database",
+ "buildomat-jobsh",
  "serde",
  "serde_json",
  "toml 0.8.23",
