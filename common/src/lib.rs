@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 use std::io::{IsTerminal, Read};
@@ -214,4 +214,18 @@ pub fn true_if_missing() -> bool {
 pub enum StringOrBool {
     String(String),
     Bool(bool),
+}
+
+pub fn render_bytes(bytes: u64) -> String {
+    if bytes < 1000 {
+        return format!("{bytes} bytes");
+    }
+    let mut bytes = bytes as f64 / 1000.0;
+    for unit in ["kB", "MB", "GB"] {
+        if bytes < 1000.0 {
+            return format!("{bytes:.2} {unit}");
+        }
+        bytes /= 1000.0;
+    }
+    format!("{bytes:.2} TB")
 }

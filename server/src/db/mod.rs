@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 use std::collections::HashMap;
@@ -9,7 +9,9 @@ use std::time::Duration;
 
 use anyhow::Result;
 use buildomat_common::*;
-use buildomat_database::{conflict, DBResult, FromRow, Handle, Sqlite};
+use buildomat_database::{
+    conflict, DBResult, DatabaseError, FromRow, Handle, Sqlite,
+};
 use buildomat_types::*;
 use chrono::prelude::*;
 use sea_query::{
@@ -37,6 +39,7 @@ mod types {
     sqlite_ulid_new_type!(WorkerId);
     sqlite_ulid_new_type!(FactoryId);
     sqlite_ulid_new_type!(TargetId);
+    sqlite_ulid_new_type!(CachePendingUploadId);
 
     pub use buildomat_database::{Dictionary, IsoDate, JsonValue};
 }
@@ -3086,6 +3089,116 @@ impl Database {
             assert_eq!(ic, 1);
 
             Ok(nt)
+        })
+    }
+
+    pub fn cache_file(
+        &self,
+        owner: UserId,
+        name: &str,
+    ) -> DBResult<Option<CacheFile>> {
+        self.sql.tx_immediate(|h| {
+            let mut rows = h.get_rows(
+                Query::select()
+                    .from(CacheFileDef::Table)
+                    .columns(CacheFile::columns())
+                    .and_where(Expr::col(CacheFileDef::Owner).eq(owner))
+                    .and_where(Expr::col(CacheFileDef::Name).eq(name))
+                    .to_owned(),
+            )?;
+            if rows.len() <= 1 {
+                Ok(rows.pop())
+            } else {
+                Err(DatabaseError::Conflict("duplicate cache files".into()))
+            }
+        })
+    }
+
+    pub fn record_cache_use(&self, owner: UserId, name: &str) -> DBResult<()> {
+        self.sql.tx_immediate(|h| {
+            h.exec_update(
+                Query::update()
+                    .table(CacheFileDef::Table)
+                    .value(CacheFileDef::TimeLastUse, IsoDate::now())
+                    .and_where(Expr::col(CacheFileDef::Owner).eq(owner))
+                    .and_where(Expr::col(CacheFileDef::Name).eq(name))
+                    .to_owned(),
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn record_pending_cache_upload(
+        &self,
+        owner: UserId,
+        name: &str,
+        worker: WorkerId,
+        size_bytes: u64,
+        s3_upload_id: &str,
+        chunks: u32,
+    ) -> DBResult<CachePendingUploadId> {
+        self.sql.tx_immediate(|h| {
+            let id = CachePendingUploadId::generate();
+            h.exec_insert(
+                Query::insert()
+                    .into_table(CachePendingUploadDef::Table)
+                    .columns(CachePendingUpload::bare_columns())
+                    .values_panic([
+                        id.into(),
+                        s3_upload_id.into(),
+                        owner.into(),
+                        name.into(),
+                        worker.into(),
+                        size_bytes.into(),
+                        chunks.into(),
+                    ])
+                    .to_owned(),
+            )?;
+            Ok(id)
+        })
+    }
+
+    pub fn pending_cache_upload(
+        &self,
+        id: CachePendingUploadId,
+    ) -> DBResult<CachePendingUpload> {
+        self.sql.tx_immediate(|h| {
+            h.get_row(
+                Query::select()
+                    .from(CachePendingUploadDef::Table)
+                    .columns(CachePendingUpload::columns())
+                    .and_where(Expr::col(CachePendingUploadDef::Id).eq(id))
+                    .to_owned(),
+            )
+        })
+    }
+
+    pub fn complete_cache_upload(
+        &self,
+        id: CachePendingUploadId,
+    ) -> DBResult<()> {
+        let pending = self.pending_cache_upload(id)?;
+
+        self.sql.tx(|h| {
+            h.exec_insert(
+                Query::insert()
+                    .into_table(CacheFileDef::Table)
+                    .columns(CacheFile::bare_columns())
+                    .values_panic([
+                        pending.owner.into(),
+                        pending.name.into(),
+                        pending.size_bytes.into(),
+                        IsoDate::now().into(),
+                    ])
+                    .to_owned(),
+            )?;
+            h.exec_delete(
+                Query::delete()
+                    .from_table(CachePendingUploadDef::Table)
+                    .and_where(Expr::col(CachePendingUploadDef::Id).eq(id))
+                    .to_owned(),
+            )?;
+            Ok(())
         })
     }
 }
