@@ -92,23 +92,28 @@ async fn destroy_instance(
     log: &Logger,
     ec2: &aws_sdk_ec2::Client,
     id: &str,
-    force_stop: bool,
 ) -> Result<()> {
-    /*
-     * Before terminating an instance, attempt to initiate a forced shutdown.
-     * There is regrettably no force flag for termination (!) and if we don't do
-     * this first, AWS will sometimes wait rather a long (and billable) time
-     * before actually terminating a guest.  It is difficult, as the saying
-     * goes, to get a man to understand something, when his salary depends upon
-     * his not understanding it.
-     */
-    if force_stop {
-        info!(log, "forcing stop of instance {id}...");
-        ec2.stop_instances().instance_ids(id).force(true).send().await?;
-    }
-
     info!(log, "terminating instance {id}...");
-    ec2.terminate_instances().instance_ids(id).send().await?;
+    /*
+     * If requested, perform a forced shutdown of the VM before terminating it,
+     * otherwise AWS waits until the instance stops on its own (still billing
+     * you for it!).  Note that both "force" and "skip_os_shutdown" must be
+     * enabled for the instance to reliably shut down immediately.
+     */
+    ec2.terminate_instances()
+        .instance_ids(id)
+        /*
+         * Ensure the instance gets terminated if there is a problem with the
+         * underlying compute host.
+         */
+        .force(true)
+        /*
+         * Avoids sending an ACPI shutdown signal to the VM and immediately
+         * stops it, instead of waiting for the instance to shut itself down.
+         */
+        .skip_os_shutdown(true)
+        .send()
+        .await?;
 
     Ok(())
 }
@@ -396,7 +401,7 @@ async fn aws_worker_one(
                 || &i.state == "stopped"
                 || &i.state == "pending")
         {
-            destroy_instance(log, ec2, &i.id, &i.state == "running").await?;
+            destroy_instance(log, ec2, &i.id).await?;
         }
     }
 
