@@ -9,7 +9,7 @@ use buildomat_common::*;
 use buildomat_download::PotentialRange;
 use buildomat_github_database::{types::*, Database};
 use buildomat_jobsh::variety::basic::{output_sse, output_table, BasicConfig};
-use chrono::SecondsFormat;
+use chrono::{DateTime, SecondsFormat, Utc};
 use dropshot::Body;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use http_body_util::StreamBody;
@@ -59,6 +59,11 @@ struct BasicPrivate {
 
     #[serde(default)]
     extra_repo_ids: Vec<i64>,
+
+    #[serde(default)]
+    time_assigned: Option<DateTime<Utc>>,
+    #[serde(default)]
+    time_complete: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -203,6 +208,21 @@ pub(crate) async fn flush(
         },
     ];
 
+    /*
+     * By default, GitHub configures the check_run "started_at" field to the
+     * time the check run was created on their backend.  This is not accurate
+     * though, as it includes both the time spent waiting for dependencies and
+     * the time it takes for the factory to spin up the worker.
+     *
+     * Overriding it to the time the job was assigned to a worker fixes that.
+     *
+     * While we are at it, we also override the "completed_at" field, even
+     * though in most cases the one calculated by GitHub shouldn't drift too
+     * much from the truth.
+     */
+    let started_at = p.time_assigned;
+    let completed_at = p.time_complete;
+
     Ok(if p.complete {
         if let Some(e) = p.error.as_deref() {
             FlushOut {
@@ -211,6 +231,8 @@ pub(crate) async fn flush(
                 detail,
                 state: FlushState::Failure,
                 actions: Default::default(),
+                started_at,
+                completed_at,
             }
         } else if p.job_state.as_deref().unwrap() == "completed" {
             FlushOut {
@@ -219,6 +241,8 @@ pub(crate) async fn flush(
                 detail,
                 state: FlushState::Success,
                 actions: Default::default(),
+                started_at,
+                completed_at,
             }
         } else {
             FlushOut {
@@ -230,6 +254,8 @@ pub(crate) async fn flush(
                 detail,
                 state: FlushState::Failure,
                 actions: Default::default(),
+                started_at,
+                completed_at,
             }
         }
     } else if let Some(ts) = p.job_state.as_deref() {
@@ -240,6 +266,8 @@ pub(crate) async fn flush(
                 detail,
                 state: FlushState::Queued,
                 actions: cancel,
+                started_at,
+                completed_at,
             }
         } else if ts == "waiting" {
             FlushOut {
@@ -252,6 +280,8 @@ pub(crate) async fn flush(
                 detail,
                 state: FlushState::Queued,
                 actions: cancel,
+                started_at,
+                completed_at,
             }
         } else {
             FlushOut {
@@ -260,6 +290,8 @@ pub(crate) async fn flush(
                 detail,
                 state: FlushState::Running,
                 actions: cancel,
+                started_at,
+                completed_at,
             }
         }
     } else {
@@ -269,6 +301,8 @@ pub(crate) async fn flush(
             detail,
             state: FlushState::Queued,
             actions: cancel,
+            started_at,
+            completed_at,
         }
     })
 }
@@ -331,6 +365,19 @@ pub(crate) async fn run(
         if new_state != p.job_state {
             cr.flushed = false;
             p.job_state = new_state;
+        }
+
+        if let Some(time_assigned) = bt.times.get("assigned") {
+            if p.time_assigned != Some(*time_assigned) {
+                cr.flushed = false;
+                p.time_assigned = Some(*time_assigned);
+            }
+        }
+        if let Some(time_complete) = bt.times.get("complete") {
+            if p.time_complete != Some(*time_complete) {
+                cr.flushed = false;
+                p.time_complete = Some(*time_complete);
+            }
         }
 
         if running {

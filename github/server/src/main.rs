@@ -14,6 +14,7 @@ use buildomat_github_client::types::{
 use buildomat_github_database::types::*;
 use buildomat_github_hooktypes as hooktypes;
 use buildomat_jobsh::jobfile::JobFileSet;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use slog::{debug, error, info, o, trace, warn, Logger};
@@ -1183,6 +1184,8 @@ struct FlushOut {
     detail: String,
     state: FlushState,
     actions: Vec<ChecksCreateRequestActions>,
+    started_at: Option<DateTime<Utc>>,
+    completed_at: Option<DateTime<Utc>>,
 }
 
 async fn flush_check_runs(
@@ -1223,6 +1226,8 @@ async fn flush_check_runs(
                         detail: "".into(),
                         state: FlushState::Failure,
                         actions: Default::default(),
+                        started_at: None,
+                        completed_at: None,
                     }
                 } else if !p.complete {
                     FlushOut {
@@ -1234,6 +1239,8 @@ async fn flush_check_runs(
                         detail: "".into(),
                         state: FlushState::Running,
                         actions: Default::default(),
+                        started_at: None,
+                        completed_at: None,
                     }
                 } else if p.need_auth {
                     FlushOut {
@@ -1249,6 +1256,8 @@ async fn flush_check_runs(
                             identifier: "auth".into(),
                             label: "Authorise".into(),
                         }],
+                        started_at: None,
+                        completed_at: None,
                     }
                 } else if p.no_plans {
                     FlushOut {
@@ -1261,6 +1270,8 @@ async fn flush_check_runs(
                         detail: "".into(),
                         state: FlushState::Success,
                         actions: Default::default(),
+                        started_at: None,
+                        completed_at: None,
                     }
                 } else {
                     FlushOut {
@@ -1272,6 +1283,8 @@ async fn flush_check_runs(
                         detail: "".into(),
                         state: FlushState::Success,
                         actions: Default::default(),
+                        started_at: None,
+                        completed_at: None,
                     }
                 }
             }
@@ -1284,6 +1297,8 @@ async fn flush_check_runs(
                         detail: "".into(),
                         state: FlushState::Success,
                         actions: Default::default(),
+                        started_at: None,
+                        completed_at: None,
                     }
                 } else {
                     FlushOut {
@@ -1292,6 +1307,8 @@ async fn flush_check_runs(
                         detail: "".into(),
                         state: FlushState::Running,
                         actions: Default::default(),
+                        started_at: None,
+                        completed_at: None,
                     }
                 }
             }
@@ -1310,6 +1327,8 @@ async fn flush_check_runs(
                             detail: "".into(),
                             state: FlushState::Failure,
                             actions: Default::default(),
+                            started_at: None,
+                            completed_at: None,
                         }
                     } else {
                         FlushOut {
@@ -1320,6 +1339,8 @@ async fn flush_check_runs(
                             detail: "".into(),
                             state: FlushState::Success,
                             actions: Default::default(),
+                            started_at: None,
+                            completed_at: None,
                         }
                     }
                 } else {
@@ -1329,6 +1350,8 @@ async fn flush_check_runs(
                         detail: "".into(),
                         state: FlushState::Running,
                         actions: Default::default(),
+                        started_at: None,
+                        completed_at: None,
                     }
                 }
             }
@@ -1371,6 +1394,8 @@ async fn flush_check_runs(
                 output,
                 status,
                 actions: out.actions,
+                started_at: out.started_at,
+                completed_at: out.completed_at,
                 ..Default::default()
             };
 
@@ -1405,6 +1430,8 @@ async fn flush_check_runs(
                 output,
                 status,
                 actions: out.actions,
+                started_at: out.started_at,
+                completed_at: out.completed_at,
                 ..Default::default()
             };
 
