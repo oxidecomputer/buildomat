@@ -30,7 +30,7 @@ fn config_parse_minimal() {
         PathBuf::from("/var/lib/buildomat/jobs")
     );
     assert!(config.target.contains_key("default"));
-    assert_eq!(config.targets().len(), 1);
+    assert_eq!(config.target.len(), 1);
 }
 
 #[test]
@@ -76,8 +76,7 @@ fn config_parse_multiple_targets() {
     )
     .unwrap();
 
-    let targets = config.targets();
-    assert_eq!(targets.len(), 2);
+    assert_eq!(config.target.len(), 2);
     assert!(config.target.contains_key("hwci-grapefruit"));
     assert!(config.target.contains_key("hwci-gimlet"));
 }
@@ -183,14 +182,11 @@ fn config_target_matching() {
     )
     .unwrap();
 
-    // Simulate the target matching logic used in factory_loop
-    let supported_targets = config.targets();
-
     // Factory should accept jobs for its configured targets
-    assert!(supported_targets.iter().any(|t| t == "hwci-grapefruit"));
-    assert!(supported_targets.iter().any(|t| t == "hwci-gimlet"));
+    assert!(config.target.contains_key("hwci-grapefruit"));
+    assert!(config.target.contains_key("hwci-gimlet"));
 
     // Factory should NOT accept jobs for other targets
-    assert!(!supported_targets.iter().any(|t| t == "helios"));
-    assert!(!supported_targets.iter().any(|t| t == "default"));
+    assert!(!config.target.contains_key("helios"));
+    assert!(!config.target.contains_key("default"));
 }

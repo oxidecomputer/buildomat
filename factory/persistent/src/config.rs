@@ -45,15 +45,9 @@ pub(crate) struct ConfigFileExecution {
 
 /// Build target configuration.
 ///
-/// Currently empty - the factory only checks that requested targets
-/// exist in the configuration. Future commits will add execution
-/// configuration here.
-#[derive(Deserialize, Debug, Clone, Default)]
+/// Config keys are human-readable target names (e.g., "hwci-grapefruit").
+/// Target names are resolved to server IDs at startup via the
+/// `GET /0/factory/targets` endpoint.
+#[derive(Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ConfigFileTarget {}
-
-impl ConfigFile {
-    pub(crate) fn targets(&self) -> Vec<String> {
-        self.target.keys().cloned().collect()
-    }
-}

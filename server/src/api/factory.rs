@@ -522,3 +522,33 @@ pub(crate) async fn factory_lease_renew(
         Ok(HttpResponseOk(false))
     }
 }
+
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct FactoryTarget {
+    id: String,
+    name: String,
+}
+
+#[endpoint {
+    method = GET,
+    path = "/0/factory/targets",
+}]
+pub(crate) async fn factory_targets(
+    rqctx: RequestContext<Arc<Central>>,
+) -> DSResult<HttpResponseOk<Vec<FactoryTarget>>> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let _f = c.require_factory(log, &rqctx.request).await?;
+
+    let targets = c.db.targets().or_500()?;
+    Ok(HttpResponseOk(
+        targets
+            .into_iter()
+            .map(|t| FactoryTarget {
+                id: t.id.to_string(),
+                name: t.name,
+            })
+            .collect(),
+    ))
+}

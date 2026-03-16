@@ -347,13 +347,7 @@ async fn e2e_factory_loop_success() {
         },
     };
 
-    let client = buildomat_client::ClientBuilder::new(&url)
-        .bearer_token("factory-token")
-        .build()
-        .unwrap();
-
-    let mut central =
-        Central { log: test_logger(), client, config, instances: Vec::new() };
+    let mut central = test_central(&url, config);
 
     // Acquire lease, create worker, spawn command
     factory_loop(&mut central).await.unwrap();
@@ -462,13 +456,7 @@ async fn e2e_factory_loop_failure() {
         },
     };
 
-    let client = buildomat_client::ClientBuilder::new(&url)
-        .bearer_token("factory-token")
-        .build()
-        .unwrap();
-
-    let mut central =
-        Central { log: test_logger(), client, config, instances: Vec::new() };
+    let mut central = test_central(&url, config);
 
     // Acquire lease and spawn (failing) command
     factory_loop(&mut central).await.unwrap();
@@ -515,13 +503,7 @@ async fn e2e_factory_loop_no_work() {
         },
     };
 
-    let client = buildomat_client::ClientBuilder::new(&url)
-        .bearer_token("factory-token")
-        .build()
-        .unwrap();
-
-    let mut central =
-        Central { log: test_logger(), client, config, instances: Vec::new() };
+    let mut central = test_central(&url, config);
 
     // Should return without creating any instances
     factory_loop(&mut central).await.unwrap();
@@ -565,13 +547,7 @@ async fn e2e_factory_loop_event_streaming() {
         },
     };
 
-    let client = buildomat_client::ClientBuilder::new(&url)
-        .bearer_token("factory-token")
-        .build()
-        .unwrap();
-
-    let mut central =
-        Central { log: test_logger(), client, config, instances: Vec::new() };
+    let mut central = test_central(&url, config);
 
     // Acquire lease, spawn command
     factory_loop(&mut central).await.unwrap();
@@ -645,13 +621,7 @@ async fn e2e_factory_loop_diagnostic_scripts() {
         },
     };
 
-    let client = buildomat_client::ClientBuilder::new(&url)
-        .bearer_token("factory-token")
-        .build()
-        .unwrap();
-
-    let mut central =
-        Central { log: test_logger(), client, config, instances: Vec::new() };
+    let mut central = test_central(&url, config);
 
     // Lease, bootstrap, run pre-diag, spawn command
     factory_loop(&mut central).await.unwrap();
@@ -754,16 +724,27 @@ fn stub_config(
     }
 }
 
-/// Helper: set up a Central and run one factory_loop iteration to
-/// acquire a lease and spawn the command, then return Central.
-async fn spawn_stub(url: &str, config: ConfigFile) -> Central {
+/// Create a Central with target_map populated from config (name=ID for tests).
+fn test_central(url: &str, config: ConfigFile) -> Central {
     let client = buildomat_client::ClientBuilder::new(url)
         .bearer_token("factory-token")
         .build()
         .unwrap();
+    let target_map =
+        config.target.keys().map(|k| (k.clone(), k.clone())).collect();
+    Central {
+        log: test_logger(),
+        client,
+        config,
+        instances: Vec::new(),
+        target_map,
+    }
+}
 
-    let mut central =
-        Central { log: test_logger(), client, config, instances: Vec::new() };
+/// Helper: set up a Central and run one factory_loop iteration to
+/// acquire a lease and spawn the command, then return Central.
+async fn spawn_stub(url: &str, config: ConfigFile) -> Central {
+    let mut central = test_central(url, config);
 
     factory_loop(&mut central).await.unwrap();
     assert_eq!(central.instances.len(), 1, "should have spawned one instance");
@@ -1111,13 +1092,7 @@ async fn e2e_setup_failure_destroys_worker() {
         },
     };
 
-    let client = buildomat_client::ClientBuilder::new(&url)
-        .bearer_token("factory-token")
-        .build()
-        .unwrap();
-
-    let mut central =
-        Central { log: test_logger(), client, config, instances: Vec::new() };
+    let mut central = test_central(&url, config);
 
     // factory_loop should return an error (bootstrap failed).
     let result = factory_loop(&mut central).await;

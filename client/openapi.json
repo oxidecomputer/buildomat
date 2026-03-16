@@ -747,6 +747,33 @@
         }
       }
     },
+    "/0/factory/targets": {
+      "get": {
+        "operationId": "factory_targets",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_FactoryTarget",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FactoryTarget"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/0/factory/worker": {
       "post": {
         "operationId": "factory_worker_create",
@@ -2819,6 +2846,21 @@
         },
         "required": [
           "ok"
+        ]
+      },
+      "FactoryTarget": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
         ]
       },
       "FactoryWhatsNext": {

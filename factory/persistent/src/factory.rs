@@ -87,6 +87,40 @@ pub(crate) struct Central {
     pub(crate) client: buildomat_client::Client,
     pub(crate) config: ConfigFile,
     pub(crate) instances: Vec<Instance>,
+    /// Map of target name → server ULID, resolved at startup.
+    pub(crate) target_map: std::collections::HashMap<String, String>,
+}
+
+/// Resolve configured target names to server IDs.
+///
+/// Queries the server's target list and builds a name→ID map for
+/// all targets in the factory config.  Fails if any configured
+/// target name is not found on the server.
+pub(crate) async fn resolve_targets(c: &mut Central) -> Result<()> {
+    let server_targets = c.client.factory_targets().send().await?.into_inner();
+
+    let mut target_map = std::collections::HashMap::new();
+    for name in c.config.target.keys() {
+        match server_targets.iter().find(|t| t.name == *name) {
+            Some(t) => {
+                info!(c.log, "resolved target"; "name" => name, "id" => &t.id);
+                target_map.insert(name.clone(), t.id.clone());
+            }
+            None => {
+                let available: Vec<&str> =
+                    server_targets.iter().map(|t| t.name.as_str()).collect();
+                bail!(
+                    "target {:?} not found on server; available: {:?}",
+                    name,
+                    available,
+                );
+            }
+        }
+    }
+
+    info!(c.log, "resolved {} target(s)", target_map.len());
+    c.target_map = target_map;
+    Ok(())
 }
 
 pub(crate) async fn factory_loop(c: &mut Central) -> Result<()> {
@@ -366,10 +400,11 @@ async fn complete_instance(
 /// If any setup step fails after the worker is created on the server,
 /// the worker is destroyed best-effort to avoid leaking it.
 async fn accept_work(c: &mut Central) -> Result<()> {
+    let target_ids: Vec<String> = c.target_map.values().cloned().collect();
     let res = c
         .client
         .factory_lease()
-        .body_map(|b| b.supported_targets(c.config.targets()))
+        .body_map(|b| b.supported_targets(target_ids))
         .send()
         .await?
         .into_inner();
@@ -379,14 +414,24 @@ async fn accept_work(c: &mut Central) -> Result<()> {
         return Ok(());
     };
 
-    info!(c.log, "received lease"; "job" => &lease.job, "target" => &lease.target);
+    let target_name = c
+        .target_map
+        .iter()
+        .find(|(_, id)| **id == lease.target)
+        .map(|(name, _)| name.clone());
 
-    if !c.config.target.contains_key(&lease.target) {
+    info!(c.log, "received lease";
+        "job" => &lease.job,
+        "target" => &lease.target,
+        "target_name" => target_name.as_deref()
+            .unwrap_or("(not in config)"));
+
+    if target_name.is_none() {
         bail!(
-            "server assigned unsupported target {:?} \
-             (we advertised {:?})",
+            "server assigned target ULID {:?} which is not in our \
+             resolved target map (we advertised {:?})",
             lease.target,
-            c.config.targets(),
+            c.target_map,
         );
     }
 
@@ -410,9 +455,15 @@ async fn accept_work(c: &mut Central) -> Result<()> {
      * configure diagnostics, and spawn the command.  If any step
      * fails, destroy the worker so we don't leak it on the server.
      */
-    let result =
-        setup_instance(c, &worker_id, &bootstrap, &lease.job, &lease.target)
-            .await;
+    let result = setup_instance(
+        c,
+        &worker_id,
+        &bootstrap,
+        &lease.job,
+        &lease.target,
+        target_name.as_deref(),
+    )
+    .await;
 
     if let Err(ref e) = result {
         warn!(c.log, "worker setup failed, destroying orphan";
@@ -436,6 +487,7 @@ async fn setup_instance(
     bootstrap: &str,
     job_id: &str,
     target: &str,
+    target_name: Option<&str>,
 ) -> Result<()> {
     /*
      * Associate the worker with an instance ID.
@@ -483,8 +535,40 @@ async fn setup_instance(
 
     /*
      * Get job information including input files and output rules.
+     *
+     * RACE CONDITION: The server assigns jobs to workers via a
+     * background task (job_assignment), not during bootstrap.  Other
+     * factories (aws, gimlet, propolis) don't hit this because their
+     * VM boot time covers the gap.  The persistent factory has no
+     * boot delay, so we must poll.  If server performance work reduces
+     * VM startup times, those factories may also need this.
+     *
+     * The proper fix is server-side: assign the job to the worker
+     * during bootstrap or lease acceptance.
      */
-    let ping = worker_client.worker_ping().send().await?.into_inner();
+    let ping = {
+        let mut attempts = 0u32;
+        loop {
+            let p = worker_client.worker_ping().send().await?.into_inner();
+            if p.job.is_some() {
+                break p;
+            }
+            attempts += 1;
+            if attempts == 1 {
+                info!(c.log, "waiting for job assignment";
+                    "worker" => worker_id);
+            }
+            if attempts >= 30 {
+                bail!(
+                    "job assignment timeout: server did not assign a job \
+                     to worker {} after {} seconds",
+                    worker_id,
+                    attempts
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    };
 
     let output_rules = if let Some(job) = &ping.job {
         info!(c.log, "job has {} input(s), {} output rule(s)",
@@ -529,7 +613,17 @@ async fn setup_instance(
         let meta_dir = paths.artifacts.join("buildomat");
         std::fs::create_dir_all(&meta_dir)?;
         let meta_path = meta_dir.join("job.json");
-        std::fs::write(&meta_path, serde_json::to_string_pretty(job)?)?;
+
+        // Serialize the server's job object, then inject target
+        // identity from the factory config.  The server API does not
+        // include target name/ID in WorkerPingJob, so we add them
+        // here from the lease (target ULID) and config (target name).
+        let mut job_value = serde_json::to_value(job)?;
+        if let Some(obj) = job_value.as_object_mut() {
+            obj.insert("target".to_string(), serde_json::json!(target_name));
+            obj.insert("target_id".to_string(), serde_json::json!(target));
+        }
+        std::fs::write(&meta_path, serde_json::to_string_pretty(&job_value)?)?;
         info!(c.log, "wrote job metadata"; "path" => %meta_path.display());
     }
 
@@ -579,9 +673,6 @@ async fn setup_instance(
         .args(&exec.args)
         .current_dir(&paths.work)
         .env("BUILDOMAT_JOB_ID", job_id)
-        .env("BUILDOMAT_TARGET", target)
-        .env("BUILDOMAT_WORKER_ID", worker_id)
-        .env("BUILDOMAT_WORK_DIR", &paths.work)
         .env("BUILDOMAT_ARTIFACT_DIR", &paths.artifacts)
         .env("BUILDOMAT_OUTPUT_DIR", &paths.output)
         .stdout(Stdio::piped())

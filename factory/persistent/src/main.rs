@@ -28,7 +28,7 @@ use slog::{error, info, warn};
 use tokio::signal::unix::SignalKind;
 
 use config::ConfigFile;
-use factory::{factory_loop, shutdown, Central};
+use factory::{factory_loop, resolve_targets, shutdown, Central};
 
 /// Maximum time to spend on graceful shutdown before giving up.
 /// Budget: ~10s graceful_kill + ~20s for network calls.
@@ -66,8 +66,10 @@ async fn main() -> Result<()> {
         bail!("must specify at least one [target.*] in configuration");
     }
 
+    let target_names: Vec<&str> =
+        config.target.keys().map(|s| s.as_str()).collect();
     info!(log, "persistent factory starting";
-        "targets" => ?config.targets(),
+        "targets" => ?target_names,
         "command" => &config.execution.command,
         "job_dir" => %config.execution.job_dir.display(),
     );
@@ -76,7 +78,15 @@ async fn main() -> Result<()> {
         .bearer_token(&config.factory.token)
         .build()?;
 
-    let mut central = Central { log, client, config, instances: Vec::new() };
+    let mut central = Central {
+        log,
+        client,
+        config,
+        instances: Vec::new(),
+        target_map: std::collections::HashMap::new(),
+    };
+
+    resolve_targets(&mut central).await?;
 
     let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())?;
     let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt())?;

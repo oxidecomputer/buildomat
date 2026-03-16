@@ -1019,6 +1019,7 @@ async fn main() -> Result<()> {
     ad.register(api::factory::factory_worker_destroy)?;
     ad.register(api::factory::factory_lease)?;
     ad.register(api::factory::factory_lease_renew)?;
+    ad.register(api::factory::factory_targets)?;
     ad.register(api::public::public_file_download)?;
     ad.register(api::public::public_file_head)?;
     ad.register(file_agent)?;
