@@ -18,6 +18,7 @@ mod nocloud;
 mod propolis;
 mod serial;
 mod svc;
+#[cfg(target_os = "illumos")]
 mod ucred;
 mod vm;
 mod zones;
