@@ -5,9 +5,13 @@
 use std::os::fd::AsRawFd;
 
 use anyhow::{bail, Result};
-use libc::{getpeerucred, ucred_free, ucred_getzoneid, ucred_t, zoneid_t};
+#[cfg(target_os = "illumos")]
+use libc::{getpeerucred, ucred_free, ucred_getzoneid, ucred_t};
+
+use crate::zones::zoneid_t;
 
 pub trait PeerUCred: AsRawFd {
+    #[cfg(target_os = "illumos")]
     fn peer_ucred(&self) -> Result<UCred> {
         let fd = self.as_raw_fd();
 
@@ -20,14 +24,21 @@ pub trait PeerUCred: AsRawFd {
 
         Ok(UCred { uc })
     }
+
+    #[cfg(not(target_os = "illumos"))]
+    fn peer_ucred(&self) -> Result<UCred> {
+        bail!("only works on illumos systems");
+    }
 }
 
 impl PeerUCred for tokio::net::UnixStream {}
 
 pub struct UCred {
+    #[cfg(target_os = "illumos")]
     uc: *mut ucred_t,
 }
 
+#[cfg(target_os = "illumos")]
 impl Drop for UCred {
     fn drop(&mut self) {
         assert!(!self.uc.is_null());
@@ -38,7 +49,11 @@ impl Drop for UCred {
 
 impl UCred {
     pub fn zoneid(&self) -> Option<zoneid_t> {
+        #[cfg(target_os = "illumos")]
         let zoneid = unsafe { ucred_getzoneid(self.uc) };
+        #[cfg(not(target_os = "illumos"))]
+        let zoneid = -1;
+
         if zoneid < 0 {
             None
         } else {

@@ -2,18 +2,22 @@
  * Copyright 2024 Oxide Computer Company
  */
 
-use std::ffi::CString;
-
 use anyhow::{bail, Result};
+
+#[cfg(not(target_os = "illumos"))]
+pub use libc::c_int as zoneid_t;
+#[cfg(target_os = "illumos")]
 pub use libc::zoneid_t;
 
 #[link(name = "c")]
+#[cfg(target_os = "illumos")]
 extern "C" {
     fn getzoneidbyname(name: *const libc::c_char) -> zoneid_t;
 }
 
+#[cfg(target_os = "illumos")]
 pub fn zone_name_to_id(name: &str) -> Result<Option<zoneid_t>> {
-    let cs = CString::new(name)?;
+    let cs = std::ffi::CString::new(name)?;
 
     let id = unsafe { getzoneidbyname(cs.as_ptr()) };
     if id < 0 {
@@ -31,6 +35,11 @@ pub fn zone_name_to_id(name: &str) -> Result<Option<zoneid_t>> {
     }
 
     Ok(Some(id))
+}
+
+#[cfg(not(target_os = "illumos"))]
+pub fn zone_name_to_id(_name: &str) -> Result<Option<zoneid_t>> {
+    bail!("only works on illumos systems");
 }
 
 pub fn zone_exists(name: &str) -> Result<bool> {

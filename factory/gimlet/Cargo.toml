@@ -14,7 +14,6 @@ buildomat-types = { path = "../../types" }
 anyhow = { workspace = true }
 chrono = { workspace = true }
 debug_parser = { workspace = true }
-devinfo = { workspace = true }
 dropshot = { workspace = true }
 getopts = { workspace = true }
 hyper = { workspace = true }
@@ -33,3 +32,6 @@ tokio = { workspace = true }
 toml = { workspace = true }
 usdt = { workspace = true }
 uuid = { workspace = true }
+
+[target.'cfg(target_os = "illumos")'.dependencies]
+devinfo = { workspace = true }

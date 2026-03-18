@@ -11,8 +11,7 @@ use std::{
 use anyhow::{anyhow, bail, Result};
 use buildomat_common::*;
 
-use crate::{disks, efi};
-use disks::Slot;
+use crate::disks::{self, Slot};
 
 #[derive(Debug)]
 struct Status {
@@ -210,7 +209,10 @@ pub fn cleanup() -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "illumos")]
 fn prepare_m2() -> Result<()> {
+    use crate::efi;
+
     let disks = disks::list_disks()?;
 
     let Some(d) = disks.get(&Slot::M2(0)) else {
@@ -303,6 +305,11 @@ fn prepare_m2() -> Result<()> {
     println!(" * zpool {pool} created");
 
     Ok(())
+}
+
+#[cfg(not(target_os = "illumos"))]
+fn prepare_m2() -> Result<()> {
+    bail!("only works on illumos systems");
 }
 
 fn format_disks() -> Result<()> {
