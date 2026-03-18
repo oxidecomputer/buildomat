@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 
+#[cfg(target_os = "illumos")]
 use crate::ucred::PeerUCred;
 use crate::zones::*;
 use anyhow::{anyhow, bail, Result};
@@ -25,7 +26,7 @@ pub enum SerialData {
 
 pub struct SerialForZone {
     name: String,
-    zoneid: zoneid_t,
+    zoneid: ZoneId,
     rx: tokio::sync::mpsc::Receiver<SerialData>,
     shutdown: tokio::sync::watch::Sender<bool>,
     inner: Arc<Inner>,
@@ -42,6 +43,7 @@ impl SerialForZone {
          * Remove the zone from the active set and shut down any socket tasks.
          */
         let mut zones = self.inner.zones.lock().unwrap();
+        #[cfg_attr(not(target_os = "illumos"), expect(unused))]
         let removed = zones.remove(&self.zoneid).unwrap();
         assert_eq!(removed.name, self.name);
         assert_eq!(removed.zoneid, self.zoneid);
@@ -69,13 +71,13 @@ pub struct Serial(Arc<Inner>);
 #[derive(Clone)]
 struct Zone {
     name: String,
-    zoneid: zoneid_t,
+    zoneid: ZoneId,
     tx: tokio::sync::mpsc::Sender<SerialData>,
     shutdown: tokio::sync::watch::Receiver<bool>,
 }
 
 pub struct Inner {
-    zones: Mutex<HashMap<zoneid_t, Zone>>,
+    zones: Mutex<HashMap<ZoneId, Zone>>,
 }
 
 impl Serial {
@@ -114,10 +116,15 @@ impl Serial {
         Ok(s0)
     }
 
+    #[cfg_attr(not(target_os = "illumos"), expect(unused))]
     async fn accept_task(&self, log: Logger, listen: UnixListener) -> ! {
         loop {
-            let (sock, zoneid) = match listen.accept().await {
+            let (sock, zoneid): (UnixStream, ZoneId) = match listen
+                .accept()
+                .await
+            {
                 Ok((sock, _)) => {
+                    #[cfg(target_os = "illumos")]
                     match sock.peer_ucred() {
                         Ok(uc) => {
                             let Some(zoneid) = uc.zoneid() else {
@@ -125,7 +132,7 @@ impl Serial {
                                 continue;
                             };
 
-                            if zoneid == 0 {
+                            if zoneid.0 == 0 {
                                 /*
                                  * We never want connections from the global
                                  * zone.
@@ -140,6 +147,12 @@ impl Serial {
                             error!(log, "incoming socket: {e}");
                             continue;
                         }
+                    }
+
+                    #[cfg(not(target_os = "illumos"))]
+                    {
+                        error!(log, "only works on illumos");
+                        continue;
                     }
 
                     /*

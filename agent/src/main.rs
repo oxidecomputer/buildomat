@@ -908,6 +908,7 @@ fn zfs_get(dataset: &str, prop: &str) -> Result<String> {
     Ok(l[0].to_string())
 }
 
+#[cfg_attr(not(target_os = "illumos"), expect(dead_code))]
 fn zfs_set(dataset: &str, prop: &str, value: &str) -> Result<()> {
     let out = Command::new("/sbin/zfs")
         .arg("set")

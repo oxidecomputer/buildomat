@@ -30,6 +30,7 @@ mod cleanup;
 mod config;
 mod db;
 mod disks;
+#[cfg(target_os = "illumos")]
 mod efi;
 mod factory;
 mod host;
