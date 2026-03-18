@@ -1,8 +1,8 @@
 [package]
 name = "buildomat-github-dbtool"
-version = "0.0.0"
-edition = "2021"
-license = "MPL-2.0"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 
 [dependencies]
 buildomat-github-database = { path = "../database" }

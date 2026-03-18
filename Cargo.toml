@@ -27,6 +27,11 @@ members = [
 ]
 resolver = "2"
 
+[workspace.package]
+edition = "2021"
+license = "MPL-2.0"
+version = "0.0.0"
+
 [workspace.dependencies]
 ansi-to-html = { version = "0.2", features =  [ "lazy-init" ] }
 anyhow = "1"

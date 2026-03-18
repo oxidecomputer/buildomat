@@ -1,8 +1,8 @@
 [package]
 name = "buildomat-github-ghtool"
-version = "0.0.0"
-edition = "2021"
-license = "MPL-2.0"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 
 [features]
 default = ['vendored-openssl']
