@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 use std::io::{IsTerminal, Read};
@@ -15,6 +15,10 @@ use regex::Regex;
 use rusty_ulid::Ulid;
 use serde::{Deserialize, Serialize};
 use slog::{o, Drain, Logger};
+
+const KILOBYTE: f64 = 1024.0;
+const MEGABYTE: f64 = 1024.0 * KILOBYTE;
+const GIGABYTE: f64 = 1024.0 * MEGABYTE;
 
 pub fn read_toml<P: AsRef<Path>, T>(n: P) -> Result<T>
 where
@@ -214,4 +218,17 @@ pub fn true_if_missing() -> bool {
 pub enum StringOrBool {
     String(String),
     Bool(bool),
+}
+
+pub fn render_bytes(bytes: u64) -> String {
+    let bytes = bytes as f64;
+    if bytes > GIGABYTE {
+        format!("{:<.2}GiB", bytes / GIGABYTE)
+    } else if bytes > MEGABYTE {
+        format!("{:<.2}MiB", bytes / MEGABYTE)
+    } else if bytes > KILOBYTE {
+        format!("{:<.2}KiB", bytes / KILOBYTE)
+    } else {
+        format!("{}B", bytes)
+    }
 }

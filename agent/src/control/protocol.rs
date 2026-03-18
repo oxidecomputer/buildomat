@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 use std::ffi::OsString;
@@ -21,6 +21,13 @@ pub struct StoreEntry {
     pub name: String,
     pub value: String,
     pub secret: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct BeginCacheUpload {
+    pub cache_id: String,
+    pub chunk_size_bytes: u32,
+    pub chunk_upload_urls: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -48,6 +55,21 @@ pub enum Payload {
 
     FactoryInfo,
     FactoryInfoResult(FactoryInfo),
+
+    CacheUrl(String),
+    CacheUrlResponse(Option<String>),
+
+    BeginCacheUpload {
+        name: String,
+        size_bytes: u64,
+    },
+    BeginCacheUploadOk(BeginCacheUpload),
+    BeginCacheUploadSkip,
+
+    CompleteCacheUpload {
+        cache_id: String,
+        uploaded_etags: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 use std::collections::HashMap;
@@ -37,6 +37,7 @@ mod types {
     sqlite_ulid_new_type!(WorkerId);
     sqlite_ulid_new_type!(FactoryId);
     sqlite_ulid_new_type!(TargetId);
+    sqlite_ulid_new_type!(CacheFileId);
 
     pub use buildomat_database::{Dictionary, IsoDate, JsonValue};
 }
@@ -3086,6 +3087,177 @@ impl Database {
             assert_eq!(ic, 1);
 
             Ok(nt)
+        })
+    }
+
+    pub fn cache_file(&self, id: CacheFileId) -> DBResult<Option<CacheFile>> {
+        self.sql.tx(|h| {
+            h.get_row_opt(
+                Query::select()
+                    .from(CacheFileDef::Table)
+                    .columns(CacheFile::columns())
+                    .and_where(Expr::col(CacheFileDef::Id).eq(id))
+                    .to_owned(),
+            )
+        })
+    }
+
+    pub fn cache_file_by_name(
+        &self,
+        owner: UserId,
+        name: &str,
+    ) -> DBResult<Option<CacheFile>> {
+        self.sql.tx(|h| {
+            h.get_row_opt(
+                Query::select()
+                    .from(CacheFileDef::Table)
+                    .columns(CacheFile::columns())
+                    .and_where(Expr::col(CacheFileDef::Owner).eq(owner))
+                    .and_where(Expr::col(CacheFileDef::Name).eq(name))
+                    .to_owned(),
+            )
+        })
+    }
+
+    pub fn record_cache_use(&self, id: CacheFileId) -> DBResult<()> {
+        self.sql.tx_immediate(|h| {
+            h.exec_update(
+                Query::update()
+                    .table(CacheFileDef::Table)
+                    .value(CacheFileDef::TimeLastUse, IsoDate::now())
+                    .and_where(Expr::col(CacheFileDef::Id).eq(id))
+                    .to_owned(),
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn record_pending_cache_upload(
+        &self,
+        id: CacheFileId,
+        owner: UserId,
+        name: &str,
+        worker: WorkerId,
+        size_bytes: u64,
+        s3_upload_id: &str,
+        chunks: u32,
+    ) -> DBResult<()> {
+        self.sql.tx_immediate(|h| {
+            h.exec_insert(
+                CachePendingUpload {
+                    id,
+                    s3_upload_id: s3_upload_id.into(),
+                    owner,
+                    name: name.into(),
+                    worker,
+                    size_bytes: DataSize(size_bytes),
+                    chunks,
+                    etags: None,
+                    time_begin: IsoDate::now(),
+                    time_finish: None,
+                }
+                .insert(),
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn pending_cache_upload(
+        &self,
+        id: CacheFileId,
+    ) -> DBResult<Option<CachePendingUpload>> {
+        self.sql.tx(|h| {
+            h.get_row_opt(
+                Query::select()
+                    .from(CachePendingUploadDef::Table)
+                    .columns(CachePendingUpload::columns())
+                    .and_where(Expr::col(CachePendingUploadDef::Id).eq(id))
+                    .to_owned(),
+            )
+        })
+    }
+
+    pub fn finish_cache_upload(
+        &self,
+        id: CacheFileId,
+        etags: &[String],
+    ) -> DBResult<()> {
+        for etag in etags {
+            assert!(!etag.contains(','), "comma in etag {etag:?}");
+        }
+
+        self.sql.tx_immediate(|h| {
+            let count = h.exec_update(
+                Query::update()
+                    .table(CachePendingUploadDef::Table)
+                    .value(CachePendingUploadDef::Etags, etags.join(","))
+                    .value(CachePendingUploadDef::TimeFinish, IsoDate::now())
+                    .and_where(Expr::col(CachePendingUploadDef::Id).eq(id))
+                    .and_where(
+                        Expr::col(CachePendingUploadDef::TimeFinish).is_null(),
+                    )
+                    .to_owned(),
+            )?;
+            if count == 1 {
+                Ok(())
+            } else {
+                conflict!("no pending cache upload with ID {id}");
+            }
+        })
+    }
+
+    pub fn finished_cache_uploads(&self) -> DBResult<Vec<CachePendingUpload>> {
+        self.sql.tx(|h| {
+            h.get_rows(
+                Query::select()
+                    .from(CachePendingUploadDef::Table)
+                    .columns(CachePendingUpload::columns())
+                    .and_where(
+                        Expr::col(CachePendingUploadDef::TimeFinish)
+                            .is_not_null(),
+                    )
+                    .order_by(CachePendingUploadDef::TimeFinish, Order::Asc)
+                    .to_owned(),
+            )
+        })
+    }
+
+    pub fn persist_cache_upload(&self, id: CacheFileId) -> DBResult<()> {
+        let Some(pending) = self.pending_cache_upload(id)? else {
+            conflict!("no pending cache upload with ID {id}");
+        };
+
+        self.sql.tx_immediate(|h| {
+            h.exec_insert(
+                CacheFile {
+                    id,
+                    owner: pending.owner,
+                    name: pending.name,
+                    size_bytes: pending.size_bytes,
+                    time_upload: IsoDate::now(),
+                    time_last_use: None,
+                }
+                .insert(),
+            )?;
+            h.exec_delete(
+                Query::delete()
+                    .from_table(CachePendingUploadDef::Table)
+                    .and_where(Expr::col(CachePendingUploadDef::Id).eq(id))
+                    .to_owned(),
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn discard_cache_upload(&self, id: CacheFileId) -> DBResult<()> {
+        self.sql.tx_immediate(|h| {
+            h.exec_delete(
+                Query::delete()
+                    .from_table(CachePendingUploadDef::Table)
+                    .and_where(Expr::col(CachePendingUploadDef::Id).eq(id))
+                    .to_owned(),
+            )?;
+            Ok(())
         })
     }
 }
