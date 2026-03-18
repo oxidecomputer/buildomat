@@ -8,15 +8,13 @@ use std::time::{Duration, UNIX_EPOCH};
 use std::{collections::HashMap, time::SystemTime};
 
 use anyhow::{anyhow, bail, Result};
-use aws_config::Region;
-use aws_config::{meta::region::RegionProviderChain, BehaviorVersion};
-use aws_sdk_ec2::config::Credentials;
 use aws_sdk_ec2::types::{
     BlockDeviceMapping, EbsBlockDevice, Filter,
     InstanceNetworkInterfaceSpecification, InstanceType, ResourceType, Tag,
     TagSpecification,
 };
 use base64::Engine;
+use buildomat_aws::AwsConfig;
 use buildomat_client::types::*;
 use slog::{debug, error, info, o, warn, Logger};
 
@@ -594,25 +592,14 @@ async fn aws_worker_one(
 pub(crate) async fn aws_worker(c: Arc<Central>) -> Result<()> {
     let log = c.log.new(o!("component" => "worker"));
 
-    let region = RegionProviderChain::first_try(Region::new(
-        c.config.aws.region.clone(),
-    ))
-    .region()
-    .await
-    .ok_or_else(|| anyhow!("could not select region"))?;
-    let creds = Credentials::new(
-        &c.config.aws.access_key_id,
-        &c.config.aws.secret_access_key,
-        None,
-        None,
-        "config-file",
-    );
-
-    let cfg = aws_config::defaults(BehaviorVersion::v2026_01_12())
-        .region(region)
-        .credentials_provider(creds)
-        .load()
-        .await;
+    let cfg = AwsConfig {
+        access_key_id: c.config.aws.access_key_id.clone(),
+        secret_access_key: c.config.aws.secret_access_key.clone(),
+        profile: c.config.aws.profile.clone(),
+        region: c.config.aws.region.clone(),
+    }
+    .into_sdk_config()
+    .await?;
 
     let ec2 = aws_sdk_ec2::Client::new(&cfg);
 

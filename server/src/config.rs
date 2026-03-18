@@ -102,27 +102,12 @@ pub struct ConfigFileAdmin {
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigFileStorage {
-    pub access_key_id: String,
-    pub secret_access_key: String,
+    pub access_key_id: Option<String>,
+    pub secret_access_key: Option<String>,
+    pub profile: Option<String>,
     pub bucket: String,
     pub prefix: String,
     pub region: String,
-}
-
-impl ConfigFileStorage {
-    pub fn creds(&self) -> aws_credential_types::Credentials {
-        aws_credential_types::Credentials::new(
-            &self.access_key_id,
-            &self.secret_access_key,
-            None,
-            None,
-            "buildomat",
-        )
-    }
-
-    pub fn region(&self) -> aws_types::region::Region {
-        aws_types::region::Region::new(self.region.to_string())
-    }
 }
 
 pub fn load<P: AsRef<Path>>(path: P) -> Result<ConfigFile> {

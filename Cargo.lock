@@ -663,6 +663,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "buildomat-aws"
+version = "0.0.0"
+dependencies = [
+ "aws-config",
+ "aws-credential-types",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "buildomat-bunyan"
 version = "0.0.0"
 dependencies = [
@@ -754,6 +763,7 @@ dependencies = [
  "aws-sdk-ec2",
  "aws-types",
  "base64 0.22.1",
+ "buildomat-aws",
  "buildomat-client",
  "buildomat-common",
  "buildomat-types",
@@ -1017,6 +1027,7 @@ dependencies = [
  "aws-credential-types",
  "aws-sdk-s3",
  "aws-types",
+ "buildomat-aws",
  "buildomat-common",
  "buildomat-database",
  "buildomat-download",
