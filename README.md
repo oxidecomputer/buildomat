@@ -659,6 +659,36 @@ Configuration properties supported for basic jobs include:
     environment running in an ephemeral virtual machine, with a reasonable set
     of build tools.  32GB of RAM and 200GB of disk should be available.
 
+## Running Buildomat locally
+
+The `cargo xtask local` set of commands helps you run a local buildomat.
+
+The first thing to do is setting it up.  You will need [a configured AWS
+profile][aws-profile] pointing to the AWS account that will host storage and
+compute, and public DNS records pointing to ports 9979 (for `buildomat-server`)
+and 4021 (for `buildomat-github-server`).  Once you have those, you can run the
+setup:
+
+```
+$ cargo xtask local setup
+```
+
+The setup will ask which components to configure, ask you a few questions, and
+create all the resources and configuration files you'll need.  Afterwards, you
+can start the individual components:
+
+* `cargo xtask local buildomat-server`
+* `cargo xtask local buildomat-factory-aws`
+* `cargo xtask local buildomat-github-server`
+
+You can also interact with the local server using the CLI:
+
+```
+$ cargo xtask local buildomat COMMAND
+```
+
+[aws-profile]: https://docs.aws.amazon.com/cli/v1/userguide/cli-chap-authentication.html
+
 ## Licence
 
 Unless otherwise noted, all components are licenced under the [Mozilla Public

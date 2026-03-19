@@ -13,8 +13,6 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 pub struct Config {
     pub id: u64,
-    #[allow(unused)]
-    pub secret: String,
 }
 
 pub fn load_bytes<P: AsRef<Path>>(p: P) -> Result<Vec<u8>> {

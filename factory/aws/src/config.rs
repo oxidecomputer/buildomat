@@ -50,9 +50,11 @@ pub(crate) struct ConfigFileAws {
     pub vpc: String,
     pub subnet: ConfigFileAwsSubnets,
     pub tag: String,
-    pub key: String,
+    pub key: Option<String>,
     pub security_group: String,
     pub limit_total: usize,
+    #[serde(default)]
+    pub public_ip: bool,
 }
 
 impl ConfigFileAws {

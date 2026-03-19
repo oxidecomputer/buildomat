@@ -1,0 +1,27 @@
+[package]
+name = "xtask-setup"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+buildomat-common = { path = "../common" }
+buildomat-client = { path = "../client" }
+
+anyhow = { workspace = true }
+aws-config = { workspace = true }
+aws-runtime = { workspace = true }
+aws-sdk-ec2 = { workspace = true }
+aws-sdk-s3 = { workspace = true }
+aws-types = { workspace = true }
+dialoguer = { workspace = true }
+dropshot = { workspace = true }
+http = { workspace = true }
+rand = { workspace = true }
+reqwest = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+slog = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }

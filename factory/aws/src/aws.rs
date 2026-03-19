@@ -146,7 +146,7 @@ async fn create_instance(
             .run_instances()
             .image_id(&target.ami)
             .instance_type(InstanceType::from_str(&target.instance_type)?)
-            .key_name(&config.aws.key)
+            .set_key_name(config.aws.key.clone())
             .min_count(1)
             .max_count(1)
             .tag_specifications(
@@ -192,7 +192,7 @@ async fn create_instance(
                 InstanceNetworkInterfaceSpecification::builder()
                     .subnet_id(subnet)
                     .device_index(0)
-                    .associate_public_ip_address(false)
+                    .associate_public_ip_address(config.aws.public_ip)
                     .groups(&config.aws.security_group)
                     .build(),
             )

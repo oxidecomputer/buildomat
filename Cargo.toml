@@ -24,6 +24,7 @@ members = [
 	"sse",
 	"types",
 	"xtask",
+	"xtask-setup",
 ]
 resolver = "2"
 
@@ -37,6 +38,7 @@ ansi-to-html = { version = "0.2", features =  [ "lazy-init" ] }
 anyhow = "1"
 aws-config = "1"
 aws-credential-types = "1"
+aws-runtime = "1"
 aws-sdk-ec2 = "1"
 aws-sdk-s3 = "1"
 aws-types = "1"
@@ -45,6 +47,7 @@ bytes = "1.1"
 chrono = { version = "0.4", features = [ "serde" ] }
 debug_parser = "0.1"
 devinfo = { version = "0.1", features = [ "private" ] }
+dialoguer = { version = "0.12.0", default-features = false }
 dirs-next = "2"
 dropshot = "0.16"
 futures = "0.3"

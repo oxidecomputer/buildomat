@@ -4,11 +4,12 @@
 
 use std::cmp::Ordering;
 use std::io::{Seek, Write};
-use std::path::PathBuf;
+use std::os::unix::process::CommandExt as _;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use tempfile::NamedTempFile;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context as _, Result};
+use tempfile::NamedTempFile;
 
 pub trait OutputExt {
     fn info(&self) -> String;
@@ -69,7 +70,7 @@ fn openapi() -> Result<()> {
     };
 
     std::fs::remove_file(&buildomat_client_tmp).ok();
-    let status = Command::new(env!("CARGO"))
+    let status = cargo()
         .arg("run")
         .arg("-p")
         .arg("buildomat-server")
@@ -256,7 +257,7 @@ fn crates() -> Result<()> {
         t
     };
 
-    let res = Command::new(env!("CARGO"))
+    let res = cargo()
         .arg("tree")
         .arg("--depth")
         .arg("0")
@@ -351,14 +352,233 @@ fn crates() -> Result<()> {
     Ok(())
 }
 
+fn local_setup() -> Result<()> {
+    /*
+     * This command is implemented as a separate crate because it depends on the
+     * AWS SDK, reqwest and dropshot.  Adding all of those dependencies to xtask
+     * would unreasonably slow down compilation.
+     */
+    Err(cargo().args(["run", "--bin", "xtask-setup"]).exec().into())
+}
+
+fn local_buildomat() -> Result<()> {
+    let local = local_setup_root_for("server")?;
+    Err(cargo()
+        .args(["run", "--bin", "buildomat", "--"])
+        .args(std::env::args_os().skip(3).collect::<Vec<_>>())
+        .env("BUILDOMAT_CONFIG", local.join("cli-config.toml"))
+        .exec()
+        .into())
+}
+
+fn local_build_linux_agent(dest: &Path) -> Result<()> {
+    eprintln!("building the agent for Linux...");
+    let status = cargo()
+        .args(["build", "--bin", "buildomat-agent"])
+        .arg("--release")
+        .arg("--target=x86_64-unknown-linux-musl")
+        .status()?;
+    if !status.success() {
+        std::process::exit(status.code().unwrap_or(1));
+    }
+    std::fs::copy(
+        PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join(
+            "../target/x86_64-unknown-linux-musl/release/buildomat-agent",
+        ),
+        dest,
+    )?;
+
+    Ok(())
+}
+
+fn local_build_illumos_agent(dest: &Path) -> Result<()> {
+    eprintln!("building the agent for illumos...");
+    let status = cargo()
+        .args(["build", "--bin", "buildomat-agent"])
+        .arg("--release")
+        .arg("--target=x86_64-unknown-illumos")
+        .status()?;
+    if !status.success() {
+        std::process::exit(status.code().unwrap_or(1));
+    }
+    std::fs::copy(
+        PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+            .join("../target/x86_64-unknown-illumos/release/buildomat-agent"),
+        dest,
+    )?;
+
+    Ok(())
+}
+
+fn local_buildomat_server() -> Result<()> {
+    let local = local_setup_root_for("server")?;
+
+    /*
+     * The server requires the agent binary to be present in the current working
+     * directory, so that it can serve it to workers.  To avoid confusion when
+     * making changes to the agent but forgetting to recompile it, we compile it
+     * on each build (changes not touching the agent should be instant anyway).
+     *
+     * We are unconditionally building the x86_64-unknown-linux-musl variant of
+     * the agent.  Linux is what xtask-setup configures the AWS factory to use,
+     * and using musl prevents issues with older glibcs or building on NixOS.
+     *
+     * When the illumos target is installed, we also build the illumos agent.
+     */
+    local_build_linux_agent(&local.join("buildomat-agent-linux"))?;
+    if is_target_installed("x86_64-unknown-illumos") {
+        local_build_illumos_agent(&local.join("buildomat-agent"))?;
+    }
+
+    eprintln!();
+    eprintln!("running the server...");
+    Err(cargo()
+        .args(["run", "--bin", "buildomat-server", "--"])
+        /*
+         * The server requires both an explicit configuration file and to be
+         * executed from the correct working directory.
+         */
+        .arg("-f")
+        .arg(&local.join("config.toml"))
+        .current_dir(&local)
+        .exec()
+        .into())
+}
+
+fn local_buildomat_factory_aws() -> Result<()> {
+    let local = local_setup_root_for("factory-aws")?;
+    Err(cargo()
+        .args(["run", "--bin", "buildomat-factory-aws", "--"])
+        .arg("-f")
+        .arg(&local.join("config.toml"))
+        .exec()
+        .into())
+}
+
+fn local_buildomat_github_server() -> Result<()> {
+    let local = local_setup_root_for("github-server")?;
+    Err(cargo()
+        .args(["run", "--bin", "buildomat-github-server", "--"])
+        .current_dir(&local)
+        .exec()
+        .into())
+}
+
+fn local_setup_root_for(component: &str) -> Result<PathBuf> {
+    let env = std::env::var_os("CARGO_MANIFEST_DIR")
+        .context("xtask is not running under Cargo")?;
+    let root = PathBuf::from(env)
+        .join("..")
+        .join(".local")
+        .join(component)
+        .canonicalize()?;
+
+    if !root.exists() {
+        bail!("{component} is not ready, run \"cargo xtask local setup\"");
+    }
+    Ok(root)
+}
+
+fn local() -> Result<()> {
+    subcommands(
+        2,
+        &[
+            ("setup", "initialize the local environment", local_setup),
+            ("buildomat", "run the CLI", local_buildomat),
+            ("buildomat-server", "run the server", local_buildomat_server),
+            (
+                "buildomat-factory-aws",
+                "run jobs on AWS",
+                local_buildomat_factory_aws,
+            ),
+            (
+                "buildomat-github-server",
+                "integrate with GitHub",
+                local_buildomat_github_server,
+            ),
+        ],
+    )
+}
+
 fn main() -> Result<()> {
-    match std::env::args().nth(1).as_deref() {
-        Some("openapi") => openapi(),
-        Some("build-linux-agent") => build_agent(AgentBuild::Linux),
-        Some("build-agent") => build_agent(AgentBuild::Helios),
-        Some("crates") => crates(),
-        Some(_) | None => {
-            bail!("do not know how to do that");
+    subcommands(
+        1,
+        &[
+            ("openapi", "regenerate the server openapi.json", openapi),
+            (
+                "build-linux-agent",
+                "start a buildomat job to build the agent on Linux",
+                || build_agent(AgentBuild::Linux),
+            ),
+            (
+                "build-agent",
+                "start a buildomat job to build the agent on Helios",
+                || build_agent(AgentBuild::Helios),
+            ),
+            ("crates", "list the crates in the workspace", crates),
+            ("local", "run buildomat locally", local),
+        ],
+    )
+}
+
+/*
+ * Exceedingly simple command line parser with support for xtask, only
+ * supporting -h/--help and subcommands.  We only need those features right now
+ * so pulling a library doesn't make sense.  If we reach a point of needing more
+ * complex argument parsing we should replace this with a proper library.
+ */
+fn subcommands(
+    level: usize,
+    commands: &[(&str, &str, fn() -> Result<()>)],
+) -> Result<()> {
+    let mut cmd = std::env::args().nth(level);
+
+    /*
+     * Treat --help/-h as no subcommand, which shows the help message.
+     */
+    if cmd.as_deref() == Some("--help") || cmd.as_deref() == Some("-h") {
+        cmd = None;
+    }
+
+    for (candidate, _, function) in commands {
+        if cmd.as_deref() == Some(*candidate) {
+            return function();
         }
     }
+
+    let padding = commands.iter().map(|c| c.0.len()).max().unwrap() + 3;
+    eprintln!("available subcommands:");
+    for (command, description, _) in commands {
+        eprintln!("- {command:<padding$}{description}");
+    }
+
+    if let Some(cmd) = cmd {
+        eprintln!();
+        eprintln!("error: unknown subcommand {cmd}");
+        std::process::exit(1);
+    } else {
+        Ok(())
+    }
+}
+
+fn cargo() -> Command {
+    Command::new(std::env::var_os("CARGO").expect("not running under Cargo"))
+}
+
+fn is_target_installed(target: &str) -> bool {
+    let output = Command::new("rustc")
+        .arg("--print=sysroot")
+        .output()
+        .expect("failed to invoke \"rustc --print=sysroot\"");
+    if !output.status.success() {
+        panic!("\"rustc --print=sysroot\" exited with {}", output.status);
+    }
+
+    let sysroot = PathBuf::from(
+        String::from_utf8(output.stdout)
+            .expect("non-UTF-8 sysroot")
+            .trim_end_matches('\n'),
+    );
+
+    sysroot.join("lib").join("rustlib").join(target).is_dir()
 }

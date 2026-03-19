@@ -25,8 +25,6 @@ pub struct Buildomat {
 #[derive(Deserialize)]
 pub struct Config {
     pub id: u64,
-    #[allow(unused)]
-    pub secret: String,
     pub webhook_secret: String,
     pub base_url: String,
     pub confroot: String,
