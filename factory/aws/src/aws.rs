@@ -8,6 +8,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use std::{collections::HashMap, time::SystemTime};
 
 use anyhow::{anyhow, bail, Result};
+use aws_sdk_ec2::error::ProvideErrorMetadata as _;
 use aws_sdk_ec2::types::{
     BlockDeviceMapping, EbsBlockDevice, Filter,
     InstanceNetworkInterfaceSpecification, InstanceType, ResourceType, Tag,
@@ -134,66 +135,89 @@ async fn create_instance(
     let script = base64::engine::general_purpose::STANDARD.encode(&script);
 
     info!(log, "creating an instance (worker {})...", id);
-    let res = ec2
-        .run_instances()
-        .image_id(&target.ami)
-        .instance_type(InstanceType::from_str(&target.instance_type)?)
-        .key_name(&config.aws.key)
-        .min_count(1)
-        .max_count(1)
-        .tag_specifications(
-            TagSpecification::builder()
-                .resource_type(ResourceType::Instance)
-                .tags(
-                    Tag::builder().key("Name").value(format!("w-{id}")).build(),
-                )
-                .tags(
-                    Tag::builder()
-                        .key(&config.aws.tag)
-                        .value("1".to_string())
-                        .build(),
-                )
-                .tags(
-                    Tag::builder()
-                        .key(config.aws.tagkey_worker())
-                        .value(&id)
-                        .build(),
-                )
-                .tags(
-                    Tag::builder()
-                        .key(config.aws.tagkey_lease())
-                        .value(lease_id)
-                        .build(),
-                )
-                .build(),
-        )
-        .block_device_mappings(
-            BlockDeviceMapping::builder()
-                .device_name("/dev/sda1")
-                .ebs(
-                    EbsBlockDevice::builder()
-                        .volume_size(target.root_size_gb)
-                        .build(),
-                )
-                .build(),
-        )
-        .network_interfaces(
-            InstanceNetworkInterfaceSpecification::builder()
-                .subnet_id(&config.aws.subnet)
-                .device_index(0)
-                .associate_public_ip_address(false)
-                .groups(&config.aws.security_group)
-                .build(),
-        )
-        .user_data(script)
-        .send()
-        .await?;
-
-    let mut instances = res
-        .instances()
-        .into_iter()
-        .map(|i| Instance::from((i, config.aws.tag.as_str())))
-        .collect::<Vec<_>>();
+    let mut instances = Vec::new();
+    /*
+     * We occasionally noticed AWS running out of the instance type we use in
+     * the Availability Zone our subnet is created in.  Falling back to other
+     * subnets allows us to mitigate the issue.
+     */
+    for subnet in config.aws.subnet.as_slice() {
+        let res = ec2
+            .run_instances()
+            .image_id(&target.ami)
+            .instance_type(InstanceType::from_str(&target.instance_type)?)
+            .key_name(&config.aws.key)
+            .min_count(1)
+            .max_count(1)
+            .tag_specifications(
+                TagSpecification::builder()
+                    .resource_type(ResourceType::Instance)
+                    .tags(
+                        Tag::builder()
+                            .key("Name")
+                            .value(format!("w-{id}"))
+                            .build(),
+                    )
+                    .tags(
+                        Tag::builder()
+                            .key(&config.aws.tag)
+                            .value("1".to_string())
+                            .build(),
+                    )
+                    .tags(
+                        Tag::builder()
+                            .key(config.aws.tagkey_worker())
+                            .value(&id)
+                            .build(),
+                    )
+                    .tags(
+                        Tag::builder()
+                            .key(config.aws.tagkey_lease())
+                            .value(lease_id)
+                            .build(),
+                    )
+                    .build(),
+            )
+            .block_device_mappings(
+                BlockDeviceMapping::builder()
+                    .device_name("/dev/sda1")
+                    .ebs(
+                        EbsBlockDevice::builder()
+                            .volume_size(target.root_size_gb)
+                            .build(),
+                    )
+                    .build(),
+            )
+            .network_interfaces(
+                InstanceNetworkInterfaceSpecification::builder()
+                    .subnet_id(subnet)
+                    .device_index(0)
+                    .associate_public_ip_address(false)
+                    .groups(&config.aws.security_group)
+                    .build(),
+            )
+            .user_data(&script)
+            .send()
+            .await;
+        match res {
+            Ok(res) => {
+                instances = res
+                    .instances()
+                    .into_iter()
+                    .map(|i| Instance::from((i, config.aws.tag.as_str())))
+                    .collect();
+                break;
+            }
+            Err(e) if e.code() == Some("InsufficientInstanceCapacity") => {
+                warn!(
+                    log,
+                    "AWS ran out of instance type {:?} in subnet {subnet:?}",
+                    target.instance_type
+                );
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
 
     if instances.len() != 1 {
         bail!("wanted one instance, got {instances:?}");
