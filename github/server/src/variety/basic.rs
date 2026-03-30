@@ -1404,6 +1404,7 @@ pub mod test {
                 "oxidecomputer/helios-omicron-brand".into(),
                 "oxidecomputer/helios-omnios-build".into(),
                 "oxidecomputer/helios-omnios-extra".into(),
+                "oxidecomputer/bldb".into(),
                 "oxidecomputer/nanobl-rs".into(),
             ],
             publish: vec![
