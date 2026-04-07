@@ -48,7 +48,7 @@ pub(crate) struct ConfigFileAws {
     pub profile: Option<String>,
     pub region: String,
     pub vpc: String,
-    pub subnet: String,
+    pub subnet: ConfigFileAwsSubnets,
     pub tag: String,
     pub key: String,
     pub security_group: String,
@@ -62,5 +62,23 @@ impl ConfigFileAws {
 
     pub fn tagkey_lease(&self) -> String {
         format!("{}-lease_id", self.tag)
+    }
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(untagged)]
+pub enum ConfigFileAwsSubnets {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+impl ConfigFileAwsSubnets {
+    pub fn as_slice(&self) -> &[String] {
+        match self {
+            ConfigFileAwsSubnets::Single(subnet) => {
+                std::slice::from_ref(subnet)
+            }
+            ConfigFileAwsSubnets::Multiple(subnets) => subnets,
+        }
     }
 }
