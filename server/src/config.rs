@@ -36,6 +36,8 @@ pub struct ConfigFileJob {
     pub max_runtime: u64,
     #[serde(default = "default_max_size_per_file_mb")]
     pub max_size_per_file_mb: u64,
+    #[serde(default = "default_max_size_per_individual_cache_mb")]
+    pub max_size_per_individual_cache_mb: u64,
     #[serde(default)]
     pub auto_archive: bool,
     #[serde(default)]
@@ -52,6 +54,10 @@ impl ConfigFileJob {
     pub fn max_bytes_per_input(&self) -> u64 {
         self.max_size_per_file_mb.saturating_mul(1024 * 1024)
     }
+
+    pub fn max_bytes_per_individual_cache(&self) -> u64 {
+        self.max_size_per_individual_cache_mb.saturating_mul(1024 * 1024)
+    }
 }
 
 fn default_max_size_per_file_mb() -> u64 {
@@ -59,6 +65,13 @@ fn default_max_size_per_file_mb() -> u64 {
      * By default, allow 1GB files to be uploaded:
      */
     1024
+}
+
+fn default_max_size_per_individual_cache_mb() -> u64 {
+    /*
+     * By default, allow 10GB cache files to be uploaded:
+     */
+    10240
 }
 
 fn default_purge_delay_msec() -> u64 {

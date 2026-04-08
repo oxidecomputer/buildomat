@@ -23,10 +23,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
-const KILOBYTE: f64 = 1024.0;
-const MEGABYTE: f64 = 1024.0 * KILOBYTE;
-const GIGABYTE: f64 = 1024.0 * MEGABYTE;
-
 const MAX_OUTPUTS: usize = 25;
 const MAX_TAIL_LINES: usize = 20;
 const MAX_LINE_LENGTH: usize = 90;
@@ -96,18 +92,11 @@ impl BasicOutput {
             cs.id, cs.url_key, cr.id, o.id, name
         ));
 
-        let szf = o.size as f64;
-        let size = if szf > GIGABYTE {
-            format!("{:<.2}GiB", szf / GIGABYTE)
-        } else if szf > MEGABYTE {
-            format!("{:<.2}MiB", szf / MEGABYTE)
-        } else if szf > KILOBYTE {
-            format!("{:<.2}KiB", szf / KILOBYTE)
-        } else {
-            format!("{}B", szf)
-        };
-
-        BasicOutput { path: o.path.to_string(), href, size }
+        BasicOutput {
+            path: o.path.to_string(),
+            href,
+            size: render_bytes(o.size),
+        }
     }
 }
 

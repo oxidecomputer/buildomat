@@ -1,8 +1,14 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
+use std::time::Duration;
+
+use aws_sdk_s3::presigning::PresigningConfig;
+
 use super::prelude::*;
+use crate::db::CacheFileId;
+use buildomat_common::looks_like_a_ulid;
 
 trait JobOwns {
     fn owns(&self, log: &Logger, job: &db::Job) -> DSResult<()>;
@@ -924,4 +930,284 @@ pub(crate) async fn worker_diagnostics_enable(
     info!(log, "worker {} post-job diagnostics enabled", w.id);
 
     Ok(HttpResponseUpdatedNoContent())
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct WorkerCachePath {
+    job: String,
+    name: String,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct WorkerCacheGetResponse {
+    download_url: Option<String>,
+}
+
+#[endpoint {
+    method = GET,
+    path = "/0/worker/job/{job}/cache/{name}"
+}]
+pub(crate) async fn worker_cache_get(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<WorkerCachePath>,
+) -> DSResult<HttpResponseOk<WorkerCacheGetResponse>> {
+    const DOWNLOAD_EXPIRY: Duration = Duration::from_secs(600); /* 10 minutes */
+
+    let c = rqctx.context();
+    let log = &rqctx.log;
+    let path = path.into_inner();
+
+    let w = c.require_worker(log, &rqctx.request).await?;
+    let j = c.db.job(path.job()?).or_500()?; /* XXX */
+    w.owns(log, &j)?;
+
+    if let Some(cache) =
+        c.db.cache_file_by_name(j.owner, &path.name).or_500()?
+    {
+        c.db.record_cache_use(cache.id).or_500()?;
+        Ok(HttpResponseOk(WorkerCacheGetResponse {
+            download_url: Some(
+                c.s3.get_object()
+                    .bucket(&c.config.storage.bucket)
+                    .key(c.cache_object_key(cache.id))
+                    .presigned(
+                        PresigningConfig::expires_in(DOWNLOAD_EXPIRY)
+                            .expect("invalid presigned config"),
+                    )
+                    .await
+                    .or_500()?
+                    .uri()
+                    .to_string(),
+            ),
+        }))
+    } else {
+        Ok(HttpResponseOk(WorkerCacheGetResponse { download_url: None }))
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct WorkerCacheUploadBody {
+    size_bytes: u64,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub(crate) enum WorkerCacheUploadResult {
+    Upload {
+        cache_id: String,
+        chunk_size_bytes: u32,
+        chunk_upload_urls: Vec<String>,
+    },
+    Skip,
+}
+
+impl WorkerCachePath {
+    fn job(&self) -> DSResult<db::JobId> {
+        self.job.parse::<db::JobId>().or_500()
+    }
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/worker/job/{job}/cache/{name}"
+}]
+pub(crate) async fn worker_cache_upload(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<WorkerCachePath>,
+    body: TypedBody<WorkerCacheUploadBody>,
+) -> DSResult<HttpResponseOk<WorkerCacheUploadResult>> {
+    const UPLOAD_EXPIRY: Duration = Duration::from_secs(3600); /* 1 hour */
+    const CHUNK_SIZE: i64 = 50 * 1024 * 1024;
+
+    let c = rqctx.context();
+    let log = &rqctx.log;
+    let path = path.into_inner();
+    let size_bytes = body.into_inner().size_bytes;
+
+    let w = c.require_worker(log, &rqctx.request).await?;
+    let j = c.db.job(path.job()?).or_500()?; /* XXX */
+    w.owns(log, &j)?;
+
+    if size_bytes > c.config.job.max_bytes_per_individual_cache() {
+        return Err(HttpError::for_bad_request(
+            None,
+            "cache file too large".into(),
+        ));
+    }
+
+    let valid_name = path.name.chars().all(|chr| {
+        chr.is_ascii_alphanumeric() || chr == '-' || chr == '_' || chr == '.'
+    });
+    if !valid_name || looks_like_a_ulid(&path.name) {
+        return Err(HttpError::for_bad_request(
+            None,
+            format!("invalid cache name: {:?}", path.name),
+        ));
+    }
+
+    /*
+     * If a cache with this name already exists, avoid uploading it again to
+     * reduce time spent uploading in the CI job.
+     *
+     * Note that this check is not perfect, and it's possible that a cache gets
+     * uploaded between this request returning and the upload completing.  The
+     * complete upload endpoint has the load-bearing check; this one is just a
+     * short circuit to avoid wasting time.
+     */
+    if c.db.cache_file_by_name(j.owner, &path.name).or_500()?.is_some() {
+        return Ok(HttpResponseOk(WorkerCacheUploadResult::Skip));
+    }
+
+    let cache_id = CacheFileId::generate();
+
+    /*
+     * Caches can reach considerable size, so we parallelize their upload with
+     * S3's multipart upload feature, speeding up uploads in CI.
+     *
+     * We create a multipart upload in S3, which gives us an S3 upload ID.  We
+     * can then generate a bunch of pre-signed URLs, one per chunk, and send
+     * them to the client.  The client will use them to upload the file, and
+     * then call worker_cache_put_complete() to save the file.
+     */
+    let s3_upload_id = c
+        .s3
+        .create_multipart_upload()
+        .bucket(&c.config.storage.bucket)
+        .key(c.cache_object_key(cache_id))
+        .send()
+        .await
+        .or_500()?
+        .upload_id
+        .ok_or_else(|| anyhow::anyhow!("missing upload ID in the AWS response"))
+        .or_500()?;
+
+    let preconf = PresigningConfig::expires_in(UPLOAD_EXPIRY)
+        .expect("invalid presigned config");
+
+    let mut part_number: u32 = 0;
+    let mut remaining_bytes = size_bytes as i64;
+    let mut chunk_upload_urls = Vec::new();
+    while remaining_bytes > 0 {
+        part_number += 1;
+        chunk_upload_urls.push(
+            c.s3.upload_part()
+                .bucket(&c.config.storage.bucket)
+                .key(c.cache_object_key(cache_id))
+                .upload_id(&s3_upload_id)
+                .part_number(part_number as _)
+                .content_length(remaining_bytes.min(CHUNK_SIZE))
+                .presigned(preconf.clone())
+                .await
+                .or_500()?
+                .uri()
+                .to_string(),
+        );
+        remaining_bytes -= CHUNK_SIZE;
+    }
+
+    c.db.record_pending_cache_upload(
+        cache_id,
+        j.owner,
+        &path.name,
+        w.id,
+        size_bytes,
+        &s3_upload_id,
+        part_number,
+    )
+    .or_500()?;
+
+    Ok(HttpResponseOk(WorkerCacheUploadResult::Upload {
+        cache_id: cache_id.to_string(),
+        chunk_size_bytes: CHUNK_SIZE as _,
+        chunk_upload_urls,
+    }))
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct WorkerCacheUploadCompletePath {
+    cache_id: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct WorkerCacheUploadCompleteBody {
+    uploaded_etags: Vec<String>,
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/worker/cache-upload/{cache_id}/complete"
+}]
+pub(crate) async fn worker_cache_upload_complete(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<WorkerCacheUploadCompletePath>,
+    body: TypedBody<WorkerCacheUploadCompleteBody>,
+) -> DSResult<HttpResponseOk<()>> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+    let p = path.into_inner();
+
+    let upload_id = p.cache_id.parse::<db::CacheFileId>().or_500()?;
+    let etags = body.into_inner().uploaded_etags;
+
+    let existing = c.db.cache_file(upload_id).or_500()?;
+    let upload = match c.db.pending_cache_upload(upload_id).or_500()? {
+        Some(upload) if upload.time_finish.is_none() => upload,
+        /*
+         * A request to complete the upload already happened.  We return a
+         * success to make the request idempotent.
+         */
+        Some(_) => return Ok(HttpResponseOk(())),
+        None if existing.is_some() => return Ok(HttpResponseOk(())),
+        /*
+         * No upload with this ID ever existed.
+         */
+        None => {
+            return Err(HttpError::for_not_found(
+                None,
+                format!("missing upload {upload_id}"),
+            ));
+        }
+    };
+
+    if upload.worker != c.require_worker(log, &rqctx.request).await?.id {
+        return Err(HttpError::for_client_error(
+            None,
+            ClientErrorStatusCode::FORBIDDEN,
+            "not your upload".into(),
+        ));
+    }
+
+    /*
+     * Double-check that the client sent as many etags as we expect.
+     */
+    if upload.chunks as usize != etags.len() {
+        return Err(HttpError::for_bad_request(
+            None,
+            format!("expected {} etags, found {}", upload.chunks, etags.len()),
+        ));
+    }
+
+    /*
+     * Validate that etags are not going to cause problems in the database.
+     * Commas are rejected as they are used as the separator between etags.
+     */
+    for etag in &etags {
+        if etag.contains(',') || etag.len() > 200 {
+            return Err(HttpError::for_bad_request(
+                None,
+                format!("invalid etag: {etag:?}"),
+            ));
+        }
+    }
+
+    /*
+     * According to the documentation for the S3 request, "The processing of a
+     * CompleteMultipartUpload request could take several minutes to finalize".
+     * We don't want to block the CI job until the request succeeds.  Rather,
+     * we mark the upload as finished and let a background task take care of
+     * persisting it to S3 and the database.
+     */
+    c.db.finish_cache_upload(upload.id, &etags).or_500()?;
+
+    Ok(HttpResponseOk(()))
 }

@@ -51,6 +51,7 @@ futures = "0.3"
 futures-core = "0.3"
 getopts = "0.2"
 glob = "0.3"
+hex = "0.4.3"
 hiercmd = { git = "https://github.com/jclulow/hiercmd" }
 hmac-sha256 = "1"
 html-escape = "0.2"
@@ -90,6 +91,7 @@ slog-term = "2.7"
 smf = { git = "https://github.com/illumos/smf-rs.git" }
 strip-ansi-escapes = "0.2"
 strum = { version = "0.27", features = [ "derive" ] }
+tar = "0.4"
 tempfile = "3.3"
 thiserror = "2"
 tlvc = { git = "https://github.com/oxidecomputer/tlvc", version = "0.3.1" }
@@ -101,3 +103,4 @@ toml = "0.8"
 usdt = "0.6"
 uuid = { version = "1", features = [ "v4" ] }
 zone = { version = "0.3", features = [ "async" ], default-features = false }
+zstd = "0.13"

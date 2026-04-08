@@ -659,6 +659,78 @@ Configuration properties supported for basic jobs include:
     environment running in an ephemeral virtual machine, with a reasonable set
     of build tools.  32GB of RAM and 200GB of disk should be available.
 
+## Caching
+
+Buildomat has native support for caching intermediate artefacts across separate
+jobs, with both high-level integrations and a low-level manual command.
+
+Caches are identified by a _cache key_, a string identifying the content being
+cached.  Buildomat only restores caches when the cache key requested by the job
+is the exact match of the key of an existing cache, and doesn't provide a
+way to restore a cache whose key is only a partial match.  High-level
+integrations will pick the most appropriate cache key automatically, while it's
+your responsibility to pick the correct cache key when using the manual command.
+
+Each buildomat account or GitHub repository has its own isolated caching
+storage, to prevent unintentional cross-pollination.  While a cache with a given
+key exists on the buildomat servers it won't be possible to upload a new cache
+with the same key.  Once the cache is removed from the server it will be possible
+to upload a cache with that key again.
+
+### Rust dependency caching
+
+Buildomat includes native support for caching Rust dependencies, as part of the
+`bmat` command (available within a job).  It saves and restores the Cargo
+`target/` directory, making sure to cache only third-party dependencies (as
+caching workspace members often has diminishing returns) and choosing the
+correct cache key.
+
+You can use the `bmat cache rust restore` and `bmat cache rust save` commands in
+your job program:
+
+```bash
+#!/bin/bash
+bmat cache rust restore
+cargo build --locked
+bmat cache rust save
+```
+
+Both commands optionally accept the path of the `Cargo.toml` corresponding to
+the *workspace* to cache.  This is only needed if multiple separate workspaces
+are present in the same repository.  If no `Cargo.toml` is provided, `bmat` will
+look in the current working directory for one, and fail if it's missing.
+
+### Manual caching
+
+If the files you need to cache are not covered by one of buildomat's native
+integrations, you can use the `bmat` command (available within a job) to
+manually save and restore caches.  When using manual caching, it's your
+responsibility to pick the right cache key, and to choose which files should be
+included as part of the cache.
+
+The `bmat cache restore` command restores an existing cache, and requires the
+cache key as its first argument.
+
+The `bmat cache save` command stores files in the cache: it requires the cache
+key as its first argument, and the list of files to cache to the standard input;
+e.g. by piping `find -type f` into the command.
+
+```bash
+#!/bin/bash
+#
+# This is a worse implementation of "bmat cache rust".
+#
+
+rust_version="$(rustc --version | cut -d ' ' -f 2)"
+rust_host="$(rustc --print=host-tuple)"
+cargo_lock="$(sha256sum | cut -d ' ' -f 1)"
+cache_key="rust-$rust_version-$rust_host-$cargo_lock"
+
+bmat cache restore "$cache_key"
+cargo build --locked
+find target/ -type f | bmat cache save "$cache_key"
+```
+
 ## Licence
 
 Unless otherwise noted, all components are licenced under the [Mozilla Public

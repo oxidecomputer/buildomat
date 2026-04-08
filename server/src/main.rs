@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 #![allow(clippy::many_single_char_names)]
@@ -32,6 +32,7 @@ use slog::{error, info, o, warn, Logger};
 
 mod api;
 mod archive;
+mod caches;
 mod chunks;
 mod config;
 mod db;
@@ -41,7 +42,7 @@ mod workers;
 
 use buildomat_aws::AwsConfig;
 use db::{
-    AuthUser, Job, JobEvent, JobFile, JobFileId, JobId, JobOutput,
+    AuthUser, CacheFileId, Job, JobEvent, JobFile, JobFileId, JobId, JobOutput,
     JobOutputAndFile, Worker, WorkerEvent,
 };
 
@@ -102,6 +103,18 @@ impl<T> MakeInternalError<T> for serde_json::Result<T> {
     fn or_500(self) -> SResult<T, HttpError> {
         self.map_err(|e| {
             let msg = format!("serde JSON error: {:?}", e);
+            HttpError::for_internal_error(msg)
+        })
+    }
+}
+
+impl<T, E> MakeInternalError<T> for Result<T, aws_sdk_s3::error::SdkError<E>>
+where
+    E: std::fmt::Debug,
+{
+    fn or_500(self) -> SResult<T, HttpError> {
+        self.map_err(|e| {
+            let msg = format!("AWS error: {:?}", e);
             HttpError::for_internal_error(msg)
         })
     }
@@ -801,6 +814,10 @@ impl Central {
     ) -> Result<Vec<WorkerEvent>> {
         Ok(self.db.worker_events(worker.id, minseq, limit)?)
     }
+
+    fn cache_object_key(&self, id: CacheFileId) -> String {
+        self.object_key("cache", &id.to_string())
+    }
 }
 
 #[allow(dead_code)]
@@ -996,6 +1013,9 @@ async fn main() -> Result<()> {
     ad.register(api::worker::worker_fail)?;
     ad.register(api::worker::worker_diagnostics_enable)?;
     ad.register(api::worker::worker_diagnostics_complete)?;
+    ad.register(api::worker::worker_cache_get)?;
+    ad.register(api::worker::worker_cache_upload)?;
+    ad.register(api::worker::worker_cache_upload_complete)?;
     ad.register(api::worker::worker_append)?;
     ad.register(api::worker::worker_job_append)?;
     ad.register(api::worker::worker_job_append_one)?;
@@ -1131,6 +1151,12 @@ async fn main() -> Result<()> {
             .context("worker cleanup task failure")
     });
 
+    let c0 = Arc::clone(&c);
+    let log0 = log.new(o!("component" => "persist_cache_uploads"));
+    let t_persist_cache_uploads = tokio::task::spawn(async move {
+        caches::persist_uploads_task(log0, c0).await
+    });
+
     let server = HttpServerStarter::new(
         #[allow(clippy::needless_update)]
         &ConfigDropshot {
@@ -1154,6 +1180,9 @@ async fn main() -> Result<()> {
         _ = t_archive_jobs => bail!("archive jobs task stopped early"),
         _ = t_purge_jobs => bail!("purge jobs task stopped early"),
         _ = t_workers => bail!("worker cleanup task stopped early"),
+        _ = t_persist_cache_uploads => {
+            bail!("persist cache uploads task stopped early");
+        }
         _ = server_task => bail!("server stopped early"),
     }
 }
