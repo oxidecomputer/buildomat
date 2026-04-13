@@ -1438,16 +1438,8 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                         .map(|md| md.addresses().to_vec())
                         .unwrap_or_default(),
                 ),
-                PayloadReq::ProcessStart {
-                    name,
-                    cmd,
-                    args,
-                    env,
-                    pwd,
-                    uid,
-                    gid,
-                } => {
-                    match bgprocs.start(name, cmd, args, env, pwd, *uid, *gid) {
+                PayloadReq::ProcessStart(process) => {
+                    match bgprocs.start(process) {
                         Ok(_) => PayloadRes::Ack,
                         Err(e) => PayloadRes::Error(e.to_string()),
                     }

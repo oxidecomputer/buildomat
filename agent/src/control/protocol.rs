@@ -24,19 +24,22 @@ pub struct StoreEntry {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct Process {
+    pub name: String,
+    pub cmd: String,
+    pub args: Vec<String>,
+    pub env: Vec<(OsString, OsString)>,
+    pub pwd: OsString,
+    pub uid: u32,
+    pub gid: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub enum PayloadReq {
     StoreGet(String),
     StorePut(String, String, bool),
     MetadataAddresses,
-    ProcessStart {
-        name: String,
-        cmd: String,
-        args: Vec<String>,
-        env: Vec<(OsString, OsString)>,
-        pwd: String,
-        uid: u32,
-        gid: u32,
-    },
+    ProcessStart(Process),
     FactoryInfo,
 }
 

@@ -3,7 +3,6 @@
  */
 
 use std::collections::HashMap;
-use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Read};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Command, Stdio};
@@ -15,6 +14,7 @@ use buildomat_common::JobStream;
 use chrono::prelude::*;
 
 use super::OutputRecord;
+use crate::control::protocol::Process;
 
 fn spawn_reader<T>(
     tx: Sender<Activity>,
@@ -386,23 +386,11 @@ impl BackgroundProcesses {
         BackgroundProcesses { rx, tx, procs: Default::default() }
     }
 
-    pub fn start<'a, A, E>(
-        &mut self,
-        name: &str,
-        cmd: &str,
-        args: A,
-        env: E,
-        pwd: &str,
-        uid: u32,
-        gid: u32,
-    ) -> Result<u32>
-    where
-        A: IntoIterator<Item = &'a String>,
-        E: IntoIterator<Item = &'a (OsString, OsString)>,
-    {
+    pub fn start(&mut self, process: &Process) -> Result<u32> {
         /*
          * Process name must be unique within the task.
          */
+        let name = &process.name;
         if self.procs.contains_key(name) {
             bail!("background process {name:?} is already running");
         }
@@ -423,7 +411,7 @@ impl BackgroundProcesses {
              * child terminates, tearing down the rest of the children:
              */
             c.arg("-l").arg("child");
-            c.arg(cmd);
+            c.arg(&process.cmd);
             c
         };
 
@@ -433,10 +421,10 @@ impl BackgroundProcesses {
              * Regrettably other operating systems do not have contracts.  For
              * now, just start the program.
              */
-            Command::new(cmd)
+            Command::new(&process.cmd)
         };
 
-        for a in args {
+        for a in &process.args {
             c.arg(a);
         }
 
@@ -444,13 +432,13 @@ impl BackgroundProcesses {
          * Use the environment, working directory, and credentials passed to us
          * by the control program, not our own:
          */
-        c.current_dir(pwd);
+        c.current_dir(&process.pwd);
         c.env_clear();
-        for (k, v) in env {
+        for (k, v) in &process.env {
             c.env(k, v);
         }
-        c.uid(uid);
-        c.gid(gid);
+        c.uid(process.uid);
+        c.gid(process.gid);
 
         let pid = run_inner(
             c,
