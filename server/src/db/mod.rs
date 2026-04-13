@@ -1040,7 +1040,6 @@ impl Database {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn i_worker_event_insert(
         &self,
         h: &mut Handle,
@@ -2485,7 +2484,6 @@ impl Database {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn i_job_event_insert(
         &self,
         h: &mut Handle,

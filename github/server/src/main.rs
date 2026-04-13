@@ -2,8 +2,6 @@
  * Copyright 2025 Oxide Computer Company
  */
 
-#![allow(clippy::vec_init_then_push)]
-
 use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine;
 use buildomat_common::*;

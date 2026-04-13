@@ -2,9 +2,6 @@
  * Copyright 2025 Oxide Computer Company
  */
 
-#![allow(clippy::many_single_char_names)]
-#![allow(clippy::too_many_arguments)]
-
 use std::collections::VecDeque;
 use std::io::{Seek, Write};
 use std::path::PathBuf;
@@ -1132,7 +1129,6 @@ async fn main() -> Result<()> {
     });
 
     let server = HttpServerStarter::new(
-        #[allow(clippy::needless_update)]
         &ConfigDropshot {
             default_request_body_max_bytes: 10 * 1024 * 1024,
             bind_address,

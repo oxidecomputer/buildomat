@@ -2,8 +2,6 @@
  * Copyright 2024 Oxide Computer Company
  */
 
-#![allow(clippy::many_single_char_names)]
-
 use std::collections::VecDeque;
 use std::env;
 use std::fs::{File, OpenOptions};

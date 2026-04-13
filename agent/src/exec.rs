@@ -381,7 +381,6 @@ impl BackgroundProcesses {
         BackgroundProcesses { rx, tx, procs: Default::default() }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn start<'a, A, E>(
         &mut self,
         name: &str,

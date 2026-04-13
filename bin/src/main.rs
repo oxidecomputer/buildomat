@@ -2,8 +2,6 @@
  * Copyright 2025 Oxide Computer Company
  */
 
-#![allow(clippy::many_single_char_names)]
-
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::PathBuf;
