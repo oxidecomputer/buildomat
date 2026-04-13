@@ -71,7 +71,7 @@ impl Host {
         info!(&self.log, "powering off");
         let res =
             self.hiffy("Sequencer.set_state").arg("state", "A2").call()?;
-        if res.value.to_string().trim().to_string() != "Changed" {
+        if res.value.to_string().trim() != "Changed" {
             bail!("unexpected power off result: {:?}", res.stdout);
         }
 
@@ -87,7 +87,7 @@ impl Host {
         info!(&self.log, "powering on");
         let res =
             self.hiffy("Sequencer.set_state").arg("state", "A0").call()?;
-        if res.value.to_string().trim().to_string() != "Changed" {
+        if res.value.to_string().trim() != "Changed" {
             bail!("unexpected power on result: {:?}", res.stdout);
         }
 
@@ -748,7 +748,7 @@ impl HostManager {
                 Ok(())
             }
             HostState::Cleaning(cst) => {
-                let mut new_cst = cst.clone();
+                let mut new_cst = *cst;
 
                 {
                     let mut l = self.locked.lock().unwrap();
@@ -827,7 +827,7 @@ impl HostManager {
                 Ok(())
             }
             HostState::Starting(sst, hgs) => {
-                let mut new_sst = sst.clone();
+                let mut new_sst = *sst;
 
                 {
                     let mut l = self.locked.lock().unwrap();
@@ -854,7 +854,7 @@ impl HostManager {
                     }
                 }
 
-                if let Err(e) = self.thread_starting(&mut new_sst, &hgs) {
+                if let Err(e) = self.thread_starting(&mut new_sst, hgs) {
                     error!(log, "starting error: {e}");
                 }
 
@@ -923,7 +923,7 @@ impl HostManager {
 
                 let pb = sys
                     .ssh_exec("svcs -Ho sta,nsta svc:/site/postboot:default")?;
-                let t = pb.out.trim().split_whitespace().collect::<Vec<_>>();
+                let t = pb.out.split_whitespace().collect::<Vec<_>>();
                 if t.len() != 2 || t[0] == "ON" || t[1] == "-" {
                     bail!("postboot not ready: {t:?}");
                 }
@@ -1006,7 +1006,7 @@ impl HostManager {
 
                 let pb = sys
                     .ssh_exec("svcs -Ho sta,nsta svc:/site/postboot:default")?;
-                let t = pb.out.trim().split_whitespace().collect::<Vec<_>>();
+                let t = pb.out.split_whitespace().collect::<Vec<_>>();
                 if t.len() != 2 || t[0] == "ON" || t[1] == "-" {
                     bail!("postboot not ready: {t:?}");
                 }

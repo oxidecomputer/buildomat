@@ -23,10 +23,7 @@ fn spawn_reader<T>(
 where
     T: Read + Send + 'static,
 {
-    let stream = match stream {
-        Some(stream) => stream,
-        None => return None,
-    };
+    let stream = stream?;
 
     Some(std::thread::spawn(move || {
         let mut r = BufReader::new(stream);
@@ -329,11 +326,7 @@ fn run_common(
                     )
                     .unwrap();
                 }
-                let code = if let Some(code) = es.code() {
-                    code
-                } else {
-                    std::i32::MAX
-                };
+                let code = es.code().unwrap_or(std::i32::MAX);
                 tx.blocking_send(ab.exit(&start, &end, code)).unwrap();
                 stdio_warning
             }

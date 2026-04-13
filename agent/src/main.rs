@@ -1171,8 +1171,8 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
         let binmd = std::fs::symlink_metadata("/bin")?;
         if binmd.is_dir() {
             std::os::unix::fs::symlink(
-                &format!("../usr/bin/{CONTROL_PROGRAM}"),
-                &format!("/bin/{CONTROL_PROGRAM}"),
+                format!("../usr/bin/{CONTROL_PROGRAM}"),
+                format!("/bin/{CONTROL_PROGRAM}"),
             )?;
         }
     }

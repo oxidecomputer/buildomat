@@ -359,7 +359,7 @@ async fn details(
     Ok(hyper::Response::builder()
         .status(hyper::StatusCode::OK)
         .header(hyper::header::CONTENT_TYPE, "text/html; charset=utf-8")
-        .header(hyper::header::CONTENT_LENGTH, out.as_bytes().len())
+        .header(hyper::header::CONTENT_LENGTH, out.len())
         .body(Body::from(out))?)
 }
 
@@ -831,7 +831,7 @@ async fn status_impl(
     Ok(hyper::Response::builder()
         .status(hyper::StatusCode::OK)
         .header(hyper::header::CONTENT_TYPE, "text/html; charset=utf-8")
-        .header(hyper::header::CONTENT_LENGTH, out.as_bytes().len())
+        .header(hyper::header::CONTENT_LENGTH, out.len())
         .body(Body::from(out))?)
 }
 
@@ -1020,7 +1020,7 @@ async fn branch_to_commit(
     Ok(hyper::Response::builder()
         .status(hyper::StatusCode::OK)
         .header(hyper::header::CONTENT_TYPE, "text/plain")
-        .header(hyper::header::CONTENT_LENGTH, body.as_bytes().len())
+        .header(hyper::header::CONTENT_LENGTH, body.len())
         .body(body.into())?)
 }
 

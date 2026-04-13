@@ -219,7 +219,7 @@ async fn create_github_app(
     /*
      * Exchange the code we received in the callback with the app private key.
      */
-    Ok(reqwest::Client::new()
+    reqwest::Client::new()
         .post(format!(
             "https://api.github.com/app-manifests/{callback_code}/conversions"
         ))
@@ -231,7 +231,7 @@ async fn create_github_app(
         .context("failed to ask GitHub to finish creating the GitHub App")?
         .json()
         .await
-        .context("failed to deserialize response from GitHub")?)
+        .context("failed to deserialize response from GitHub")
 }
 
 struct CreationServerState {

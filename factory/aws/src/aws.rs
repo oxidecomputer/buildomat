@@ -69,7 +69,7 @@ impl Instance {
                     .try_into()
                     .unwrap();
 
-                (if when <= now { now - when } else { 0 }) / 1000
+                now.saturating_sub(when) / 1000
             })
             .unwrap_or(0)
     }
@@ -203,7 +203,7 @@ async fn create_instance(
             Ok(res) => {
                 instances = res
                     .instances()
-                    .into_iter()
+                    .iter()
                     .map(|i| Instance::from((i, config.aws.tag.as_str())))
                     .collect();
                 break;
@@ -245,13 +245,12 @@ async fn instances(
     Ok(res
         .reservations()
         .iter()
-        .map(|r| {
+        .flat_map(|r| {
             r.instances().iter().map(|i| {
                 let i = Instance::from((i, tag));
                 (i.id.to_string(), i)
             })
         })
-        .flatten()
         .collect())
 }
 

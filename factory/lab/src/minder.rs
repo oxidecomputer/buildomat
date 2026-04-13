@@ -74,7 +74,7 @@ impl FormatScript {
             .replace("%BASEURL%", &self.host_config.lab_baseurl)
             .replace("%HOST%", &self.host_config.nodename)
             .replace("%CONSOLE%", &self.host_config.console)
-            .replace("%BOOTARGS%", &bootargs)
+            .replace("%BOOTARGS%", bootargs)
             .replace("%COREURL%", &self.coreurl);
 
         if let Some(key) = self.key.as_deref() {

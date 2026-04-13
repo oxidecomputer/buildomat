@@ -301,7 +301,7 @@ impl App {
     fn buildomat(&self, repo: &Repository) -> buildomat_client::Client {
         buildomat_client::ClientBuilder::new(&self.config.buildomat.url)
             .bearer_token(&self.config.buildomat.token)
-            .delegated_user(&self.buildomat_username(repo))
+            .delegated_user(self.buildomat_username(repo))
             .build()
             .unwrap()
     }

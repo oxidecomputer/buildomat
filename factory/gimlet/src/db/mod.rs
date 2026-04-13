@@ -167,7 +167,7 @@ impl Database {
             /*
              * Fetch the current instance state:
              */
-            let i: Instance = h.get_row(Instance::find(&id))?;
+            let i: Instance = h.get_row(Instance::find(id))?;
 
             match i.state {
                 InstanceState::Preinstall

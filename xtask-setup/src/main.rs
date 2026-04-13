@@ -131,9 +131,9 @@ async fn run_stdout(command: &mut Command) -> Result<String> {
         bail!("\"{}\" failed with {}", name.display(), output.status);
     }
 
-    Ok(String::from_utf8(output.stdout).with_context(|| {
+    String::from_utf8(output.stdout).with_context(|| {
         format!("\"{}\" emitted non-UTF-8 data to stdout", name.display())
-    })?)
+    })
 }
 
 fn cargo() -> Command {

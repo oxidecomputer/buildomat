@@ -207,7 +207,7 @@ async fn create_s3_bucket(
     let region_idx = Select::with_theme(&ctx.input_theme)
         .with_prompt("Region to create the bucket into")
         .default(0)
-        .items(&regions)
+        .items(regions)
         .interact()?;
     let region = regions[region_idx];
 
