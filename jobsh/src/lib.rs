@@ -39,6 +39,9 @@ impl JobEventEx for JobEvent {
             ["console"] => "s_console",
             ["control"] => "s_control",
             ["panic"] => "s_panic",
+            ["post", _, "stderr"] => "s_stderr",
+            ["post", _, "stdout"] => "s_stdout",
+            ["post", _] => "s_post",
             ["stderr"] => "s_stderr",
             ["stdout"] => "s_stdout",
             ["task"] => "s_task",
@@ -70,6 +73,13 @@ impl JobEventEx for JobEvent {
 
         let section = if let Some(id) = self.task {
             EventSection::Task(id)
+        } else if let Some(post) = self.stream.strip_prefix("post.") {
+            EventSection::Post(
+                post.split_once('.')
+                    .map(|(name, _)| name)
+                    .unwrap_or(post)
+                    .into(),
+            )
         } else {
             EventSection::None
         };
@@ -164,6 +174,7 @@ pub struct EventField {
 enum EventSection {
     None,
     Task(u32),
+    Post(String),
 }
 
 #[cfg(test)]

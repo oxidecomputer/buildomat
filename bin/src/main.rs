@@ -655,6 +655,8 @@ async fn poll_job(l: &Level<Stuff>, id: &str, json: bool) -> Result<()> {
                     ["console"] => println!("|C| {p}"),
                     ["panic"] => println!("|!| {p}"),
                     ["bg", bg, "stdout" | "stderr"] => println!("|{bg}| {p}"),
+                    ["post", _] => println!("|P| {p}"),
+                    ["post", _, "stdout" | "stderr"] => println!("{p}"),
                     _ => println!("{e:?}"),
                 }
             }

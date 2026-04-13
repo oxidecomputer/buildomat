@@ -123,6 +123,7 @@ pub async fn main() -> Result<()> {
     l.cmd("store", "access the job store", cmd!(cmd_store))?;
     l.cmd("address", "manage IP addresses for this job", cmd!(cmd_address))?;
     l.cmd("process", "manage background processes", cmd!(cmd_process))?;
+    l.cmd("post", "manage post tasks", cmd!(cmd_post))?;
     l.cmd("factory", "factory information for this worker", cmd!(cmd_factory))?;
     l.hcmd("eng", "for working on and testing buildomat", cmd!(cmd_eng))?;
 
@@ -372,6 +373,67 @@ async fn cmd_store_put(mut l: Level<Stuff>) -> Result<()> {
         PayloadRes::Ack => Ok(()),
         other => bail!("unexpected response: {other:?}"),
     }
+}
+
+async fn cmd_post(mut l: Level<Stuff>) -> Result<()> {
+    l.context_mut().connect().await?;
+
+    l.cmd(
+        "success",
+        "add a post task running on success",
+        cmd!(cmd_post_success),
+    )?;
+    l.cmd(
+        "failure",
+        "add a post task running on failure",
+        cmd!(cmd_post_failure),
+    )?;
+    l.cmd("always", "add a post task always running", cmd!(cmd_post_always))?;
+
+    sel!(l).run().await
+}
+
+async fn cmd_post_success(l: Level<Stuff>) -> Result<()> {
+    post_inner(l, &[PayloadReq::PostSuccess]).await
+}
+
+async fn cmd_post_failure(l: Level<Stuff>) -> Result<()> {
+    post_inner(l, &[PayloadReq::PostFailure]).await
+}
+
+async fn cmd_post_always(l: Level<Stuff>) -> Result<()> {
+    post_inner(l, &[PayloadReq::PostSuccess, PayloadReq::PostFailure]).await
+}
+
+async fn post_inner(
+    mut l: Level<Stuff>,
+    payloads: &[fn(Process) -> PayloadReq],
+) -> Result<()> {
+    l.usage_args(Some("NAME COMMAND [ARGS...]"));
+
+    let a = args!(l);
+    let a = a.args();
+
+    if a.len() < 2 {
+        bad_args!(l, "specify at least a task name and a command to run");
+    }
+
+    for payload in payloads {
+        let req = payload(build_process(&a[0], &a[1], &a[2..])?);
+        match l.context_mut().req(req).await? {
+            PayloadRes::Error(e) => {
+                /*
+                 * This request is purely local to the agent, so an
+                 * error is not something we should retry indefinitely.
+                 */
+                bail!("could not enqueue post task {:?}: {e}", a[0]);
+            }
+            PayloadRes::Ack => {}
+            other => bail!("unexpected response: {other:?}"),
+        }
+    }
+
+    Ok(())
 }
 
 async fn cmd_process(mut l: Level<Stuff>) -> Result<()> {

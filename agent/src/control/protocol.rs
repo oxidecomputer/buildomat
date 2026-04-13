@@ -40,6 +40,8 @@ pub enum PayloadReq {
     StorePut(String, String, bool),
     MetadataAddresses,
     ProcessStart(Process),
+    PostSuccess(Process),
+    PostFailure(Process),
     FactoryInfo,
 }
 

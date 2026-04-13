@@ -60,7 +60,9 @@ mod os_constants {
 }
 use os_constants::*;
 
-use crate::control::protocol::StoreEntry;
+use crate::control::protocol::{Process, StoreEntry};
+
+const QUOTA_POST_TASKS_PER_TYPE: usize = 32;
 
 #[derive(Serialize, Deserialize)]
 struct ConfigFile {
@@ -343,9 +345,9 @@ impl ClientWrap {
                 ActivityBuilder::Task(id) => {
                     AppendJobEntry::TaskEvent(*id, rec)
                 }
-                ActivityBuilder::Diag(_) | ActivityBuilder::Bg(_) => {
-                    AppendJobEntry::JobEvent(rec)
-                }
+                ActivityBuilder::Diag(_)
+                | ActivityBuilder::Bg(_)
+                | ActivityBuilder::Post(_) => AppendJobEntry::JobEvent(rec),
             })
             .await
             .unwrap();
@@ -1022,7 +1024,13 @@ enum Stage {
     Ready,
     Download(mpsc::Receiver<download::Activity>),
     NextTask,
-    Child(mpsc::Receiver<exec::Activity>, ActivityBuilder, Option<bool>),
+    NextPostTask(PostQueue),
+    Child(
+        mpsc::Receiver<exec::Activity>,
+        ActivityBuilder,
+        Option<bool>,
+        NextStage,
+    ),
     Upload(mpsc::Receiver<upload::Activity>),
     StartPreDiagnostics(String),
     PreDiagnostics(mpsc::Receiver<exec::Activity>, Option<bool>),
@@ -1030,6 +1038,22 @@ enum Stage {
     PostDiagnostics(mpsc::Receiver<exec::Activity>, Option<bool>),
     Complete,
     Broken,
+}
+
+/*
+ * Unfortunately we can't add the next stage as a filed of the stage: due to how
+ * stages are used we wouldn't be able to unbox it if we were to add Box<Stage>.
+ */
+#[derive(Clone, Copy)]
+enum NextStage {
+    NextTask,
+    NextPostTask(PostQueue),
+}
+
+#[derive(Clone, Copy)]
+enum PostQueue {
+    Success,
+    Failure,
 }
 
 async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
@@ -1228,6 +1252,8 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
     let mut control = control::server::listen()?;
     let mut creq: Option<control::server::Request> = None;
     let mut bgprocs = exec::BackgroundProcesses::new();
+    let mut post_tasks_success = VecDeque::new();
+    let mut post_tasks_failure = VecDeque::new();
 
     let mut metadata: Option<metadata::FactoryMetadata> = None;
     let mut factory: Option<WorkerPingFactoryInfo> = None;
@@ -1458,6 +1484,12 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                         Err(e) => PayloadRes::Error(e.to_string()),
                     }
                 }
+                PayloadReq::PostSuccess(process) => {
+                    add_post_task(&mut post_tasks_success, process)
+                }
+                PayloadReq::PostFailure(process) => {
+                    add_post_task(&mut post_tasks_failure, process)
+                }
                 PayloadReq::FactoryInfo => {
                     if let Some(f) = &factory {
                         PayloadRes::FactoryInfo(FactoryInfo {
@@ -1558,7 +1590,7 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                 if failures || tasks.is_empty() {
                     /*
                      * There are no more tasks to complete, so move on to
-                     * uploading outputs.
+                     * running post tasks.
                      */
                     info!(
                         log,
@@ -1566,10 +1598,13 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                         cw.job_id().unwrap(),
                     );
 
-                    stage = Stage::Upload(upload::upload(
-                        cw.clone(),
-                        cw.job.as_ref().unwrap().output_rules.clone(),
-                    ));
+                    stage = Stage::NextPostTask(
+                        if exit_details.iter().any(|ex| ex.failed()) {
+                            PostQueue::Failure
+                        } else {
+                            PostQueue::Success
+                        },
+                    );
                     continue;
                 }
 
@@ -1636,7 +1671,7 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                 let ab = ActivityBuilder::Task(t.id);
                 match exec::run(cmd, ab.clone()) {
                     Ok(c) => {
-                        stage = Stage::Child(c, ab, None);
+                        stage = Stage::Child(c, ab, None, NextStage::NextTask);
                     }
                     Err(e) => {
                         /*
@@ -1658,7 +1693,81 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                     }
                 }
             }
-            Stage::Child(ch, ab, failed) => {
+            Stage::NextPostTask(queue) => {
+                let post_tasks = match queue {
+                    PostQueue::Success => &mut post_tasks_success,
+                    PostQueue::Failure => &mut post_tasks_failure,
+                };
+
+                if post_tasks.is_empty() {
+                    /*
+                     * There are no more tasks to complete, so move on to
+                     * uploading outputs.
+                     */
+                    info!(
+                        log,
+                        "no more post tasks for job {}",
+                        cw.job_id().unwrap()
+                    );
+
+                    stage = Stage::Upload(upload::upload(
+                        cw.clone(),
+                        cw.job.as_ref().unwrap().output_rules.clone(),
+                    ));
+                    continue;
+                }
+
+                let t = post_tasks.pop_front().unwrap();
+                let stream = format!("post.{}", t.name);
+
+                /*
+                 * Emit an event that we can use to visually separate tasks
+                 * in the output.
+                 */
+                let msg = format!("starting post task: \"{}\"", t.name);
+                cw.append(OutputRecord::new(&stream, &msg)).await;
+
+                let mut cmd = Command::new(t.cmd);
+                cmd.current_dir(&t.pwd);
+                cmd.args(&t.args);
+                cmd.env_clear();
+                for (k, v) in &t.env {
+                    cmd.env(k, v);
+                }
+                cmd.uid(t.uid);
+                cmd.gid(t.gid);
+
+                let ab = ActivityBuilder::Post(t.name.clone());
+                match exec::run(cmd, ab.clone()) {
+                    Ok(c) => {
+                        stage = Stage::Child(
+                            c,
+                            ab,
+                            None,
+                            NextStage::NextPostTask(*queue),
+                        );
+                    }
+                    Err(e) => {
+                        /*
+                         * Try to post the error we would have reported
+                         * to the server, but don't try too hard.
+                         */
+                        cw.client
+                            .worker_job_append()
+                            .job(cw.job_id().unwrap())
+                            .body(vec![WorkerAppendJobOrTask {
+                                task: None,
+                                stream: "agent".into(),
+                                time: Utc::now(),
+                                payload: format!("ERROR: exec: {:?}", e),
+                            }])
+                            .send()
+                            .await
+                            .ok();
+                    }
+                }
+            }
+            Stage::Child(ch, ab, failed, next_stage) => {
                 let a = tokio::select! {
                     _ = pingfreq.tick() => {
                         do_ping = true;
@@ -1705,7 +1814,12 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                             cw.task_complete(*id, failed.unwrap()).await;
                         }
 
-                        stage = Stage::NextTask;
+                        stage = match next_stage {
+                            NextStage::NextTask => Stage::NextTask,
+                            NextStage::NextPostTask(queue) => {
+                                Stage::NextPostTask(*queue)
+                            }
+                        };
                     }
                     None => {
                         for a in bgprocs.killall().await {
@@ -1863,6 +1977,23 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
             }
         }
     }
+}
+
+fn add_post_task(queue: &mut VecDeque<Process>, task: &Process) -> PayloadRes {
+    if queue.len() >= QUOTA_POST_TASKS_PER_TYPE {
+        return PayloadRes::Error(format!(
+            "cannot register more than {QUOTA_POST_TASKS_PER_TYPE} post tasks"
+        ));
+    }
+    if queue.iter().any(|p| p.name == task.name) {
+        return PayloadRes::Error(format!(
+            "a post task named {:?} already exists",
+            task.name
+        ));
+    }
+
+    queue.push_back(task.clone());
+    PayloadRes::Ack
 }
 
 #[tokio::main]

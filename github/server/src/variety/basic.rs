@@ -461,6 +461,7 @@ pub(crate) async fn run(
                 let panic = ev.stream == "panic";
                 let worker = ev.stream == "worker";
                 let bgproc = ev.stream.starts_with("bg.");
+                let post = ev.stream.starts_with("post.");
 
                 if stdio || console || panic {
                     /*
@@ -519,7 +520,10 @@ pub(crate) async fn run(
                      */
                     let line = format!("|W| {}", ev.payload);
                     p.events_tail.push_back((None, line));
-                } else if !bgproc {
+                /*
+                 * Background processes and post tasks are excluded.
+                 */
+                } else if !bgproc && !post {
                     p.events_tail.push_back((
                         Some(format!("{}/{:?}", ev.stream, ev.task)),
                         format!("{}: {}", ev.stream, ev.payload),
