@@ -33,6 +33,9 @@ impl JobEventEx for JobEvent {
             JobStream::Console => "s_console",
             JobStream::Control => "s_control",
             JobStream::Panic => "s_panic",
+            JobStream::Post { .. } => "s_post",
+            JobStream::PostStderr { .. } => "s_post_stderr",
+            JobStream::PostStdout { .. } => "s_post_stdout",
             JobStream::Stderr => "s_stderr",
             JobStream::Stdout => "s_stdout",
             JobStream::Task => "s_task",
@@ -70,6 +73,13 @@ impl JobEventEx for JobEvent {
 
         let section = if let Some(id) = self.task {
             EventSection::Task(id)
+        } else if let Some(post) = self.stream.strip_prefix("post.") {
+            EventSection::Post(
+                post.split_once('.')
+                    .map(|(name, _)| name)
+                    .unwrap_or(post)
+                    .into(),
+            )
         } else {
             EventSection::None
         };
@@ -164,6 +174,7 @@ pub struct EventField {
 enum EventSection {
     None,
     Task(u32),
+    Post(String),
 }
 
 impl Serialize for EventSection {
@@ -171,6 +182,7 @@ impl Serialize for EventSection {
         match self {
             EventSection::None => s.serialize_str("none"),
             EventSection::Task(idx) => s.serialize_str(&format!("task:{idx}")),
+            EventSection::Post(n) => s.serialize_str(&format!("post:{n}")),
         }
     }
 }

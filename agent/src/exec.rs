@@ -132,6 +132,7 @@ pub enum ActivityBuilder {
     Task(u32),
     Diag(String),
     Bg(String),
+    Post(String),
 }
 
 impl ActivityBuilder {
@@ -140,6 +141,7 @@ impl ActivityBuilder {
             ActivityBuilder::Task(_) => JobStream::Stdout,
             ActivityBuilder::Diag(_) => JobStream::Stdout,
             ActivityBuilder::Bg(name) => JobStream::BgStdout { name },
+            ActivityBuilder::Post(name) => JobStream::PostStdout { name },
         }
     }
 
@@ -148,6 +150,7 @@ impl ActivityBuilder {
             ActivityBuilder::Task(_) => JobStream::Stderr,
             ActivityBuilder::Diag(_) => JobStream::Stderr,
             ActivityBuilder::Bg(name) => JobStream::BgStderr { name },
+            ActivityBuilder::Post(name) => JobStream::PostStderr { name },
         }
     }
 
@@ -156,6 +159,7 @@ impl ActivityBuilder {
             ActivityBuilder::Task(_) => JobStream::Task,
             ActivityBuilder::Diag(name) => JobStream::Diag { name },
             ActivityBuilder::Bg(name) => JobStream::Bg { name },
+            ActivityBuilder::Post(name) => JobStream::Post { name },
         }
     }
 
@@ -164,6 +168,7 @@ impl ActivityBuilder {
             ActivityBuilder::Task(_) => JobStream::Worker,
             ActivityBuilder::Diag(name) => JobStream::Diag { name },
             ActivityBuilder::Bg(name) => JobStream::Bg { name },
+            ActivityBuilder::Post(name) => JobStream::Post { name },
         }
     }
 
@@ -176,6 +181,7 @@ impl ActivityBuilder {
         match self {
             ActivityBuilder::Task(_) => {}
             ActivityBuilder::Diag(_) => {}
+            ActivityBuilder::Post(_) => {}
             ActivityBuilder::Bg(name) => {
                 s += &format!("background process {name:?}: ")
             }

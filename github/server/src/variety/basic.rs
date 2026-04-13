@@ -492,7 +492,10 @@ pub(crate) async fn run(
                     }
                     JobStream::Bg { .. }
                     | JobStream::BgStderr { .. }
-                    | JobStream::BgStdout { .. } => {}
+                    | JobStream::BgStdout { .. }
+                    | JobStream::Post { .. }
+                    | JobStream::PostStderr { .. }
+                    | JobStream::PostStdout { .. } => {}
                 }
             }
 
