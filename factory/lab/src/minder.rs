@@ -149,7 +149,7 @@ impl CentralExt for Central {
         &self,
         name: &str,
     ) -> HResult<&super::config::ConfigFileHost> {
-        if let Some(h) = self.hosts.get(&name.to_string()) {
+        if let Some(h) = self.hosts.get(name) {
             Ok(&h.config)
         } else {
             Err(dropshot::HttpError::for_client_error(

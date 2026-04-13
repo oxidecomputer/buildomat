@@ -1094,7 +1094,7 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
         let status = Command::new("/sbin/zfs")
             .arg("create")
             .arg("-o")
-            .arg(&format!("mountpoint={}", INPUT_PATH))
+            .arg(format!("mountpoint={INPUT_PATH}"))
             .arg(INPUT_DATASET)
             .env_clear()
             .current_dir("/")

@@ -1432,7 +1432,6 @@ async fn flush_check_runs(
                 actions: out.actions,
                 started_at: out.started_at,
                 completed_at: out.completed_at,
-                ..Default::default()
             };
 
             let res = gh

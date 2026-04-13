@@ -294,8 +294,7 @@ fn run_common(
                  * process.
                  */
                 if ab.bgproc.is_none() {
-                    tx.blocking_send(ab.exit(&start, &end, std::i32::MAX))
-                        .unwrap();
+                    tx.blocking_send(ab.exit(&start, &end, i32::MAX)).unwrap();
                 }
 
                 false
@@ -326,7 +325,7 @@ fn run_common(
                     )
                     .unwrap();
                 }
-                let code = es.code().unwrap_or(std::i32::MAX);
+                let code = es.code().unwrap_or(i32::MAX);
                 tx.blocking_send(ab.exit(&start, &end, code)).unwrap();
                 stdio_warning
             }

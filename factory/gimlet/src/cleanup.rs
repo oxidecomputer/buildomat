@@ -254,7 +254,7 @@ fn prepare_m2() -> Result<()> {
         let p = &mut vtoc.parts_mut()[i];
         p.p_tag = efi::sys::V_USR;
         p.p_start = next_start;
-        p.p_size = size.into();
+        p.p_size = size;
         next_start = next_start.checked_add(size).unwrap();
     }
 
@@ -289,11 +289,11 @@ fn prepare_m2() -> Result<()> {
         .env_clear()
         .arg("create")
         .arg("-O")
-        .arg(&format!("mountpoint=/pool/int/{id}"))
+        .arg(format!("mountpoint=/pool/int/{id}"))
         .arg("-O")
         .arg("compress=on")
         .arg(&pool)
-        .arg(&format!("{}s5", d.name))
+        .arg(format!("{}s5", d.name))
         .output()?;
 
     if !out.status.success() {
