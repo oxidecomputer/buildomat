@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>Create GitHub App for buildomat</title>
+        <style>
+            form {
+                height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+        </style>
+    </head>
+    <body>
+        <form action="https://github.com/settings/apps/new?state={{secret}}" method="post">
+            <input type="hidden" name="manifest" value="{{manifest}}">
+            <button>Go to GitHub to create the GitHub App</button>
+        </form>
+    </body>
+</html>

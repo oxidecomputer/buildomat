@@ -73,10 +73,14 @@ pub fn load(profile_name: Option<&str>) -> Result<Profile> {
     /*
      * Next, locate our configuration file.
      */
-    let mut path = dirs_next::config_dir()
-        .ok_or_else(|| anyhow!("could not find config directory"))?;
-    path.push("buildomat");
-    path.push("config.toml");
+    let path = if let Some(path) = std::env::var_os("BUILDOMAT_CONFIG") {
+        path.into()
+    } else {
+        dirs_next::config_dir()
+            .ok_or_else(|| anyhow!("could not find config directory"))?
+            .join("buildomat")
+            .join("config.toml")
+    };
 
     let c: Config =
         read_file(&path).with_context(|| anyhow!("reading file {:?}", path))?;

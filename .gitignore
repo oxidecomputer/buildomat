@@ -1,4 +1,13 @@
 /target
+
+#
+# Files needed when running buildomat locally with xtask.
+#
+/.local
+
+#
+# Files needed when running buildomat locally without xtask.
+#
 /config.toml
 /data.sqlite3
 /cache
