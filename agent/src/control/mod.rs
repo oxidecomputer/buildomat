@@ -14,7 +14,7 @@ use tokio::{
 };
 
 use protocol::{
-    Decoder, FactoryInfo, Message, Payload, PayloadReq, PayloadRes,
+    Decoder, FactoryInfo, Message, Payload, PayloadReq, PayloadRes, Process,
 };
 
 pub(crate) mod protocol;
@@ -386,31 +386,14 @@ async fn cmd_process_start(mut l: Level<Stuff>) -> Result<()> {
     l.usage_args(Some("NAME COMMAND [ARGS...]"));
 
     let a = args!(l);
+    let a = a.args();
 
-    if a.args().len() < 2 {
+    if a.len() < 2 {
         bad_args!(l, "specify at least a process name and a command to run");
     }
 
-    let payload = PayloadReq::ProcessStart {
-        name: a.args()[0].to_string(),
-        cmd: a.args()[1].to_string(),
-        args: a.args().iter().skip(2).cloned().collect::<Vec<_>>(),
-
-        /*
-         * The process will actually be spawned by the agent, which is
-         * running under service management.  To aid the user, we want
-         * to forward the environment and current directory so that the
-         * process can be started as if it were run from the job program
-         * itself.
-         */
-        env: std::env::vars_os().collect::<Vec<_>>(),
-        pwd: std::env::current_dir()?.to_str().unwrap().to_string(),
-
-        uid: unsafe { libc::geteuid() },
-        gid: unsafe { libc::getegid() },
-    };
-
-    match l.context_mut().req(payload).await? {
+    let req = PayloadReq::ProcessStart(build_process(&a[0], &a[1], &a[2..])?);
+    match l.context_mut().req(req).await? {
         PayloadRes::Error(e) => {
             /*
              * This request is purely local to the agent, so an
@@ -421,6 +404,26 @@ async fn cmd_process_start(mut l: Level<Stuff>) -> Result<()> {
         PayloadRes::Ack => Ok(()),
         other => bail!("unexpected response: {other:?}"),
     }
+}
+
+fn build_process(name: &str, cmd: &str, args: &[String]) -> Result<Process> {
+    Ok(Process {
+        name: name.into(),
+        cmd: cmd.into(),
+        args: args.into(),
+
+        /*
+         * The process will actually be spawned by the agent, which is
+         * running under service management.  To aid the user, we want
+         * to forward the environment and current directory so that the
+         * process can be started as if it were run from the job program
+         * itself.
+         */
+        env: std::env::vars_os().collect(),
+        pwd: std::env::current_dir()?.into_os_string(),
+        uid: unsafe { libc::geteuid() },
+        gid: unsafe { libc::getegid() },
+    })
 }
 
 async fn factory_info(s: &mut Stuff) -> Result<FactoryInfo> {

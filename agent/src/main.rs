@@ -1435,24 +1435,18 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                         Err(e) => PayloadRes::Error(e.to_string()),
                     }
                 }
-                PayloadReq::MetadataAddresses => PayloadRes::MetadataAddresses(
-                    metadata
-                        .as_ref()
-                        .map(|md| md.addresses().to_vec())
-                        .unwrap_or_default(),
-                ),
-                PayloadReq::ProcessStart {
-                    name,
-                    cmd,
-                    args,
-                    env,
-                    pwd,
-                    uid,
-                    gid,
-                } => {
-                    match bgprocs.start(name, cmd, args, env, pwd, *uid, *gid) {
-                        Ok(_) => PayloadRes::Ack,
-                        Err(e) => PayloadRes::Error(e.to_string()),
+                 PayloadReq::MetadataAddresses => {
+                     PayloadRes::MetadataAddresses(
+                         metadata
+                             .as_ref()
+                             .map(|md| md.addresses().to_vec())
+                             .unwrap_or_default(),
+                     )
+                 }
+                PayloadReq::ProcessStart(process) => {
+                    match bgprocs.start(process) {
+                         Ok(_) => PayloadRes::Ack,
+                         Err(e) => PayloadRes::Error(e.to_string()),
                     }
                 }
                 PayloadReq::FactoryInfo => {
