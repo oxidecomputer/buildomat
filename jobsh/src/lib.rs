@@ -11,19 +11,12 @@ use serde::Serialize;
 pub mod jobfile;
 pub mod variety;
 
-/*
- * Classes for these streams are defined in the "variety/basic/www/style.css",
- * which we send along with the generated HTML output.
- */
-const CSS_STREAM_CLASSES: &[&str] =
-    &["stdout", "stderr", "task", "worker", "control", "console", "panic"];
-
 pub trait JobEventEx {
     /**
      * Choose a colour (CSS class name) for the stream to which this event
      * belongs.
      */
-    fn css_class(&self) -> String;
+    fn css_class(&self) -> &'static str;
 
     /**
      * Turn a job event into a somewhat abstract object with pre-formatted HTML
@@ -34,15 +27,23 @@ pub trait JobEventEx {
 }
 
 impl JobEventEx for JobEvent {
-    fn css_class(&self) -> String {
-        let s = self.stream.as_str();
+    fn css_class(&self) -> &'static str {
+        let s = self.stream.split('.').collect::<Vec<_>>();
 
-        if CSS_STREAM_CLASSES.contains(&s) {
-            format!("s_{s}")
-        } else if s.starts_with("bg.") {
-            "s_bgtask".into()
-        } else {
-            "s_default".into()
+        /*
+         * Classes are defined in "variety/basic/www/style.css", which we send
+         * along with the generated HTML output.
+         */
+        match s.as_slice() {
+            ["bg", ..] => "s_bgtask",
+            ["console"] => "s_console",
+            ["control"] => "s_control",
+            ["panic"] => "s_panic",
+            ["stderr"] => "s_stderr",
+            ["stdout"] => "s_stdout",
+            ["task"] => "s_task",
+            ["worker"] => "s_worker",
+            _ => "s_default",
         }
     }
 
@@ -137,7 +138,7 @@ fn encode_payload(payload: &str) -> Cow<'_, str> {
 #[derive(Debug, Serialize)]
 pub struct EventRow {
     task: Option<u32>,
-    css_class: String,
+    css_class: &'static str,
     fields: Vec<EventField>,
 }
 
