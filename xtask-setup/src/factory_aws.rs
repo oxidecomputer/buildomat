@@ -8,8 +8,8 @@ use std::iter::once;
 use anyhow::{anyhow, Context as _, Result};
 use aws_config::{BehaviorVersion, Region};
 use aws_sdk_ec2::types::{
-    AttributeBooleanValue, Filter, LocationType, ResourceType, Tag,
-    TagSpecification,
+    AttributeBooleanValue, Filter, IpPermission, IpRange, LocationType,
+    PrefixListId, ResourceType, Tag, TagSpecification,
 };
 use aws_sdk_ec2::Client as EC2Client;
 use buildomat_client::types::{FactoryCreate, TargetCreate, TargetRedirect};
@@ -46,9 +46,10 @@ pub(crate) async fn setup(ctx: &Context) -> Result<()> {
      * core server.  Rather than asking again, reuse those choices.
      */
     let server_config = ServerConfig::from_context(ctx)?;
+    let region = &server_config.storage.region;
     let sdk_config = aws_config::defaults(BehaviorVersion::latest())
         .profile_name(&server_config.storage.profile)
-        .region(Region::new(server_config.storage.region.clone()))
+        .region(Region::new(region.clone()))
         .load()
         .await;
     let ec2 = EC2Client::new(&sdk_config);
@@ -56,7 +57,7 @@ pub(crate) async fn setup(ctx: &Context) -> Result<()> {
     println!("Configuring the AWS account to run buildomat jobs...");
     let vpc = create_vpc(ctx, &ec2).await?;
     let subnet = create_subnet(ctx, &ec2, &vpc).await?;
-    let sg = create_security_group(ctx, &ec2, &vpc).await?;
+    let sg = create_security_group(ctx, &ec2, &region, &vpc).await?;
     create_internet_gateway(ctx, &ec2, &vpc).await?;
 
     let ami = find_ubuntu_ami(&ec2, UBUNTU_RELEASE).await?;
@@ -205,6 +206,7 @@ async fn create_subnet(
 async fn create_security_group(
     ctx: &Context,
     ec2: &EC2Client,
+    region: &str,
     vpc: &str,
 ) -> Result<String> {
     let name = &ctx.setup_name;
@@ -225,25 +227,107 @@ async fn create_security_group(
         .security_groups()
         .first()
         .cloned();
-    if let Some(existing) = existing {
-        return Ok(existing.group_id.unwrap());
+
+    let group_id = if let Some(existing) = existing {
+        existing.group_id.unwrap()
+    } else {
+        ec2.create_security_group()
+            .group_name(name)
+            .description("VMs running buildomat jobs in a local setup.")
+            .tag_specifications(tags(ctx, ResourceType::SecurityGroup))
+            .vpc_id(vpc)
+            .send()
+            .await
+            .context("failed to create AWS security group")?
+            .group_id
+            .unwrap()
+    };
+
+    /*
+     * While on a brand new security group we can assume there are no rules,
+     * existing groups might have incomplete rules.  To avoid complex logic, we
+     * just delete all rules and add new ones.
+     */
+    let rules = ec2
+        .describe_security_group_rules()
+        .filters(filter("group-id", &group_id))
+        .into_paginator()
+        .send()
+        .collect::<Result<Vec<_>, _>>()
+        .await
+        .with_context(|| {
+            format!("failed to list security group rules for {group_id:?}")
+        })?
+        .into_iter()
+        .flat_map(|page| page.security_group_rules().to_vec());
+    for rule in rules {
+        if rule.is_egress.unwrap_or(false) {
+            ec2.revoke_security_group_egress()
+                .group_id(&group_id)
+                .security_group_rule_ids(&rule.security_group_rule_id.unwrap())
+                .send()
+                .await
+                .context("failed to delete security group rule")?;
+        } else {
+            ec2.revoke_security_group_ingress()
+                .group_id(&group_id)
+                .security_group_rule_ids(&rule.security_group_rule_id.unwrap())
+                .send()
+                .await
+                .context("failed to delete security group rule")?;
+        }
     }
 
     /*
-     * The default security group configuration allows no inbound traffic and
-     * full outbound traffic, which is what we want here.  No need to add rules.
+     * Authorize outbound IPv4 traffic from the instance.
      */
-    Ok(ec2
-        .create_security_group()
-        .group_name(name)
-        .description("VMs running buildomat jobs in a local setup.")
-        .tag_specifications(tags(ctx, ResourceType::SecurityGroup))
-        .vpc_id(vpc)
+    ec2.authorize_security_group_egress()
+        .group_id(&group_id)
+        .tag_specifications(custom_tag(
+            ResourceType::SecurityGroupRule,
+            "outbound-traffic",
+        ))
+        .ip_permissions(
+            IpPermission::builder()
+                .ip_protocol("-1")
+                .ip_ranges(IpRange::builder().cidr_ip("0.0.0.0/0").build())
+                .build(),
+        )
         .send()
         .await
-        .context("failed to create AWS security group")?
-        .group_id
-        .unwrap())
+        .context("failed to create egress rule")?;
+
+    /*
+     * Authorize EC2 Instance Connect to connect to SSH.
+     */
+    let instance_connect = find_managed_prefix_list(
+        ec2,
+        &format!("com.amazonaws.{region}.ec2-instance-connect"),
+    )
+    .await?;
+    ec2.authorize_security_group_ingress()
+        .group_id(&group_id)
+        .tag_specifications(custom_tag(
+            ResourceType::SecurityGroupRule,
+            "ec2-instance-connect",
+        ))
+        .ip_permissions(
+            IpPermission::builder()
+                .prefix_list_ids(
+                    PrefixListId::builder()
+                        .prefix_list_id(instance_connect)
+                        .build(),
+                )
+                .from_port(22)
+                .to_port(22)
+                .ip_protocol("tcp")
+                .build(),
+        )
+        .send()
+        .await
+        .context("failed to create ingress rule for EC2 Instance Connect")?;
+
+    Ok(group_id)
 }
 
 async fn create_internet_gateway(
@@ -370,6 +454,27 @@ async fn find_ubuntu_ami(ec2: &EC2Client, release: &str) -> Result<String> {
 }
 
 /**
+ * AWS maintains list of IPs used by some of their services.  We can use them to
+ * allow those services to connect to the security group, without allowing any
+ * other service or external user.
+ */
+async fn find_managed_prefix_list(
+    ec2: &EC2Client,
+    name: &str,
+) -> Result<String> {
+    ec2.describe_managed_prefix_lists()
+        .filters(filter("prefix-list-name", name))
+        .filters(filter("owner-id", "AWS"))
+        .send()
+        .await
+        .context("failed to retrieve managed prefix lists")?
+        .prefix_lists()
+        .first()
+        .and_then(|pl| pl.prefix_list_id.clone())
+        .ok_or_else(|| anyhow!("couldn't find managed prefix list {name}"))
+}
+
+/**
  * AWS is annoying and not all availability zones in a region support any given
  * instance type.  For example, at the time of writing this, only two AZs in
  * "eu-central-1" (out of three) support the "c8a.2xlarge" instance type. We
@@ -464,9 +569,13 @@ fn filter(name: &str, value: impl Into<String>) -> Filter {
 }
 
 fn tags(ctx: &Context, resource_type: ResourceType) -> TagSpecification {
+    custom_tag(resource_type, &ctx.setup_name)
+}
+
+fn custom_tag(resource_type: ResourceType, name: &str) -> TagSpecification {
     TagSpecification::builder()
         .resource_type(resource_type)
-        .tags(Tag::builder().key("Name").value(&ctx.setup_name).build())
+        .tags(Tag::builder().key("Name").value(name).build())
         .build()
 }
 
