@@ -123,51 +123,75 @@ pub enum Activity {
     Complete,
 }
 
-struct ActivityBuilder {
-    error_stream: String,
-    exit_stream: String,
-    bgproc: Option<String>,
+pub enum ActivityBuilder {
+    Task,
+    Diag(String),
+    Bg(String),
 }
 
 impl ActivityBuilder {
-    fn exit(&self, start: &Instant, end: &Instant, code: i32) -> Activity {
-        Activity::Exit(ExitDetails {
-            stream: self.exit_stream.to_string(),
-            duration_ms: end.duration_since(*start).as_millis() as u64,
-            when: Utc::now(),
-            code,
-        })
-    }
-
     fn stdout_stream(&self) -> String {
-        if let Some(n) = &self.bgproc {
-            format!("bg.{n}.stdout")
-        } else {
-            "stdout".to_string()
+        match self {
+            ActivityBuilder::Task => "stdout".into(),
+            ActivityBuilder::Diag(_) => "stdout".into(),
+            ActivityBuilder::Bg(n) => format!("bg.{n}.stdout"),
         }
     }
 
     fn stderr_stream(&self) -> String {
-        if let Some(n) = &self.bgproc {
-            format!("bg.{n}.stderr")
-        } else {
-            "stderr".to_string()
+        match self {
+            ActivityBuilder::Task => "stderr".into(),
+            ActivityBuilder::Diag(_) => "stderr".into(),
+            ActivityBuilder::Bg(n) => format!("bg.{n}.stderr"),
         }
+    }
+
+    fn exit_stream(&self) -> String {
+        match self {
+            ActivityBuilder::Task => "task".into(),
+            ActivityBuilder::Diag(n) => format!("diag.{n}"),
+            ActivityBuilder::Bg(n) => format!("bg.{n}"),
+        }
+    }
+
+    fn error_stream(&self) -> String {
+        match self {
+            ActivityBuilder::Task => "worker".into(),
+            ActivityBuilder::Diag(n) => format!("diag.{n}"),
+            ActivityBuilder::Bg(n) => format!("bg.{n}"),
+        }
+    }
+
+    fn is_bg(&self) -> bool {
+        matches!(self, ActivityBuilder::Bg(_))
     }
 
     fn errmsg(&self, pfx: &str, msg: &str) -> String {
         let mut s = format!("{pfx}: ");
-        if let Some(bg) = &self.bgproc {
-            s += &format!("background process {bg:?}: ");
+        match self {
+            ActivityBuilder::Task => {}
+            ActivityBuilder::Diag(_) => {}
+            ActivityBuilder::Bg(name) => {
+                s += &format!("background process {name:?}: ")
+            }
         }
         s += ": ";
         s += msg;
         s
     }
 
+    fn exit(&self, start: &Instant, end: &Instant, code: i32) -> Activity {
+        Activity::Exit(ExitDetails {
+            stream: self.exit_stream(),
+            duration_ms: end.duration_since(*start).as_millis() as u64,
+            when: Utc::now(),
+            code,
+        })
+    }
+
     fn err(&self, msg: &str) -> Activity {
         Activity::Output(OutputDetails {
-            stream: self.error_stream.to_string(),
+            stream: self.error_stream(),
             msg: self.errmsg("exec error", msg),
             time: Utc::now(),
         })
@@ -175,7 +199,7 @@ impl ActivityBuilder {
 
     fn warn(&self, msg: &str) -> Activity {
         Activity::Output(OutputDetails {
-            stream: self.error_stream.to_string(),
+            stream: self.error_stream(),
             msg: self.errmsg("exec warning", msg),
             time: Utc::now(),
         })
@@ -229,39 +253,13 @@ pub fn thread_done(
     }
 }
 
-pub fn run_diagnostic(cmd: Command, name: &str) -> Result<Receiver<Activity>> {
+pub fn run(cmd: Command, ab: ActivityBuilder) -> Result<Receiver<Activity>> {
     let (tx, rx) = channel::<Activity>(100);
-
-    run_common(
-        cmd,
-        ActivityBuilder {
-            error_stream: format!("diag.{name}"),
-            exit_stream: format!("diag.{name}"),
-            bgproc: None,
-        },
-        tx,
-    )?;
-
+    run_inner(cmd, ab, tx)?;
     Ok(rx)
 }
 
-pub fn run(cmd: Command) -> Result<Receiver<Activity>> {
-    let (tx, rx) = channel::<Activity>(100);
-
-    run_common(
-        cmd,
-        ActivityBuilder {
-            error_stream: "worker".to_string(),
-            exit_stream: "task".to_string(),
-            bgproc: None,
-        },
-        tx,
-    )?;
-
-    Ok(rx)
-}
-
-fn run_common(
+fn run_inner(
     mut cmd: Command,
     ab: ActivityBuilder,
     tx: Sender<Activity>,
@@ -293,7 +291,7 @@ fn run_common(
                  * Only send an exit notification if this is the primary task
                  * process.
                  */
-                if ab.bgproc.is_none() {
+                if !ab.is_bg() {
                     tx.blocking_send(ab.exit(&start, &end, i32::MAX)).unwrap();
                 }
 
@@ -312,7 +310,7 @@ fn run_common(
                 let stdio_warning = !thread_done(&mut readout, "stdout", until)
                     | !thread_done(&mut readerr, "stderr", until);
 
-                if ab.bgproc.is_some() {
+                if ab.is_bg() {
                     /*
                      * No further notifications are required for background
                      * processes.
@@ -332,7 +330,7 @@ fn run_common(
             }
         };
 
-        assert!(ab.bgproc.is_none());
+        assert!(!ab.is_bg());
 
         if stdio_warning {
             tx.blocking_send(ab.warn(
@@ -436,16 +434,11 @@ impl BackgroundProcesses {
         c.uid(process.uid);
         c.gid(process.gid);
 
-        let pid = run_common(
-            c,
-            ActivityBuilder {
-                error_stream: format!("bg.{name}"),
-                exit_stream: format!("bg.{name}"),
-                bgproc: Some(name.to_string()),
-            },
-            self.tx.clone(),
-        )
-        .map_err(|e| anyhow!("starting background process {name:?}: {e}"))?;
+        let pid =
+            run_inner(c, ActivityBuilder::Bg(name.clone()), self.tx.clone())
+                .map_err(|e| {
+                    anyhow!("starting background process {name:?}: {e}")
+                })?;
 
         self.procs.insert(name.to_string(), Proc { pid });
 

@@ -36,7 +36,7 @@ mod shadow;
 mod upload;
 
 use control::protocol::{FactoryInfo, PayloadReq, PayloadRes};
-use exec::ExitDetails;
+use exec::{ActivityBuilder, ExitDetails};
 
 struct Agent {
     log: Logger,
@@ -658,7 +658,7 @@ impl ClientWrap {
         cmd.uid(0);
         cmd.gid(0);
 
-        match exec::run_diagnostic(cmd, name) {
+        match exec::run(cmd, ActivityBuilder::Diag(name.into())) {
             Ok(c) => Some(c),
             Err(e) => {
                 /*
@@ -1435,18 +1435,16 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                         Err(e) => PayloadRes::Error(e.to_string()),
                     }
                 }
-                 PayloadReq::MetadataAddresses => {
-                     PayloadRes::MetadataAddresses(
-                         metadata
-                             .as_ref()
-                             .map(|md| md.addresses().to_vec())
-                             .unwrap_or_default(),
-                     )
-                 }
+                PayloadReq::MetadataAddresses => PayloadRes::MetadataAddresses(
+                    metadata
+                        .as_ref()
+                        .map(|md| md.addresses().to_vec())
+                        .unwrap_or_default(),
+                ),
                 PayloadReq::ProcessStart(process) => {
                     match bgprocs.start(process) {
-                         Ok(_) => PayloadRes::Ack,
-                         Err(e) => PayloadRes::Error(e.to_string()),
+                        Ok(_) => PayloadRes::Ack,
+                        Err(e) => PayloadRes::Error(e.to_string()),
                     }
                 }
                 PayloadReq::FactoryInfo => {
@@ -1624,7 +1622,7 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                 cmd.uid(t.uid);
                 cmd.gid(t.gid);
 
-                match exec::run(cmd) {
+                match exec::run(cmd, ActivityBuilder::Task) {
                     Ok(c) => {
                         stage = Stage::Child(c, t, None);
                     }
