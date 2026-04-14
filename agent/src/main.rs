@@ -35,7 +35,7 @@ mod exec;
 mod shadow;
 mod upload;
 
-use control::protocol::{FactoryInfo, Payload};
+use control::protocol::{FactoryInfo, PayloadReq, PayloadRes};
 use exec::ExitDetails;
 
 struct Agent {
@@ -1402,7 +1402,7 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
              * Handle requests from the control program.
              */
             let reply = match req.payload() {
-                Payload::StoreGet(name) => {
+                PayloadReq::StoreGet(name) => {
                     match cw
                         .client
                         .worker_job_store_get()
@@ -1411,17 +1411,17 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                         .send()
                         .await
                     {
-                        Ok(res) => Payload::StoreGetResult(
+                        Ok(res) => PayloadRes::StoreGet(
                             res.into_inner().value.map(|v| StoreEntry {
                                 name: name.to_string(),
                                 value: v.value,
                                 secret: v.secret,
                             }),
                         ),
-                        Err(e) => Payload::Error(e.to_string()),
+                        Err(e) => PayloadRes::Error(e.to_string()),
                     }
                 }
-                Payload::StorePut(name, value, secret) => {
+                PayloadReq::StorePut(name, value, secret) => {
                     match cw
                         .client
                         .worker_job_store_put()
@@ -1431,17 +1431,17 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                         .send()
                         .await
                     {
-                        Ok(..) => Payload::Ack,
-                        Err(e) => Payload::Error(e.to_string()),
+                        Ok(..) => PayloadRes::Ack,
+                        Err(e) => PayloadRes::Error(e.to_string()),
                     }
                 }
-                Payload::MetadataAddresses => Payload::MetadataAddressesResult(
+                PayloadReq::MetadataAddresses => PayloadRes::MetadataAddresses(
                     metadata
                         .as_ref()
                         .map(|md| md.addresses().to_vec())
                         .unwrap_or_default(),
                 ),
-                Payload::ProcessStart {
+                PayloadReq::ProcessStart {
                     name,
                     cmd,
                     args,
@@ -1451,22 +1451,21 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                     gid,
                 } => {
                     match bgprocs.start(name, cmd, args, env, pwd, *uid, *gid) {
-                        Ok(_) => Payload::Ack,
-                        Err(e) => Payload::Error(e.to_string()),
+                        Ok(_) => PayloadRes::Ack,
+                        Err(e) => PayloadRes::Error(e.to_string()),
                     }
                 }
-                Payload::FactoryInfo => {
+                PayloadReq::FactoryInfo => {
                     if let Some(f) = &factory {
-                        Payload::FactoryInfoResult(FactoryInfo {
+                        PayloadRes::FactoryInfo(FactoryInfo {
                             id: f.id.to_string(),
                             name: f.name.to_string(),
                             private: f.private.clone(),
                         })
                     } else {
-                        Payload::Error("factory info not available".into())
+                        PayloadRes::Error("factory info not available".into())
                     }
                 }
-                _ => Payload::Error("unexpected message type".to_string()),
             };
 
             req.reply(reply).await;

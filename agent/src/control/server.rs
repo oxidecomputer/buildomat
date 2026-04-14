@@ -16,20 +16,22 @@ use tokio::{
 };
 
 use super::{
-    protocol::{Decoder, Message, Payload},
+    protocol::{Decoder, Message, Payload, PayloadReq, PayloadRes},
     SOCKET_PATH,
 };
 
 #[derive(Debug)]
 pub struct Request {
     id: u64,
-    payload: Payload,
+    payload: PayloadReq,
     conn: Arc<Connection>,
 }
 
 impl Request {
-    pub async fn reply(self, payload: Payload) {
-        let m = Message { id: self.id, payload }.pack().unwrap();
+    pub async fn reply(self, resp: PayloadRes) {
+        let m = Message { id: self.id, payload: Payload::Resp(resp) }
+            .pack()
+            .unwrap();
 
         /*
          * Put the serialised message on the write queue for the socket from
@@ -40,7 +42,7 @@ impl Request {
         self.conn.notify.notify_one();
     }
 
-    pub fn payload(&self) -> &Payload {
+    pub fn payload(&self) -> &PayloadReq {
         &self.payload
     }
 }
@@ -201,25 +203,21 @@ async fn handle_client_turn(
     while let Some(msg) = ci.decoder.take()? {
         match ci.state {
             ClientState::Running => match &msg.payload {
-                Payload::StoreGet(..)
-                | Payload::StorePut(..)
-                | Payload::MetadataAddresses
-                | Payload::ProcessStart { .. }
-                | Payload::FactoryInfo => {
+                Payload::Req(request) => {
                     /*
                      * These are requests from the control program.  Pass them
                      * on to the main loop.
                      */
                     let req = Request {
                         id: msg.id,
-                        payload: msg.payload.clone(),
+                        payload: request.clone(),
                         conn: Arc::clone(conn),
                     };
 
                     tx.send(req).await.unwrap();
                 }
-                other => {
-                    bail!("unexpected message {:?}", other);
+                Payload::Resp(resp) => {
+                    bail!("received response instead of request: {resp:?}");
                 }
             },
         }
