@@ -36,6 +36,7 @@ version = "0.0.0"
 [workspace.lints.clippy]
 identity_op = "allow"
 many_single_char_names = "allow"
+should_implement_trait = "allow"
 too_many_arguments = "allow"
 type_complexity = "allow"
 vec_init_then_push = "allow"
