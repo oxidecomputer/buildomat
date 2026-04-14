@@ -752,7 +752,15 @@ pub(crate) async fn run(
             async move { app.load_file(&gh, &repo, &sha, &name).await }.boxed()
         }));
 
-        let tasks = tb.build(&c).await?;
+        let tasks = match tb.build(&c).await {
+            Ok(t) => t,
+            /*
+             * Report the error to the user if we couldn't create the list of
+             * tasks.  For example, this could happen if the user requested the
+             * installation of a Rust toolchain without rust-toolchain.toml.
+             */
+            Err(e) => return fatal(&mut p, cr, db, &e.to_string()),
+        };
 
         /*
          * Attach tags that allow us to more easily map the buildomat job back
