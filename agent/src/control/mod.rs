@@ -13,7 +13,9 @@ use tokio::{
     net::UnixStream,
 };
 
-use protocol::{Decoder, FactoryInfo, Message, Payload};
+use protocol::{
+    Decoder, FactoryInfo, Message, Payload, PayloadReq, PayloadRes,
+};
 
 pub(crate) mod protocol;
 pub(crate) mod server;
@@ -33,10 +35,16 @@ impl Stuff {
         Ok(())
     }
 
-    async fn req(&mut self, payload: Payload) -> Result<Payload> {
-        let message = Message { id: self.ids.next().unwrap(), payload };
+    async fn req(&mut self, req: PayloadReq) -> Result<PayloadRes> {
+        let message = Message {
+            id: self.ids.next().unwrap(),
+            payload: Payload::Req(req),
+        };
         match self.send_and_recv(&message).await {
-            Ok(response) => Ok(response.payload),
+            Ok(Message { payload: Payload::Resp(r), .. }) => Ok(r),
+            Ok(Message { payload: Payload::Req(r), .. }) => {
+                bail!("received a request instead of a response: {r:?}");
+            }
             Err(e) => {
                 /*
                  * Requests to the agent are relatively simple and over a UNIX
@@ -54,10 +62,10 @@ impl Stuff {
      * need to retry until we are able to get a successful response of some
      * kind back from the server.
      */
-    async fn req_retry(&mut self, payload: Payload) -> Result<Payload> {
+    async fn req_retry(&mut self, req: PayloadReq) -> Result<PayloadRes> {
         loop {
-            match self.req(payload.clone()).await? {
-                Payload::Error(e) => {
+            match self.req(req.clone()).await? {
+                PayloadRes::Error(e) => {
                     eprintln!(
                         "WARNING: control request failure (retrying): {e}"
                     );
@@ -147,11 +155,12 @@ async fn cmd_address_list(mut l: Level<Stuff>) -> Result<()> {
 
     let filter = a.opts().opt_str("f");
 
-    let addrs = match l.context_mut().req(Payload::MetadataAddresses).await? {
-        Payload::Error(e) => {
+    let addrs = match l.context_mut().req(PayloadReq::MetadataAddresses).await?
+    {
+        PayloadRes::Error(e) => {
             bail!("WARNING: control request failure: {e}");
         }
-        Payload::MetadataAddressesResult(addrs) => addrs,
+        PayloadRes::MetadataAddresses(addrs) => addrs,
         other => bail!("unexpected response: {other:?}"),
     };
 
@@ -249,11 +258,11 @@ async fn cmd_eng(mut l: Level<Stuff>) -> Result<()> {
 async fn cmd_eng_metadata(mut l: Level<Stuff>) -> Result<()> {
     let _ = no_args!(l);
 
-    match l.context_mut().req(Payload::MetadataAddresses).await? {
-        Payload::Error(e) => {
+    match l.context_mut().req(PayloadReq::MetadataAddresses).await? {
+        PayloadRes::Error(e) => {
             bail!("WARNING: control request failure: {e}");
         }
-        Payload::MetadataAddressesResult(addrs) => {
+        PayloadRes::MetadataAddresses(addrs) => {
             println!("addrs = {addrs:#?}");
             Ok(())
         }
@@ -284,10 +293,10 @@ async fn cmd_store_get(mut l: Level<Stuff>) -> Result<()> {
     let no_wait = a.opts().opt_present("W");
     let mut printed_wait = false;
 
-    let req = Payload::StoreGet(name.clone());
+    let req = PayloadReq::StoreGet(name.clone());
     loop {
         match l.context_mut().req_retry(req.clone()).await? {
-            Payload::StoreGetResult(Some(ent)) => {
+            PayloadRes::StoreGet(Some(ent)) => {
                 /*
                  * Output formatting here should be kept consistent with
                  * what "buildomat job store get" does outside a job;
@@ -300,7 +309,7 @@ async fn cmd_store_get(mut l: Level<Stuff>) -> Result<()> {
                 }
                 break Ok(());
             }
-            Payload::StoreGetResult(None) => {
+            PayloadRes::StoreGet(None) => {
                 if no_wait {
                     bail!("the store has no value for {name:?}");
                 }
@@ -356,10 +365,11 @@ async fn cmd_store_put(mut l: Level<Stuff>) -> Result<()> {
     };
 
     let secret = a.opts().opt_present("s");
-    let req = Payload::StorePut(a.args()[0].to_string(), value.clone(), secret);
+    let req =
+        PayloadReq::StorePut(a.args()[0].to_string(), value.clone(), secret);
 
     match l.context_mut().req_retry(req).await? {
-        Payload::Ack => Ok(()),
+        PayloadRes::Ack => Ok(()),
         other => bail!("unexpected response: {other:?}"),
     }
 }
@@ -381,7 +391,7 @@ async fn cmd_process_start(mut l: Level<Stuff>) -> Result<()> {
         bad_args!(l, "specify at least a process name and a command to run");
     }
 
-    let payload = Payload::ProcessStart {
+    let payload = PayloadReq::ProcessStart {
         name: a.args()[0].to_string(),
         cmd: a.args()[1].to_string(),
         args: a.args().iter().skip(2).cloned().collect::<Vec<_>>(),
@@ -401,28 +411,28 @@ async fn cmd_process_start(mut l: Level<Stuff>) -> Result<()> {
     };
 
     match l.context_mut().req(payload).await? {
-        Payload::Error(e) => {
+        PayloadRes::Error(e) => {
             /*
              * This request is purely local to the agent, so an
              * error is not something we should retry indefinitely.
              */
             bail!("could not start process: {e}");
         }
-        Payload::Ack => Ok(()),
+        PayloadRes::Ack => Ok(()),
         other => bail!("unexpected response: {other:?}"),
     }
 }
 
 async fn factory_info(s: &mut Stuff) -> Result<FactoryInfo> {
-    match s.req(Payload::FactoryInfo).await? {
-        Payload::Error(e) => {
+    match s.req(PayloadReq::FactoryInfo).await? {
+        PayloadRes::Error(e) => {
             /*
              * This request is purely local to the agent, so an
              * error is not something we should retry indefinitely.
              */
             bail!("could not get factory info: {e}");
         }
-        Payload::FactoryInfoResult(fi) => Ok(fi),
+        PayloadRes::FactoryInfo(fi) => Ok(fi),
         other => bail!("unexpected response: {other:?}"),
     }
 }

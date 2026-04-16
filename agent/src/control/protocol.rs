@@ -24,18 +24,10 @@ pub struct StoreEntry {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
-pub enum Payload {
-    Ack,
-    Error(String),
-
+pub enum PayloadReq {
     StoreGet(String),
-    StoreGetResult(Option<StoreEntry>),
-
     StorePut(String, String, bool),
-
     MetadataAddresses,
-    MetadataAddressesResult(Vec<metadata::FactoryAddresses>),
-
     ProcessStart {
         name: String,
         cmd: String,
@@ -45,9 +37,22 @@ pub enum Payload {
         uid: u32,
         gid: u32,
     },
-
     FactoryInfo,
-    FactoryInfoResult(FactoryInfo),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub enum PayloadRes {
+    Ack,
+    Error(String),
+    StoreGet(Option<StoreEntry>),
+    MetadataAddresses(Vec<metadata::FactoryAddresses>),
+    FactoryInfo(FactoryInfo),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub enum Payload {
+    Req(PayloadReq),
+    Resp(PayloadRes),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
