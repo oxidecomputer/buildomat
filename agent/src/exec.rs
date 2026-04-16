@@ -123,8 +123,9 @@ pub enum Activity {
     Complete,
 }
 
+#[derive(Debug, Clone)]
 pub enum ActivityBuilder {
-    Task,
+    Task(u32),
     Diag(String),
     Bg(String),
 }
@@ -132,7 +133,7 @@ pub enum ActivityBuilder {
 impl ActivityBuilder {
     fn stdout_stream(&self) -> String {
         match self {
-            ActivityBuilder::Task => "stdout".into(),
+            ActivityBuilder::Task(_) => "stdout".into(),
             ActivityBuilder::Diag(_) => "stdout".into(),
             ActivityBuilder::Bg(n) => format!("bg.{n}.stdout"),
         }
@@ -140,7 +141,7 @@ impl ActivityBuilder {
 
     fn stderr_stream(&self) -> String {
         match self {
-            ActivityBuilder::Task => "stderr".into(),
+            ActivityBuilder::Task(_) => "stderr".into(),
             ActivityBuilder::Diag(_) => "stderr".into(),
             ActivityBuilder::Bg(n) => format!("bg.{n}.stderr"),
         }
@@ -148,7 +149,7 @@ impl ActivityBuilder {
 
     fn exit_stream(&self) -> String {
         match self {
-            ActivityBuilder::Task => "task".into(),
+            ActivityBuilder::Task(_) => "task".into(),
             ActivityBuilder::Diag(n) => format!("diag.{n}"),
             ActivityBuilder::Bg(n) => format!("bg.{n}"),
         }
@@ -156,7 +157,7 @@ impl ActivityBuilder {
 
     fn error_stream(&self) -> String {
         match self {
-            ActivityBuilder::Task => "worker".into(),
+            ActivityBuilder::Task(_) => "worker".into(),
             ActivityBuilder::Diag(n) => format!("diag.{n}"),
             ActivityBuilder::Bg(n) => format!("bg.{n}"),
         }
@@ -169,7 +170,7 @@ impl ActivityBuilder {
     fn errmsg(&self, pfx: &str, msg: &str) -> String {
         let mut s = format!("{pfx}: ");
         match self {
-            ActivityBuilder::Task => {}
+            ActivityBuilder::Task(_) => {}
             ActivityBuilder::Diag(_) => {}
             ActivityBuilder::Bg(name) => {
                 s += &format!("background process {name:?}: ")

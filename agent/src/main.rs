@@ -335,17 +335,28 @@ impl ClientWrap {
         self.append(OutputRecord::new("worker", msg)).await;
     }
 
-    async fn append_task(&self, task: &WorkerPingTask, rec: OutputRecord) {
+    async fn append_activity(&self, ab: &ActivityBuilder, rec: OutputRecord) {
         self.tx
             .as_ref()
             .unwrap()
-            .send(AppendJobEntry::TaskEvent(task.id, rec))
+            .send(match ab {
+                ActivityBuilder::Task(id) => {
+                    AppendJobEntry::TaskEvent(*id, rec)
+                }
+                ActivityBuilder::Diag(_) | ActivityBuilder::Bg(_) => {
+                    AppendJobEntry::JobEvent(rec)
+                }
+            })
             .await
             .unwrap();
     }
 
     async fn append_task_msg(&self, task: &WorkerPingTask, msg: &str) {
-        self.append_task(task, OutputRecord::new("task", msg)).await;
+        self.append_activity(
+            &ActivityBuilder::Task(task.id),
+            OutputRecord::new("task", msg),
+        )
+        .await;
     }
 
     async fn flush_job_barrier(&self) {
@@ -361,7 +372,7 @@ impl ClientWrap {
         rx.await.unwrap();
     }
 
-    async fn task_complete(&self, task: &WorkerPingTask, failed: bool) {
+    async fn task_complete(&self, task_id: u32, failed: bool) {
         /*
          * Make sure any previously enqueued event log events have gone out to
          * the server before we complete the task.
@@ -373,7 +384,7 @@ impl ClientWrap {
                 .client
                 .worker_task_complete()
                 .job(self.job_id().unwrap())
-                .task(task.id)
+                .task(task_id)
                 .body_map(|body| body.failed(failed))
                 .send()
                 .await
@@ -1011,7 +1022,7 @@ enum Stage {
     Ready,
     Download(mpsc::Receiver<download::Activity>),
     NextTask,
-    Child(mpsc::Receiver<exec::Activity>, WorkerPingTask, Option<bool>),
+    Child(mpsc::Receiver<exec::Activity>, ActivityBuilder, Option<bool>),
     Upload(mpsc::Receiver<upload::Activity>),
     StartPreDiagnostics(String),
     PreDiagnostics(mpsc::Receiver<exec::Activity>, Option<bool>),
@@ -1622,9 +1633,10 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                 cmd.uid(t.uid);
                 cmd.gid(t.gid);
 
-                match exec::run(cmd, ActivityBuilder::Task) {
+                let ab = ActivityBuilder::Task(t.id);
+                match exec::run(cmd, ab.clone()) {
                     Ok(c) => {
-                        stage = Stage::Child(c, t, None);
+                        stage = Stage::Child(c, ab, None);
                     }
                     Err(e) => {
                         /*
@@ -1646,7 +1658,7 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                     }
                 }
             }
-            Stage::Child(ch, t, failed) => {
+            Stage::Child(ch, ab, failed) => {
                 let a = tokio::select! {
                     _ = pingfreq.tick() => {
                         do_ping = true;
@@ -1662,10 +1674,10 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
 
                 match a {
                     Some(exec::Activity::Output(o)) => {
-                        cw.append_task(t, o.to_record()).await;
+                        cw.append_activity(ab, o.to_record()).await;
                     }
                     Some(exec::Activity::Exit(ex)) => {
-                        cw.append_task(t, ex.to_record()).await;
+                        cw.append_activity(ab, ex.to_record()).await;
 
                         /*
                          * Preserve the exit status for when we record task
@@ -1682,21 +1694,23 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                          */
                         for a in bgprocs.killall().await {
                             if let exec::Activity::Output(o) = a {
-                                cw.append_task(t, o.to_record()).await;
+                                cw.append_activity(ab, o.to_record()).await;
                             }
                         }
 
                         /*
                          * Record completion of this task within the job.
                          */
-                        cw.task_complete(t, failed.unwrap()).await;
+                        if let ActivityBuilder::Task(id) = ab {
+                            cw.task_complete(*id, failed.unwrap()).await;
+                        }
 
                         stage = Stage::NextTask;
                     }
                     None => {
                         for a in bgprocs.killall().await {
                             if let exec::Activity::Output(o) = a {
-                                cw.append_task(t, o.to_record()).await;
+                                cw.append_activity(ab, o.to_record()).await;
                             }
                         }
 
