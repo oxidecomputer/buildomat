@@ -1,7 +1,7 @@
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_config::{BehaviorVersion, ConfigLoader, Region, SdkConfig};
-use aws_credential_types::Credentials;
 use aws_credential_types::provider::SharedCredentialsProvider;
+use aws_credential_types::Credentials;
 
 pub struct AwsConfig {
     pub access_key_id: Option<String>,

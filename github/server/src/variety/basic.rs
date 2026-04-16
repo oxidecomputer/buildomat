@@ -1315,13 +1315,9 @@ pub(crate) async fn details(
         }
 
         out += "<h3>Output:</h3>\n";
-        out += &output_table(
-            &bm,
-            &job,
-            local_time,
-            format!("./{}/live", cr.id),
-        )
-        .await?;
+        out +=
+            &output_table(&bm, &job, local_time, format!("./{}/live", cr.id))
+                .await?;
     }
 
     Ok(out)
