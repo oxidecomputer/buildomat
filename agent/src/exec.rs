@@ -129,7 +129,7 @@ pub enum Activity {
 
 #[derive(Clone)]
 pub enum ActivityBuilder {
-    Task,
+    Task(u32),
     Diag(String),
     Bg(String),
 }
@@ -137,7 +137,7 @@ pub enum ActivityBuilder {
 impl ActivityBuilder {
     fn stdout_stream(&self) -> JobStream {
         match self.clone() {
-            ActivityBuilder::Task => JobStream::Stdout,
+            ActivityBuilder::Task(_) => JobStream::Stdout,
             ActivityBuilder::Diag(_) => JobStream::Stdout,
             ActivityBuilder::Bg(name) => JobStream::BgStdout { name },
         }
@@ -145,7 +145,7 @@ impl ActivityBuilder {
 
     fn stderr_stream(&self) -> JobStream {
         match self.clone() {
-            ActivityBuilder::Task => JobStream::Stderr,
+            ActivityBuilder::Task(_) => JobStream::Stderr,
             ActivityBuilder::Diag(_) => JobStream::Stderr,
             ActivityBuilder::Bg(name) => JobStream::BgStderr { name },
         }
@@ -153,7 +153,7 @@ impl ActivityBuilder {
 
     fn exit_stream(&self) -> JobStream {
         match self.clone() {
-            ActivityBuilder::Task => JobStream::Task,
+            ActivityBuilder::Task(_) => JobStream::Task,
             ActivityBuilder::Diag(name) => JobStream::Diag { name },
             ActivityBuilder::Bg(name) => JobStream::Bg { name },
         }
@@ -161,7 +161,7 @@ impl ActivityBuilder {
 
     fn error_stream(&self) -> JobStream {
         match self.clone() {
-            ActivityBuilder::Task => JobStream::Worker,
+            ActivityBuilder::Task(_) => JobStream::Worker,
             ActivityBuilder::Diag(name) => JobStream::Diag { name },
             ActivityBuilder::Bg(name) => JobStream::Bg { name },
         }
@@ -174,7 +174,7 @@ impl ActivityBuilder {
     fn errmsg(&self, pfx: &str, msg: &str) -> String {
         let mut s = format!("{pfx}: ");
         match self {
-            ActivityBuilder::Task => {}
+            ActivityBuilder::Task(_) => {}
             ActivityBuilder::Diag(_) => {}
             ActivityBuilder::Bg(name) => {
                 s += &format!("background process {name:?}: ")
