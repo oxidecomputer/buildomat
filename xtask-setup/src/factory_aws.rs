@@ -57,7 +57,7 @@ pub(crate) async fn setup(ctx: &Context) -> Result<()> {
     println!("Configuring the AWS account to run buildomat jobs...");
     let vpc = create_vpc(ctx, &ec2).await?;
     let subnet = create_subnet(ctx, &ec2, &vpc).await?;
-    let sg = create_security_group(ctx, &ec2, &region, &vpc).await?;
+    let sg = create_security_group(ctx, &ec2, region, &vpc).await?;
     create_internet_gateway(ctx, &ec2, &vpc).await?;
 
     let ami = find_ubuntu_ami(&ec2, UBUNTU_RELEASE).await?;
@@ -264,14 +264,14 @@ async fn create_security_group(
         if rule.is_egress.unwrap_or(false) {
             ec2.revoke_security_group_egress()
                 .group_id(&group_id)
-                .security_group_rule_ids(&rule.security_group_rule_id.unwrap())
+                .security_group_rule_ids(rule.security_group_rule_id.unwrap())
                 .send()
                 .await
                 .context("failed to delete security group rule")?;
         } else {
             ec2.revoke_security_group_ingress()
                 .group_id(&group_id)
-                .security_group_rule_ids(&rule.security_group_rule_id.unwrap())
+                .security_group_rule_ids(rule.security_group_rule_id.unwrap())
                 .send()
                 .await
                 .context("failed to delete security group rule")?;
