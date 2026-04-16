@@ -1040,7 +1040,6 @@ impl Database {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn i_worker_event_insert(
         &self,
         h: &mut Handle,
@@ -2361,7 +2360,7 @@ impl Database {
          */
         let max_val_count = 100;
         let max_val_kib = 10;
-        if value.as_bytes().len() > max_val_kib * 1024 {
+        if value.len() > max_val_kib * 1024 {
             conflict!("maximum value size is {max_val_kib}KiB");
         }
 
@@ -2485,7 +2484,6 @@ impl Database {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn i_job_event_insert(
         &self,
         h: &mut Handle,

@@ -180,7 +180,7 @@ mod test {
     use super::InstanceState;
     use std::str::FromStr;
 
-    const INSTANCE_STATES: &'static [(&'static str, InstanceState)] = &[
+    const INSTANCE_STATES: &[(&str, InstanceState)] = &[
         ("preboot", InstanceState::Preboot),
         ("booted", InstanceState::Booted),
         ("destroying", InstanceState::Destroying),

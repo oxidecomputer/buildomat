@@ -2,8 +2,6 @@
  * Copyright 2025 Oxide Computer Company
  */
 
-#![allow(clippy::vec_init_then_push)]
-
 use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine;
 use buildomat_common::*;
@@ -301,7 +299,7 @@ impl App {
     fn buildomat(&self, repo: &Repository) -> buildomat_client::Client {
         buildomat_client::ClientBuilder::new(&self.config.buildomat.url)
             .bearer_token(&self.config.buildomat.token)
-            .delegated_user(&self.buildomat_username(repo))
+            .delegated_user(self.buildomat_username(repo))
             .build()
             .unwrap()
     }
@@ -1432,7 +1430,6 @@ async fn flush_check_runs(
                 actions: out.actions,
                 started_at: out.started_at,
                 completed_at: out.completed_at,
-                ..Default::default()
             };
 
             let res = gh

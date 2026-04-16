@@ -219,7 +219,7 @@ mod test {
     use super::CheckRunVariety;
     use std::str::FromStr;
 
-    const CHECK_RUN_VARIETIES: &'static [(&'static str, CheckRunVariety)] = &[
+    const CHECK_RUN_VARIETIES: &[(&str, CheckRunVariety)] = &[
         ("control", CheckRunVariety::Control),
         ("always_pass", CheckRunVariety::AlwaysPass),
         ("fail_first", CheckRunVariety::FailFirst),

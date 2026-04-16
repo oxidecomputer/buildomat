@@ -33,6 +33,14 @@ edition = "2021"
 license = "MPL-2.0"
 version = "0.0.0"
 
+[workspace.lints.clippy]
+identity_op = "allow"
+many_single_char_names = "allow"
+too_many_arguments = "allow"
+type_complexity = "allow"
+vec_init_then_push = "allow"
+wrong_self_convention = "allow"
+
 [workspace.dependencies]
 ansi-to-html = { version = "0.2", features =  [ "lazy-init" ] }
 anyhow = "1"

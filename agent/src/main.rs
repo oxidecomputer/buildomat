@@ -2,8 +2,6 @@
  * Copyright 2024 Oxide Computer Company
  */
 
-#![allow(clippy::many_single_char_names)]
-
 use std::collections::VecDeque;
 use std::env;
 use std::fs::{File, OpenOptions};
@@ -1094,7 +1092,7 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
         let status = Command::new("/sbin/zfs")
             .arg("create")
             .arg("-o")
-            .arg(&format!("mountpoint={}", INPUT_PATH))
+            .arg(format!("mountpoint={INPUT_PATH}"))
             .arg(INPUT_DATASET)
             .env_clear()
             .current_dir("/")
@@ -1171,8 +1169,8 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
         let binmd = std::fs::symlink_metadata("/bin")?;
         if binmd.is_dir() {
             std::os::unix::fs::symlink(
-                &format!("../usr/bin/{CONTROL_PROGRAM}"),
-                &format!("/bin/{CONTROL_PROGRAM}"),
+                format!("../usr/bin/{CONTROL_PROGRAM}"),
+                format!("/bin/{CONTROL_PROGRAM}"),
             )?;
         }
     }

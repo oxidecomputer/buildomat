@@ -104,7 +104,7 @@ mod test {
     use super::UserType;
     use std::str::FromStr;
 
-    const USER_TYPES: &'static [(&'static str, UserType)] = &[
+    const USER_TYPES: &[(&str, UserType)] = &[
         ("user", UserType::User),
         ("bot", UserType::Bot),
         ("org", UserType::Organisation),

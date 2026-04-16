@@ -74,7 +74,7 @@ impl FormatScript {
             .replace("%BASEURL%", &self.host_config.lab_baseurl)
             .replace("%HOST%", &self.host_config.nodename)
             .replace("%CONSOLE%", &self.host_config.console)
-            .replace("%BOOTARGS%", &bootargs)
+            .replace("%BOOTARGS%", bootargs)
             .replace("%COREURL%", &self.coreurl);
 
         if let Some(key) = self.key.as_deref() {
@@ -149,7 +149,7 @@ impl CentralExt for Central {
         &self,
         name: &str,
     ) -> HResult<&super::config::ConfigFileHost> {
-        if let Some(h) = self.hosts.get(&name.to_string()) {
+        if let Some(h) = self.hosts.get(name) {
             Ok(&h.config)
         } else {
             Err(dropshot::HttpError::for_client_error(

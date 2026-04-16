@@ -48,8 +48,10 @@ async fn main() -> Result<()> {
         setup_name
     };
 
-    let mut input_theme = ColorfulTheme::default();
-    input_theme.success_prefix = dialoguer::console::style(String::new());
+    let input_theme = ColorfulTheme {
+        success_prefix: dialoguer::console::style(String::new()),
+        ..ColorfulTheme::default()
+    };
 
     let ctx = Context { root, setup_name, input_theme };
 
@@ -131,9 +133,9 @@ async fn run_stdout(command: &mut Command) -> Result<String> {
         bail!("\"{}\" failed with {}", name.display(), output.status);
     }
 
-    Ok(String::from_utf8(output.stdout).with_context(|| {
+    String::from_utf8(output.stdout).with_context(|| {
         format!("\"{}\" emitted non-UTF-8 data to stdout", name.display())
-    })?)
+    })
 }
 
 fn cargo() -> Command {

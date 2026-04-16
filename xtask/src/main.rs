@@ -439,7 +439,7 @@ fn local_buildomat_server() -> Result<()> {
          * executed from the correct working directory.
          */
         .arg("-f")
-        .arg(&local.join("config.toml"))
+        .arg(local.join("config.toml"))
         .current_dir(&local)
         .exec()
         .into())
@@ -450,7 +450,7 @@ fn local_buildomat_factory_aws() -> Result<()> {
     Err(cargo()
         .args(["run", "--bin", "buildomat-factory-aws", "--"])
         .arg("-f")
-        .arg(&local.join("config.toml"))
+        .arg(local.join("config.toml"))
         .exec()
         .into())
 }

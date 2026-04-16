@@ -2,8 +2,6 @@
  * Copyright 2025 Oxide Computer Company
  */
 
-#![allow(clippy::many_single_char_names)]
-
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -1228,7 +1226,7 @@ async fn do_job_store_list(mut l: Level<Stuff>) -> Result<()> {
         );
         r.add_str(
             "updated",
-            &ent.time_update.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            ent.time_update.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         );
 
         t.add_row(r);
@@ -1353,7 +1351,7 @@ async fn do_user_list(mut l: Level<Stuff>) -> Result<()> {
         r.add_str("name", &u.name);
         r.add_str(
             "creation",
-            &u.time_create.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            u.time_create.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         );
         r.add_age("age", u.time_create.age());
         t.add_row(r);

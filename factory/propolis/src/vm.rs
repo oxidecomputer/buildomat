@@ -461,8 +461,8 @@ async fn instance_worker_one(
                     include_str!("../smf/serial.xml"),
                 ),
             ] {
-                std::fs::write(&vmdir.join(&format!("{name}.sh")), script)?;
-                std::fs::write(&smfdir.join(format!("{name}.xml")), bundle)?;
+                std::fs::write(vmdir.join(format!("{name}.sh")), script)?;
+                std::fs::write(smfdir.join(format!("{name}.xml")), bundle)?;
             }
 
             std::fs::write(&siteprofile, include_str!("../smf/site.xml"))?;
