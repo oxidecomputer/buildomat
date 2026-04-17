@@ -7,7 +7,7 @@ use std::borrow::Cow;
 use buildomat_client::types::JobEvent;
 use buildomat_common::JobStream;
 use chrono::SecondsFormat;
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 pub mod jobfile;
 pub mod variety;
@@ -68,9 +68,15 @@ impl JobEventEx for JobEvent {
             encode_payload(&self.payload),
         );
 
+        let section = if let Some(id) = self.task {
+            EventSection::Task(id)
+        } else {
+            EventSection::None
+        };
+
         EventRow {
-            task: self.task,
             css_class: self.css_class(),
+            section,
             fields: vec![
                 EventField {
                     css_class: "num",
@@ -137,8 +143,8 @@ fn encode_payload(payload: &str) -> Cow<'_, str> {
 
 #[derive(Debug, Serialize)]
 pub struct EventRow {
-    task: Option<u32>,
     css_class: &'static str,
+    section: EventSection,
     fields: Vec<EventField>,
 }
 
@@ -152,6 +158,21 @@ pub struct EventField {
      * This field is a permalink anchor, with this anchor ID:
      */
     anchor: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum EventSection {
+    None,
+    Task(u32),
+}
+
+impl Serialize for EventSection {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            EventSection::None => s.serialize_str("none"),
+            EventSection::Task(idx) => s.serialize_str(&format!("task:{idx}")),
+        }
+    }
 }
 
 #[cfg(test)]
