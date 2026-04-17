@@ -68,9 +68,15 @@ impl JobEventEx for JobEvent {
             encode_payload(&self.payload),
         );
 
+        let section = if let Some(id) = self.task {
+            EventSection::Task(id)
+        } else {
+            EventSection::None
+        };
+
         EventRow {
-            task: self.task,
             css_class: self.css_class(),
+            section,
             fields: vec![
                 EventField {
                     css_class: "num",
@@ -137,8 +143,8 @@ fn encode_payload(payload: &str) -> Cow<'_, str> {
 
 #[derive(Debug, Serialize)]
 pub struct EventRow {
-    task: Option<u32>,
     css_class: &'static str,
+    section: EventSection,
     fields: Vec<EventField>,
 }
 
@@ -152,6 +158,12 @@ pub struct EventField {
      * This field is a permalink anchor, with this anchor ID:
      */
     anchor: Option<String>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+enum EventSection {
+    None,
+    Task(u32),
 }
 
 #[cfg(test)]

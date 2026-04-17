@@ -4,7 +4,7 @@
 
 var EVT;
 var LOCAL_TIME = %LOCAL_TIME%;
-var LAST_TASK = null;
+var LAST_SECTION = null;
 var LAST_EVENT = null;
 
 /*
@@ -68,9 +68,11 @@ basic_row(ev)
 	}
 
 	/*
-	 * If the task has changed, render a full-width blank row in the table:
+	 * If the section has changed, render a full-width blank row in the table:
 	 */
-	if (evr.task !== LAST_TASK) {
+    if (LAST_SECTION === null) {
+        LAST_SECTION = evr.section;
+    } else if (evr.section !== LAST_SECTION) {
 		let count = 0;
 		for (let i = 0; i < evr.fields.length; i++) {
 			let f = evr.fields[i];
@@ -87,7 +89,7 @@ basic_row(ev)
 		tr.appendChild(td);
 		tbl.appendChild(td);
 
-		LAST_TASK = evr.task;
+		LAST_SECTION = evr.section;
 	}
 
 	let tr = document.createElement("tr");
