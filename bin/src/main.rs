@@ -644,33 +644,18 @@ async fn poll_job(l: &Level<Stuff>, id: &str, json: bool) -> Result<()> {
     loop {
         match wat.recv().await {
             Some(Ok(buildomat_client::EventOrState::Event(e))) => {
-                if json {
-                    println!("{}", serde_json::to_string(&e)?);
-                } else if e.stream == "stdout" || e.stream == "stderr" {
-                    println!("{}", e.payload);
-                } else if e.stream == "control" {
-                    println!("|=| {}", e.payload);
-                } else if e.stream == "worker" {
-                    println!("|W| {}", e.payload);
-                } else if e.stream == "task" {
-                    println!("|T| {}", e.payload);
-                } else if e.stream == "console" {
-                    println!("|C| {}", e.payload);
-                } else if e.stream == "panic" {
-                    println!("|!| {}", e.payload);
-                } else if e.stream.starts_with("bg.") {
-                    let t = e.stream.split('.').collect::<Vec<_>>();
-                    if t.len() == 3 {
-                        if t[2] == "stdout" || t[2] == "stderr" {
-                            println!("[{}] {}", t[1], e.payload);
-                        } else {
-                            println!("{:?}", e);
-                        }
-                    } else {
-                        println!("{:?}", e);
-                    }
-                } else {
-                    println!("{:?}", e);
+                let stream = e.stream.split('.').collect::<Vec<_>>();
+                let p = &e.payload;
+                match stream.as_slice() {
+                    _ if json => println!("{}", serde_json::to_string(&e)?),
+                    ["stdout" | "stderr"] => println!("{p}"),
+                    ["control"] => println!("|=| {p}"),
+                    ["worker"] => println!("|W| {p}"),
+                    ["task"] => println!("|T| {p}"),
+                    ["console"] => println!("|C| {p}"),
+                    ["panic"] => println!("|!| {p}"),
+                    ["bg", bg, "stdout" | "stderr"] => println!("|{bg}| {p}"),
+                    _ => println!("{e:?}"),
                 }
             }
             Some(Ok(buildomat_client::EventOrState::State(st))) => {
