@@ -317,6 +317,7 @@ fn run_common(
                      * No further notifications are required for background
                      * processes.
                      */
+                    return;
                 }
 
                 if let Some(sig) = es.signal() {
