@@ -1032,8 +1032,10 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
     l.usage_args(Some("BASEURL BOOTSTRAP_TOKEN"));
     l.optopt("N", "", "set nodename of machine", "NODENAME");
     l.optmulti("e", "", "add environment variables", "KEY=VALUE");
+    l.optflag("", "no-service", "avoid creating the system service");
 
     let a = args!(l);
+    let start_service = !a.opts().opt_present("no-service");
     let log = l.context().log.clone();
 
     /*
@@ -1093,7 +1095,7 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
     std::fs::copy(&exe, &cprog)?;
     make_executable(&cprog)?;
 
-    if cfg!(target_os = "illumos") {
+    if cfg!(target_os = "illumos") && start_service {
         /*
          * Copy SMF method script and manifest into place.
          */
@@ -1138,7 +1140,7 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
             Ok(o) => bail!("svccfg import failure: {:?}", o),
             Err(e) => bail!("could not execute svccfg import: {:?}", e),
         }
-    } else if cfg!(target_os = "linux") {
+    } else if cfg!(target_os = "linux") && start_service {
         /*
          * Create the input directory.
          */
