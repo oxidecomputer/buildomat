@@ -2,7 +2,7 @@
  * Copyright 2024 Oxide Computer Company
  */
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind::NotFound, Write};
@@ -13,7 +13,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use chrono::prelude::*;
 use futures::StreamExt;
 use hiercmd::prelude::*;
@@ -61,11 +61,12 @@ use os_constants::*;
 
 use crate::control::protocol::StoreEntry;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct ConfigFile {
     baseurl: String,
     bootstrap: String,
     token: String,
+    env: HashMap<String, String>,
 }
 
 impl ConfigFile {
@@ -87,7 +88,14 @@ impl ConfigFile {
             rx,
         ));
 
-        ClientWrap { log, client, job: None, tx: None, worker_tx }
+        ClientWrap {
+            log,
+            config: self.clone(),
+            client,
+            job: None,
+            tx: None,
+            worker_tx,
+        }
     }
 }
 
@@ -277,6 +285,7 @@ async fn append_worker_worker(
 #[derive(Clone)]
 pub(crate) struct ClientWrap {
     log: Logger,
+    config: ConfigFile,
     client: buildomat_client::Client,
     job: Option<Arc<WorkerPingJob>>,
     tx: Option<mpsc::Sender<AppendJobEntry>>,
@@ -648,6 +657,13 @@ impl ClientWrap {
         );
         cmd.env("LANG", "en_US.UTF-8");
         cmd.env("LC_ALL", "en_US.UTF-8");
+
+        /*
+         * Add variables configured at agent installation time.
+         */
+        for (k, v) in &self.config.env {
+            cmd.env(k, v);
+        }
 
         /*
          * Run the diagnostic script as root:
@@ -1022,6 +1038,7 @@ enum Stage {
 async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
     l.usage_args(Some("BASEURL BOOTSTRAP_TOKEN"));
     l.optopt("N", "", "set nodename of machine", "NODENAME");
+    l.optmulti("e", "", "add environment variables", "KEY=VALUE");
 
     let a = args!(l);
     let log = l.context().log.clone();
@@ -1029,6 +1046,20 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
     if a.args().len() < 2 {
         bad_args!(l, "specify base URL and bootstrap token value");
     }
+
+    /*
+     * Parse "-e KEY=VALUE" into keys and values.
+     */
+    let env = a
+        .opts()
+        .opt_strs("e")
+        .into_iter()
+        .map(|v| {
+            v.split_once('=')
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .ok_or_else(|| anyhow!("invalid flag: -e {v}"))
+        })
+        .collect::<Result<HashMap<_, _>, _>>()?;
 
     /*
      * The server will have provided these parameters in the userscript
@@ -1048,7 +1079,7 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
      */
     make_dirs_for(CONFIG_PATH)?;
     rmfile(CONFIG_PATH)?;
-    let cf = ConfigFile { baseurl, bootstrap, token: genkey(64) };
+    let cf = ConfigFile { baseurl, bootstrap, token: genkey(64), env };
     store(CONFIG_PATH, &cf)?;
 
     /*
@@ -1615,6 +1646,13 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                     cmd.env("LC_ALL", "en_US.UTF-8");
                     cmd.env("BUILDOMAT_JOB_ID", cw.job_id().unwrap());
                     cmd.env("BUILDOMAT_TASK_ID", t.id.to_string());
+
+                    /*
+                     * Add variables configured at agent installation time.
+                     */
+                    for (k, v) in &cf.env {
+                        cmd.env(k, v);
+                    }
                 }
                 for (k, v) in t.env.iter() {
                     /*
