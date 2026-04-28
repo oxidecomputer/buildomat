@@ -47,17 +47,10 @@ const AGENT: &str = "/opt/buildomat/lib/agent";
 const INPUT_PATH: &str = "/input";
 const CONTROL_PROGRAM: &str = "bmat";
 const SHADOW: &str = "/etc/shadow";
-#[cfg(target_os = "illumos")]
-mod os_constants {
-    pub const METHOD: &str = "/opt/buildomat/lib/start.sh";
-    pub const MANIFEST: &str = "/var/svc/manifest/site/buildomat-agent.xml";
-    pub const INPUT_DATASET: &str = "rpool/input";
-}
-#[cfg(target_os = "linux")]
-mod os_constants {
-    pub const UNIT: &str = "/etc/systemd/system/buildomat-agent.service";
-}
-use os_constants::*;
+const ILLUMOS_METHOD: &str = "/opt/buildomat/lib/start.sh";
+const ILLUMOS_MANIFEST: &str = "/var/svc/manifest/site/buildomat-agent.xml";
+const ILLUMOS_INPUT_DATASET: &str = "rpool/input";
+const LINUX_UNIT: &str = "/etc/systemd/system/buildomat-agent.service";
 
 use crate::control::protocol::StoreEntry;
 
@@ -1100,20 +1093,19 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
     std::fs::copy(&exe, &cprog)?;
     make_executable(&cprog)?;
 
-    #[cfg(target_os = "illumos")]
-    {
+    if cfg!(target_os = "illumos") {
         /*
          * Copy SMF method script and manifest into place.
          */
         let method = include_str!("../smf/start.sh");
-        make_dirs_for(METHOD)?;
-        rmfile(METHOD)?;
-        write_text(METHOD, method)?;
-        make_executable(METHOD)?;
+        make_dirs_for(ILLUMOS_METHOD)?;
+        rmfile(ILLUMOS_METHOD)?;
+        write_text(ILLUMOS_METHOD, method)?;
+        make_executable(ILLUMOS_METHOD)?;
 
         let manifest = include_str!("../smf/agent.xml");
-        rmfile(MANIFEST)?;
-        write_text(MANIFEST, manifest)?;
+        rmfile(ILLUMOS_MANIFEST)?;
+        write_text(ILLUMOS_MANIFEST, manifest)?;
 
         /*
          * Create the input directory.
@@ -1122,7 +1114,7 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
             .arg("create")
             .arg("-o")
             .arg(format!("mountpoint={INPUT_PATH}"))
-            .arg(INPUT_DATASET)
+            .arg(ILLUMOS_INPUT_DATASET)
             .env_clear()
             .current_dir("/")
             .status();
@@ -1137,7 +1129,7 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
          */
         let status = Command::new("/usr/sbin/svccfg")
             .arg("import")
-            .arg(MANIFEST)
+            .arg(ILLUMOS_MANIFEST)
             .env_clear()
             .current_dir("/")
             .status();
@@ -1146,10 +1138,7 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
             Ok(o) => bail!("svccfg import failure: {:?}", o),
             Err(e) => bail!("could not execute svccfg import: {:?}", e),
         }
-    }
-
-    #[cfg(target_os = "linux")]
-    {
+    } else if cfg!(target_os = "linux") {
         /*
          * Create the input directory.
          */
@@ -1159,9 +1148,9 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
          * Write a systemd unit file for the agent service.
          */
         let unit = include_str!("../systemd/agent.service");
-        make_dirs_for(UNIT)?;
-        rmfile(UNIT)?;
-        write_text(UNIT, unit)?;
+        make_dirs_for(LINUX_UNIT)?;
+        rmfile(LINUX_UNIT)?;
+        write_text(LINUX_UNIT, unit)?;
 
         /*
          * Ask systemd to load the unit file we just wrote.
