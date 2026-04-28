@@ -60,6 +60,7 @@ struct ConfigFile {
     baseurl: String,
     bootstrap: String,
     token: String,
+    setuid: bool,
     env: HashMap<String, String>,
 }
 
@@ -636,11 +637,15 @@ impl ClientWrap {
         cmd.arg(&s);
         cmd.current_dir("/");
 
-        /*
-         * Run the diagnostic script as root:
-         */
-        let passwd = Passwd::by_name("root")?
-            .ok_or_else(|| anyhow!("missing root user"))?;
+        let passwd = if self.config.setuid {
+            /*
+             * Run the diagnostic script as root:
+             */
+            Passwd::by_name("root")?
+                .ok_or_else(|| anyhow!("missing root user"))?
+        } else {
+            Passwd::current_user()?
+        };
         cmd.uid(passwd.uid.0);
         cmd.gid(passwd.gid.0);
 
@@ -652,10 +657,14 @@ impl ClientWrap {
 
         if let Some(dir) = &passwd.dir {
             cmd.env("HOME", dir);
+        } else {
+            bail!("user {} doesn't have a home directory", passwd.uid.0);
         }
         if let Some(name) = &passwd.name {
             cmd.env("USER", name);
             cmd.env("LOGNAME", name);
+        } else {
+            bail!("user {} doesn't have a name", passwd.uid.0);
         }
         cmd.env("TZ", "UTC");
         cmd.env(
@@ -1040,9 +1049,11 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
     l.optopt("N", "", "set nodename of machine", "NODENAME");
     l.optmulti("e", "", "add environment variables", "KEY=VALUE");
     l.optflag("", "no-service", "avoid creating the system service");
+    l.optflag("", "no-setuid", "prevent the agent from changing users");
 
     let a = args!(l);
     let start_service = !a.opts().opt_present("no-service");
+    let setuid = !a.opts().opt_present("no-setuid");
     let log = l.context().log.clone();
 
     /*
@@ -1081,7 +1092,7 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
      */
     make_dirs_for(CONFIG_PATH)?;
     rmfile(CONFIG_PATH)?;
-    let cf = ConfigFile { baseurl, bootstrap, token: genkey(64), env };
+    let cf = ConfigFile { baseurl, bootstrap, token: genkey(64), setuid, env };
     store(CONFIG_PATH, &cf)?;
 
     /*
@@ -1624,12 +1635,19 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                  * account or with a different working directory.
                  */
                 cmd.current_dir(&t.workdir);
-                cmd.uid(t.uid);
-                cmd.gid(t.gid);
-
-                let passwd = Passwd::by_uid(Uid(t.uid))?.ok_or_else(|| {
-                    anyhow!("no user on the system with uid {}", t.uid)
-                })?;
+                let passwd = if cf.setuid {
+                    cmd.uid(t.uid);
+                    cmd.gid(t.gid);
+                    Passwd::by_uid(Uid(t.uid))?.ok_or_else(|| {
+                        anyhow!("no user on the system with uid {}", t.uid)
+                    })?
+                } else {
+                    /*
+                     * XXX should we handle when a different uid/gid is
+                     * requested?
+                     */
+                    Passwd::current_user()?
+                };
 
                 /*
                  * The user task should have a pristine and reproducible
@@ -1645,9 +1663,16 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                     if let Some(name) = &passwd.name {
                         cmd.env("USER", name);
                         cmd.env("LOGNAME", name);
+                    } else {
+                        bail!(
+                            "user {} doesn't have a home directory",
+                            passwd.uid.0
+                        );
                     }
                     if let Some(dir) = &passwd.dir {
                         cmd.env("HOME", dir);
+                    } else {
+                        bail!("user {} doesn't have a name", passwd.uid.0);
                     }
                     cmd.env("TZ", "UTC");
                     cmd.env(

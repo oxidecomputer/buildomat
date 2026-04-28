@@ -2,7 +2,7 @@
  * Copyright 2026 Oxide Computer Company
  */
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use std::ffi::{CStr, CString};
 use std::io::{Error as IoError, ErrorKind};
 use std::path::PathBuf;
@@ -15,6 +15,11 @@ pub struct Passwd {
 }
 
 impl Passwd {
+    pub fn current_user() -> Result<Self> {
+        Self::by_uid(getuid())?
+            .ok_or_else(|| anyhow!("missing passwd entry for the current user"))
+    }
+
     pub fn by_name(name: &str) -> Result<Option<Self>> {
         let name = CString::new(name.to_string())?;
         Self::from_libc(catch_errno(|| unsafe {
@@ -49,6 +54,10 @@ impl Passwd {
             },
         }))
     }
+}
+
+pub fn getuid() -> Uid {
+    Uid(unsafe { libc::getuid() })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
