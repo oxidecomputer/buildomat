@@ -1218,105 +1218,115 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
         }
     }
 
-    if cfg!(target_os = "illumos") && start_service {
-        /*
-         * Copy SMF method script and manifest into place.
-         */
-        let script = include_str!("../smf/start.sh").replace(
-            "%AGENT_BIN%",
-            location
-                .agent_bin()
-                .to_str()
-                .ok_or_else(|| anyhow!("non-UTF-8 path"))?,
-        );
-        make_dirs_for(location.illumos_start_script())?;
-        rmfile(location.illumos_start_script())?;
-        write_text(location.illumos_start_script(), &script)?;
-        make_executable(location.illumos_start_script())?;
+    if start_service {
+        if cfg!(target_os = "illumos") {
+            /*
+             * Copy SMF method script and manifest into place.
+             */
+            let script = include_str!("../smf/start.sh").replace(
+                "%AGENT_BIN%",
+                location
+                    .agent_bin()
+                    .to_str()
+                    .ok_or_else(|| anyhow!("non-UTF-8 path"))?,
+            );
+            make_dirs_for(location.illumos_start_script())?;
+            rmfile(location.illumos_start_script())?;
+            write_text(location.illumos_start_script(), &script)?;
+            make_executable(location.illumos_start_script())?;
 
-        let manifest = include_str!("../smf/agent.xml").replace(
-            "%START_SCRIPT%",
-            location
-                .illumos_start_script()
-                .to_str()
-                .ok_or_else(|| anyhow!("non-UTF-8 path"))?,
-        );
-        rmfile(ILLUMOS_MANIFEST)?;
-        write_text(ILLUMOS_MANIFEST, &manifest)?;
+            let manifest = include_str!("../smf/agent.xml").replace(
+                "%START_SCRIPT%",
+                location
+                    .illumos_start_script()
+                    .to_str()
+                    .ok_or_else(|| anyhow!("non-UTF-8 path"))?,
+            );
+            rmfile(ILLUMOS_MANIFEST)?;
+            write_text(ILLUMOS_MANIFEST, &manifest)?;
 
-        /*
-         * Create the input directory.
-         */
-        let status = Command::new("/sbin/zfs")
-            .arg("create")
-            .arg("-o")
-            .arg(format!("mountpoint={INPUT_PATH}"))
-            .arg(ILLUMOS_INPUT_DATASET)
-            .env_clear()
-            .current_dir("/")
-            .status();
-        match status {
-            Ok(o) if o.success() => (),
-            Ok(o) => bail!("zfs create failure: {:?}", o),
-            Err(e) => bail!("could not execute zfs create: {:?}", e),
+            /*
+             * Create the input directory.
+             */
+            let status = Command::new("/sbin/zfs")
+                .arg("create")
+                .arg("-o")
+                .arg(format!("mountpoint={INPUT_PATH}"))
+                .arg(ILLUMOS_INPUT_DATASET)
+                .env_clear()
+                .current_dir("/")
+                .status();
+            match status {
+                Ok(o) if o.success() => (),
+                Ok(o) => bail!("zfs create failure: {:?}", o),
+                Err(e) => bail!("could not execute zfs create: {:?}", e),
+            }
+
+            /*
+             * Import SMF service.
+             */
+            let status = Command::new("/usr/sbin/svccfg")
+                .arg("import")
+                .arg(ILLUMOS_MANIFEST)
+                .env_clear()
+                .current_dir("/")
+                .status();
+            match status {
+                Ok(o) if o.success() => (),
+                Ok(o) => bail!("svccfg import failure: {:?}", o),
+                Err(e) => bail!("could not execute svccfg import: {:?}", e),
+            }
+        } else if cfg!(target_os = "linux") {
+            /*
+             * Create the input directory.
+             */
+            std::fs::create_dir_all(INPUT_PATH)?;
+
+            /*
+             * Write a systemd unit file for the agent service.
+             */
+            let unit = include_str!("../systemd/agent.service");
+            make_dirs_for(LINUX_UNIT)?;
+            rmfile(LINUX_UNIT)?;
+            write_text(LINUX_UNIT, unit)?;
+
+            /*
+             * Ask systemd to load the unit file we just wrote.
+             */
+            let status = Command::new("/bin/systemctl")
+                .arg("daemon-reload")
+                .env_clear()
+                .current_dir("/")
+                .status();
+            match status {
+                Ok(o) if o.success() => {}
+                Ok(o) => bail!("systemd reload failure: {:?}", o),
+                Err(e) => bail!("could not execute daemon-reload: {:?}", e),
+            }
+
+            /*
+             * Attempt to start the service:
+             */
+            let status = Command::new("/bin/systemctl")
+                .arg("start")
+                .arg("buildomat-agent.service")
+                .env_clear()
+                .current_dir("/")
+                .status();
+            match status {
+                Ok(o) if o.success() => {}
+                Ok(o) => bail!("systemd start failure: {:?}", o),
+                Err(e) => bail!("could not execute systemctl: {:?}", e),
+            }
+        } else {
+            bail!("agent doesn't know how to start a service on this OS");
         }
-
+    } else {
         /*
-         * Import SMF service.
+         * If we are running without a service, fork a child to run the agent
+         * immediately rather than using the service manager.
          */
-        let status = Command::new("/usr/sbin/svccfg")
-            .arg("import")
-            .arg(ILLUMOS_MANIFEST)
-            .env_clear()
-            .current_dir("/")
-            .status();
-        match status {
-            Ok(o) if o.success() => (),
-            Ok(o) => bail!("svccfg import failure: {:?}", o),
-            Err(e) => bail!("could not execute svccfg import: {:?}", e),
-        }
-    } else if cfg!(target_os = "linux") && start_service {
-        /*
-         * Create the input directory.
-         */
-        std::fs::create_dir_all(INPUT_PATH)?;
-
-        /*
-         * Write a systemd unit file for the agent service.
-         */
-        let unit = include_str!("../systemd/agent.service");
-        make_dirs_for(LINUX_UNIT)?;
-        rmfile(LINUX_UNIT)?;
-        write_text(LINUX_UNIT, unit)?;
-
-        /*
-         * Ask systemd to load the unit file we just wrote.
-         */
-        let status = Command::new("/bin/systemctl")
-            .arg("daemon-reload")
-            .env_clear()
-            .current_dir("/")
-            .status();
-        match status {
-            Ok(o) if o.success() => {}
-            Ok(o) => bail!("systemd reload failure: {:?}", o),
-            Err(e) => bail!("could not execute daemon-reload: {:?}", e),
-        }
-
-        /*
-         * Attempt to start the service:
-         */
-        let status = Command::new("/bin/systemctl")
-            .arg("start")
-            .arg("buildomat-agent.service")
-            .env_clear()
-            .current_dir("/")
-            .status();
-        match status {
-            Ok(o) if o.success() => {}
-            Ok(o) => bail!("systemd start failure: {:?}", o),
-            Err(e) => bail!("could not execute systemctl: {:?}", e),
-        }
+        let _child = Command::new(location.agent_bin()).arg("run").spawn()?;
     }
 
     Ok(())

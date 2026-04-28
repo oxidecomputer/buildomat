@@ -3,6 +3,7 @@
  */
 
 use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
 use std::ffi::{CStr, CString};
 use std::io::{Error as IoError, ErrorKind};
 use std::path::PathBuf;
@@ -60,10 +61,16 @@ pub fn getuid() -> Uid {
     Uid(unsafe { libc::getuid() })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
 pub struct Uid(pub u32);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
 pub struct Gid(pub u32);
 
 fn catch_errno<T, F: Fn() -> T>(f: F) -> Result<T, IoError> {

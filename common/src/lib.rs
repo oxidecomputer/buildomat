@@ -12,7 +12,8 @@ use std::time::Duration;
 use anyhow::Result;
 use chrono::prelude::*;
 use rand::distr::Alphanumeric;
-use rand::{rng, RngExt as _};
+use rand::{rng, Rng, RngExt, SeedableRng as _};
+use rand_pcg::Pcg64;
 use regex::Regex;
 use rusty_ulid::Ulid;
 use serde::{Deserialize, Serialize};
@@ -61,6 +62,24 @@ pub fn make_log(name: &'static str) -> Logger {
         .fuse();
         Logger::root(dr, o!())
     }
+}
+
+pub fn make_test_log() -> Logger {
+    let dec = slog_term::PlainSyncDecorator::new(slog_term::TestStdoutWriter);
+    let dr = slog_term::FullFormat::new(dec).build().fuse();
+    Logger::root(dr, o!())
+}
+
+pub fn make_test_rng() -> Pcg64 {
+    /*
+     * This is a deterministic rng that is guaranteed not to change behavior
+     * across version bumps.  We can rely on its outputs in assertions.
+     */
+    Pcg64::seed_from_u64(42)
+}
+
+pub fn make_test_ulid<R: Rng>(rng: &mut R) -> Ulid {
+    Ulid::from_timestamp_with_rng(0, rng)
 }
 
 fn bool_env(var: &str) -> bool {
