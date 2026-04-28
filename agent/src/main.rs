@@ -1043,10 +1043,6 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
     let a = args!(l);
     let log = l.context().log.clone();
 
-    if a.args().len() < 2 {
-        bad_args!(l, "specify base URL and bootstrap token value");
-    }
-
     /*
      * Parse "-e KEY=VALUE" into keys and values.
      */
@@ -1060,6 +1056,10 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
                 .ok_or_else(|| anyhow!("invalid flag: -e {v}"))
         })
         .collect::<Result<HashMap<_, _>, _>>()?;
+
+    if a.args().len() != 2 {
+        bad_args!(l, "specify base URL and bootstrap token value");
+    }
 
     /*
      * The server will have provided these parameters in the userscript
