@@ -2,6 +2,8 @@
  * Copyright 2025 Oxide Computer Company
  */
 
+pub mod unix;
+
 use std::io::{IsTerminal, Read};
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};

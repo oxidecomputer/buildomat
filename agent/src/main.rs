@@ -26,6 +26,7 @@ use tokio::sync::oneshot;
 use tokio::time::MissedTickBehavior;
 
 use buildomat_client::types::*;
+use buildomat_common::unix::{Passwd, Uid};
 use buildomat_common::*;
 use buildomat_types::*;
 
@@ -633,6 +634,15 @@ impl ClientWrap {
 
         let mut cmd = Command::new("/bin/bash");
         cmd.arg(&s);
+        cmd.current_dir("/");
+
+        /*
+         * Run the diagnostic script as root:
+         */
+        let passwd = Passwd::by_name("root")?
+            .ok_or_else(|| anyhow!("missing root user"))?;
+        cmd.uid(passwd.uid.0);
+        cmd.gid(passwd.gid.0);
 
         /*
          * The diagnostic task should have a pristine and reproducible
@@ -640,9 +650,13 @@ impl ClientWrap {
          */
         cmd.env_clear();
 
-        cmd.env("HOME", "/root");
-        cmd.env("USER", "root");
-        cmd.env("LOGNAME", "root");
+        if let Some(dir) = &passwd.dir {
+            cmd.env("HOME", dir);
+        }
+        if let Some(name) = &passwd.name {
+            cmd.env("USER", name);
+            cmd.env("LOGNAME", name);
+        }
         cmd.env("TZ", "UTC");
         cmd.env(
             "PATH",
@@ -657,13 +671,6 @@ impl ClientWrap {
         for (k, v) in &self.config.env {
             cmd.env(k, v);
         }
-
-        /*
-         * Run the diagnostic script as root:
-         */
-        cmd.current_dir("/");
-        cmd.uid(0);
-        cmd.gid(0);
 
         match exec::run_diagnostic(cmd, name) {
             Ok(c) => Ok(c),
@@ -1613,6 +1620,18 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                 cmd.arg(&s);
 
                 /*
+                 * Each task may be expected to run under a different user
+                 * account or with a different working directory.
+                 */
+                cmd.current_dir(&t.workdir);
+                cmd.uid(t.uid);
+                cmd.gid(t.gid);
+
+                let passwd = Passwd::by_uid(Uid(t.uid))?.ok_or_else(|| {
+                    anyhow!("no user on the system with uid {}", t.uid)
+                })?;
+
+                /*
                  * The user task should have a pristine and reproducible
                  * environment that does not leak in artefacts of the
                  * agent.
@@ -1622,11 +1641,14 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                     /*
                      * Absent a request for an entirely clean slate, we
                      * set a few specific environment variables.
-                     * XXX HOME/USER/LOGNAME should probably respect "uid"
                      */
-                    cmd.env("HOME", "/root");
-                    cmd.env("USER", "root");
-                    cmd.env("LOGNAME", "root");
+                    if let Some(name) = &passwd.name {
+                        cmd.env("USER", name);
+                        cmd.env("LOGNAME", name);
+                    }
+                    if let Some(dir) = &passwd.dir {
+                        cmd.env("HOME", dir);
+                    }
                     cmd.env("TZ", "UTC");
                     cmd.env(
                         "PATH",
@@ -1653,14 +1675,6 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                      */
                     cmd.env(k, v);
                 }
-
-                /*
-                 * Each task may be expected to run under a different user
-                 * account or with a different working directory.
-                 */
-                cmd.current_dir(&t.workdir);
-                cmd.uid(t.uid);
-                cmd.gid(t.gid);
 
                 match exec::run(cmd) {
                     Ok(c) => {
