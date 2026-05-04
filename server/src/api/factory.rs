@@ -3,6 +3,7 @@
  */
 
 use super::prelude::*;
+use crate::api::worker::validate_stream;
 
 trait WorkerOwns {
     fn owns(&self, log: &Logger, worker: &db::Worker) -> DSResult<()>;
@@ -198,6 +199,8 @@ pub(crate) async fn factory_worker_append(
     f.owns(log, &w)?;
 
     let job = c.db.worker_job(w.id).or_500()?;
+
+    validate_stream(&b.stream)?;
 
     let retry = if let Some(job) = job {
         if job.complete {

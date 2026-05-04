@@ -346,6 +346,8 @@ pub(crate) async fn worker_job_append_one(
     let j = c.db.job(path.into_inner().job()?).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
+    validate_stream(&a.stream)?;
+
     info!(log, "worker {} append to job {} stream {}", w.id, j.id, a.stream);
 
     c.db.job_append_event(
@@ -387,6 +389,10 @@ pub(crate) async fn worker_job_append(
     let j = c.db.job(path.into_inner().job()?).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
+    for entry in &a {
+        validate_stream(&entry.stream)?;
+    }
+
     info!(log, "worker {} append {} events to job {}", w.id, a.len(), j.id);
 
     c.db.job_append_events(
@@ -422,6 +428,8 @@ pub(crate) async fn worker_task_append(
     let p = path.into_inner();
     let j = c.db.job(p.job()?).or_500()?; /* XXX */
     w.owns(log, &j)?;
+
+    validate_stream(&a.stream)?;
 
     info!(
         log,
@@ -722,7 +730,7 @@ pub(crate) async fn worker_job_add_output(
                 add.size,
                 e,
             );
-            return bad_request(e);
+            bad_request(e)
         }
     }
 }
@@ -851,6 +859,10 @@ pub(crate) async fn worker_append(
 
     let a = append.into_inner();
 
+    for entry in &a {
+        validate_stream(&entry.stream)?;
+    }
+
     info!(log, "worker {} append {} self events", w.id, a.len());
 
     c.db.worker_append_events(
@@ -911,4 +923,22 @@ pub(crate) async fn worker_diagnostics_enable(
     info!(log, "worker {} post-job diagnostics enabled", w.id);
 
     Ok(HttpResponseUpdatedNoContent())
+}
+
+pub(crate) fn validate_stream(name: &str) -> DSResult<()> {
+    if name.len() > 64 {
+        return bad_request(format!(
+            "stream name {name:?} is longer than 64 bytes"
+        ));
+    }
+
+    if let Some(c) = name.chars().find(|c| {
+        !c.is_ascii_alphanumeric() && *c != '-' && *c != '_' && *c != '.'
+    }) {
+        return bad_request(format!(
+            "invalid char {c:?} in stream name {name:?}"
+        ));
+    }
+
+    Ok(())
 }
