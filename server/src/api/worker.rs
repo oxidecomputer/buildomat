@@ -674,13 +674,9 @@ pub(crate) async fn worker_job_add_output(
 
     let max = c.config.job.max_bytes_per_output();
     if add.size > max {
-        return Err(HttpError::for_client_error(
-            None,
-            ClientErrorStatusCode::BAD_REQUEST,
-            format!(
-                "output file size {} bigger than allowed maximum {max} bytes",
-                add.size,
-            ),
+        return bad_request(format!(
+            "output file size {} bigger than allowed maximum {max} bytes",
+            add.size,
         ));
     }
 
@@ -726,11 +722,7 @@ pub(crate) async fn worker_job_add_output(
                 add.size,
                 e,
             );
-            Err(HttpError::for_client_error(
-                Some("invalid".to_string()),
-                ClientErrorStatusCode::BAD_REQUEST,
-                format!("{}", e),
-            ))
+            return bad_request(e);
         }
     }
 }
@@ -762,10 +754,9 @@ pub(crate) async fn worker_job_add_output_sync(
      */
     let add = add.into_inner();
     let addsize = if add.size < 0 || add.size > 1024 * 1024 * 1024 {
-        return Err(HttpError::for_client_error(
-            Some("invalid".to_string()),
-            ClientErrorStatusCode::BAD_REQUEST,
-            format!("size {} must be between 0 and 1073741824", add.size),
+        return bad_request(format!(
+            "size {} must be between 0 and 1073741824",
+            add.size
         ));
     } else {
         add.size as u64
@@ -793,11 +784,7 @@ pub(crate) async fn worker_job_add_output_sync(
                 addsize,
                 e,
             );
-            return Err(HttpError::for_client_error(
-                Some("invalid".to_string()),
-                ClientErrorStatusCode::BAD_REQUEST,
-                format!("{:?}", e),
-            ));
+            return bad_request(format!("{e:?}"));
         }
     };
 

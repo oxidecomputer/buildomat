@@ -429,11 +429,7 @@ pub(crate) async fn job_output_signed_url(
     let b = body.into_inner();
 
     if b.expiry_seconds > 3600 {
-        return Err(HttpError::for_client_error(
-            None,
-            ClientErrorStatusCode::BAD_REQUEST,
-            "URLs can last at most one hour (3600 seconds)".into(),
-        ));
+        return bad_request("URLs can last at most one hour (3600 seconds)");
     }
 
     let owner = c.require_user(log, &rqctx.request).await?;
@@ -492,11 +488,7 @@ impl JobOutputPublish {
         {
             Ok(())
         } else {
-            Err(HttpError::for_client_error(
-                None,
-                ClientErrorStatusCode::BAD_REQUEST,
-                "invalid published file ID".into(),
-            ))
+            bad_request("invalid published file ID")
         }
     }
 }
@@ -959,10 +951,8 @@ fn parse_output_rule(input: &str) -> DSResult<db::CreateOutputRule> {
                     s = State::SlashOrEquals;
                 }
                 other => {
-                    return Err(HttpError::for_client_error(
-                        None,
-                        ClientErrorStatusCode::BAD_REQUEST,
-                        format!("wanted sigil/absolute path, not {:?}", other),
+                    return bad_request(format!(
+                        "wanted sigil/absolute path, not {other:?}"
                     ));
                 }
             },
@@ -976,10 +966,8 @@ fn parse_output_rule(input: &str) -> DSResult<db::CreateOutputRule> {
                     s = State::Slash;
                 }
                 other => {
-                    return Err(HttpError::for_client_error(
-                        None,
-                        ClientErrorStatusCode::BAD_REQUEST,
-                        format!("{:?} unexpected in output rule", other),
+                    return bad_request(format!(
+                        "{other:?} unexpected in output rule",
                     ));
                 }
             },
@@ -993,10 +981,8 @@ fn parse_output_rule(input: &str) -> DSResult<db::CreateOutputRule> {
                     s = State::Slash;
                 }
                 other => {
-                    return Err(HttpError::for_client_error(
-                        None,
-                        ClientErrorStatusCode::BAD_REQUEST,
-                        format!("{:?} unexpected in output rule", other),
+                    return bad_request(format!(
+                        "{other:?} unexpected in output rule",
                     ));
                 }
             },
@@ -1006,10 +992,8 @@ fn parse_output_rule(input: &str) -> DSResult<db::CreateOutputRule> {
                     s = State::Rule;
                 }
                 other => {
-                    return Err(HttpError::for_client_error(
-                        None,
-                        ClientErrorStatusCode::BAD_REQUEST,
-                        format!("wanted '/', not {:?}, in output rule", other),
+                    return bad_request(format!(
+                        "wanted '/', not {other:?}, in output rule",
                     ));
                 }
             },
@@ -1018,11 +1002,7 @@ fn parse_output_rule(input: &str) -> DSResult<db::CreateOutputRule> {
     }
 
     if !rule.starts_with('/') {
-        return Err(HttpError::for_client_error(
-            None,
-            ClientErrorStatusCode::BAD_REQUEST,
-            "output rule pattern must be absolute path".to_string(),
-        ));
+        return bad_request("output rule pattern must be absolute path");
     }
 
     if ignore {
@@ -1071,37 +1051,21 @@ pub(crate) async fn job_submit(
     let new_job = new_job.into_inner();
 
     if new_job.tasks.len() > 100 {
-        return Err(HttpError::for_client_error(
-            None,
-            ClientErrorStatusCode::BAD_REQUEST,
-            "too many tasks".into(),
-        ));
+        return bad_request("too many tasks");
     }
 
     if new_job.inputs.len() > 25 {
-        return Err(HttpError::for_client_error(
-            None,
-            ClientErrorStatusCode::BAD_REQUEST,
-            "too many inputs".into(),
-        ));
+        return bad_request("too many inputs");
     }
 
     if new_job.tags.len() > 100 {
-        return Err(HttpError::for_client_error(
-            None,
-            ClientErrorStatusCode::BAD_REQUEST,
-            "too many tags".into(),
-        ));
+        return bad_request("too many tags");
     }
 
     if new_job.tags.iter().map(|(n, v)| n.len() + v.len()).sum::<usize>()
         > 131072
     {
-        return Err(HttpError::for_client_error(
-            None,
-            ClientErrorStatusCode::BAD_REQUEST,
-            "total size of all tags is larger than 128KB".into(),
-        ));
+        return bad_request("total size of all tags is larger than 128KB");
     }
 
     for n in new_job.tags.keys() {
@@ -1119,11 +1083,7 @@ pub(crate) async fn job_submit(
                     || c == '-'
             })
         {
-            return Err(HttpError::for_client_error(
-                None,
-                ClientErrorStatusCode::BAD_REQUEST,
-                "tag names must be [0-9a-z._-]+".into(),
-            ));
+            return bad_request("tag names must be [0-9a-z._-]+");
         }
     }
 
@@ -1135,10 +1095,9 @@ pub(crate) async fn job_submit(
         Some(target) => target,
         None => {
             info!(log, "could not resolve target name {:?}", new_job.target);
-            return Err(HttpError::for_client_error(
-                None,
-                ClientErrorStatusCode::BAD_REQUEST,
-                format!("could not resolve target name {:?}", new_job.target),
+            return bad_request(format!(
+                "could not resolve target name {:?}",
+                new_job.target
             ));
         }
     };
@@ -1285,22 +1244,14 @@ pub(crate) async fn job_add_input(
 
     let add = add.into_inner();
     if add.name.contains('/') {
-        return Err(HttpError::for_client_error(
-            None,
-            ClientErrorStatusCode::BAD_REQUEST,
-            "name must not be a path".into(),
-        ));
+        return bad_request("name must not be a path");
     }
 
     let max = c.config.job.max_bytes_per_input();
     if add.size > max {
-        return Err(HttpError::for_client_error(
-            None,
-            ClientErrorStatusCode::BAD_REQUEST,
-            format!(
-                "input file size {} bigger than allowed maximum {max} bytes",
-                add.size,
-            ),
+        return bad_request(format!(
+            "input file size {} bigger than allowed maximum {max} bytes",
+            add.size,
         ));
     }
 
@@ -1373,11 +1324,7 @@ pub(crate) async fn job_add_input(
                 add.size,
                 e,
             );
-            Err(HttpError::for_client_error(
-                Some("invalid".to_string()),
-                ClientErrorStatusCode::BAD_REQUEST,
-                format!("{}", e),
-            ))
+            bad_request(e)
         }
     }
 }
@@ -1407,11 +1354,7 @@ pub(crate) async fn job_add_input_sync(
     let job = c.load_job_for_user(log, &owner, p.job()?).await?;
 
     if !job.waiting {
-        return Err(HttpError::for_client_error(
-            None,
-            ClientErrorStatusCode::CONFLICT,
-            "cannot add inputs to a job that is not waiting".into(),
-        ));
+        return bad_request("cannot add inputs to a job that is not waiting");
     }
 
     /*
@@ -1421,20 +1364,15 @@ pub(crate) async fn job_add_input_sync(
      */
     let add = add.into_inner();
     let addsize = if add.size < 0 || add.size > 1024 * 1024 * 1024 {
-        return Err(HttpError::for_client_error(
-            Some("invalid".to_string()),
-            ClientErrorStatusCode::BAD_REQUEST,
-            format!("size {} must be between 0 and 1073741824", add.size),
+        return bad_request(format!(
+            "size {} must be between 0 and 1073741824",
+            add.size
         ));
     } else {
         add.size as u64
     };
     if add.name.contains('/') {
-        return Err(HttpError::for_client_error(
-            None,
-            ClientErrorStatusCode::BAD_REQUEST,
-            "name must not be a path".into(),
-        ));
+        return bad_request("name must not be a path");
     }
 
     let chunks = add
@@ -1456,11 +1394,7 @@ pub(crate) async fn job_add_input_sync(
                 addsize,
                 e,
             );
-            return Err(HttpError::for_client_error(
-                Some("invalid".to_string()),
-                ClientErrorStatusCode::BAD_REQUEST,
-                format!("{:?}", e),
-            ));
+            return bad_request(format!("{e:?}"));
         }
     };
 
