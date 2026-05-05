@@ -7,7 +7,7 @@ use std::borrow::Cow;
 use buildomat_client::types::JobEvent;
 use buildomat_common::JobStream;
 use chrono::SecondsFormat;
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 pub mod jobfile;
 pub mod variety;
@@ -33,6 +33,9 @@ impl JobEventEx for JobEvent {
             JobStream::Console => "s_console",
             JobStream::Control => "s_control",
             JobStream::Panic => "s_panic",
+            JobStream::Post { .. } => "s_post",
+            JobStream::PostStderr { .. } => "s_post_stderr",
+            JobStream::PostStdout { .. } => "s_post_stdout",
             JobStream::Stderr => "s_stderr",
             JobStream::Stdout => "s_stdout",
             JobStream::Task => "s_task",
@@ -68,9 +71,22 @@ impl JobEventEx for JobEvent {
             encode_payload(&self.payload),
         );
 
+        let section = if let Some(id) = self.task {
+            EventSection::Task(id)
+        } else if let Some(post) = self.stream.strip_prefix("post.") {
+            EventSection::Post(
+                post.split_once('.')
+                    .map(|(name, _)| name)
+                    .unwrap_or(post)
+                    .into(),
+            )
+        } else {
+            EventSection::None
+        };
+
         EventRow {
-            task: self.task,
             css_class: self.css_class(),
+            section,
             fields: vec![
                 EventField {
                     css_class: "num",
@@ -137,8 +153,8 @@ fn encode_payload(payload: &str) -> Cow<'_, str> {
 
 #[derive(Debug, Serialize)]
 pub struct EventRow {
-    task: Option<u32>,
     css_class: &'static str,
+    section: EventSection,
     fields: Vec<EventField>,
 }
 
@@ -152,6 +168,23 @@ pub struct EventField {
      * This field is a permalink anchor, with this anchor ID:
      */
     anchor: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum EventSection {
+    None,
+    Task(u32),
+    Post(String),
+}
+
+impl Serialize for EventSection {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            EventSection::None => s.serialize_str("none"),
+            EventSection::Task(idx) => s.serialize_str(&format!("task:{idx}")),
+            EventSection::Post(n) => s.serialize_str(&format!("post:{n}")),
+        }
+    }
 }
 
 #[cfg(test)]

@@ -13,7 +13,7 @@ use futures::future::BoxFuture;
 use hyper::Response;
 use serde::{Deserialize, Serialize};
 
-use crate::JobEventEx;
+use crate::{EventSection, JobEventEx};
 
 /*
  * We can use "deny_unknown_fields" here because the global frontmatter fields
@@ -56,7 +56,7 @@ pub async fn output_table(
 ) -> Result<String> {
     let mut out = "<table id=\"table_output\">\n".to_string();
 
-    let mut last = None;
+    let mut last = EventSection::None;
 
     out += "<tr>\n";
     out += "<td class=\"num\"><span class=\"header\">SEQ</span></td>\n";
@@ -112,10 +112,10 @@ pub async fn output_table(
         let evr = ev.event_row();
 
         /*
-         * If the task has changed, render a full-width blank row in the
+         * If the section has changed, render a full-width blank row in the
          * table:
          */
-        if evr.task != last {
+        if evr.section != last {
             let cols = evr
                 .fields
                 .iter()
@@ -124,7 +124,7 @@ pub async fn output_table(
 
             out += &format!("<tr><td colspan=\"{cols}\">&nbsp;</td></tr>");
         }
-        last = evr.task;
+        last = evr.section;
 
         out += &format!("<tr class=\"{}\">\n", evr.css_class);
 

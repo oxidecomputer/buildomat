@@ -13,6 +13,9 @@ pub enum JobStream {
     Diag { name: String },
     Error,
     Panic,
+    Post { name: String },
+    PostStderr { name: String },
+    PostStdout { name: String },
     Stderr,
     Stdout,
     Task,
@@ -37,6 +40,13 @@ impl JobStream {
             ["diag", name] => JobStream::Diag { name: name.to_string() },
             ["error"] => JobStream::Error,
             ["panic"] => JobStream::Panic,
+            ["post", name] => JobStream::Post { name: name.to_string() },
+            ["post", name, "stderr"] => {
+                JobStream::PostStderr { name: name.to_string() }
+            }
+            ["post", name, "stdout"] => {
+                JobStream::PostStdout { name: name.to_string() }
+            }
             ["stderr"] => JobStream::Stderr,
             ["stdout"] => JobStream::Stdout,
             ["task"] => JobStream::Task,
@@ -49,6 +59,8 @@ impl JobStream {
         match self {
             JobStream::BgStderr { .. }
             | JobStream::BgStdout { .. }
+            | JobStream::PostStderr { .. }
+            | JobStream::PostStdout { .. }
             | JobStream::Stderr
             | JobStream::Stdout => true,
             JobStream::Agent
@@ -58,6 +70,7 @@ impl JobStream {
             | JobStream::Diag { .. }
             | JobStream::Error
             | JobStream::Panic
+            | JobStream::Post { .. }
             | JobStream::Task
             | JobStream::Worker
             | JobStream::Unknown(_) => false,
@@ -77,6 +90,9 @@ impl std::fmt::Display for JobStream {
             JobStream::Diag { name } => write!(f, "diag.{name}"),
             JobStream::Error => f.write_str("error"),
             JobStream::Panic => f.write_str("panic"),
+            JobStream::Post { name } => write!(f, "post.{name}"),
+            JobStream::PostStderr { name } => write!(f, "post.{name}.stderr"),
+            JobStream::PostStdout { name } => write!(f, "post.{name}.stdout"),
             JobStream::Stderr => f.write_str("stderr"),
             JobStream::Stdout => f.write_str("stdout"),
             JobStream::Task => f.write_str("task"),

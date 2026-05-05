@@ -653,9 +653,15 @@ async fn poll_job(l: &Level<Stuff>, id: &str, json: bool) -> Result<()> {
                     JobStream::Console => println!("|C| {p}"),
                     JobStream::Control => println!("|=| {p}"),
                     JobStream::Panic => println!("|!| {p}"),
+                    JobStream::Post { .. } => println!("|P| {p}"),
                     JobStream::Task => println!("|T| {p}"),
                     JobStream::Worker => println!("|W| {p}"),
-                    JobStream::Stderr | JobStream::Stdout => println!("{p}"),
+                    JobStream::Stderr
+                    | JobStream::Stdout
+                    | JobStream::PostStderr { .. }
+                    | JobStream::PostStdout { .. } => {
+                        println!("{p}")
+                    }
                     JobStream::Agent
                     | JobStream::Bg { .. }
                     | JobStream::Diag { .. }

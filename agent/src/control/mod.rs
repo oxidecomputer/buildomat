@@ -14,7 +14,7 @@ use tokio::{
 };
 
 use protocol::{
-    Decoder, FactoryInfo, Message, Payload, PayloadReq, PayloadRes,
+    Decoder, FactoryInfo, Message, Payload, PayloadReq, PayloadRes, Process,
 };
 
 pub(crate) mod protocol;
@@ -123,6 +123,7 @@ pub async fn main() -> Result<()> {
     l.cmd("store", "access the job store", cmd!(cmd_store))?;
     l.cmd("address", "manage IP addresses for this job", cmd!(cmd_address))?;
     l.cmd("process", "manage background processes", cmd!(cmd_process))?;
+    l.cmd("post", "manage post tasks", cmd!(cmd_post))?;
     l.cmd("factory", "factory information for this worker", cmd!(cmd_factory))?;
     l.hcmd("eng", "for working on and testing buildomat", cmd!(cmd_eng))?;
 
@@ -374,6 +375,62 @@ async fn cmd_store_put(mut l: Level<Stuff>) -> Result<()> {
     }
 }
 
+async fn cmd_post(mut l: Level<Stuff>) -> Result<()> {
+    l.context_mut().connect().await?;
+
+    l.cmd(
+        "success",
+        "add a post task running on success",
+        cmd!(cmd_post_success),
+    )?;
+    l.cmd(
+        "failure",
+        "add a post task running on failure",
+        cmd!(cmd_post_failure),
+    )?;
+    l.cmd("always", "add a post task that always runs", cmd!(cmd_post_always))?;
+
+    sel!(l).run().await
+}
+
+async fn cmd_post_success(l: Level<Stuff>) -> Result<()> {
+    post_inner(l, &[PayloadReq::PostSuccess]).await
+}
+
+async fn cmd_post_failure(l: Level<Stuff>) -> Result<()> {
+    post_inner(l, &[PayloadReq::PostFailure]).await
+}
+
+async fn cmd_post_always(l: Level<Stuff>) -> Result<()> {
+    post_inner(l, &[PayloadReq::PostSuccess, PayloadReq::PostFailure]).await
+}
+
+async fn post_inner(
+    mut l: Level<Stuff>,
+    payloads: &[fn(Process) -> PayloadReq],
+) -> Result<()> {
+    l.usage_args(Some("NAME COMMAND [ARGS...]"));
+
+    let a = args!(l);
+
+    for payload in payloads {
+        let req = payload(build_process(&l, a.args())?);
+        match l.context_mut().req(req).await? {
+            PayloadRes::Error(e) => {
+                /*
+                 * This request is purely local to the agent, so an
+                 * error is not something we should retry indefinitely.
+                 */
+                bail!("could not enqueue post task {:?}: {e}", a.args()[0]);
+            }
+            PayloadRes::Ack => {}
+            other => bail!("unexpected response: {other:?}"),
+        }
+    }
+
+    Ok(())
+}
+
 async fn cmd_process(mut l: Level<Stuff>) -> Result<()> {
     l.context_mut().connect().await?;
 
@@ -387,30 +444,8 @@ async fn cmd_process_start(mut l: Level<Stuff>) -> Result<()> {
 
     let a = args!(l);
 
-    if a.args().len() < 2 {
-        bad_args!(l, "specify at least a process name and a command to run");
-    }
-
-    let payload = PayloadReq::ProcessStart {
-        name: a.args()[0].to_string(),
-        cmd: a.args()[1].to_string(),
-        args: a.args().iter().skip(2).cloned().collect::<Vec<_>>(),
-
-        /*
-         * The process will actually be spawned by the agent, which is
-         * running under service management.  To aid the user, we want
-         * to forward the environment and current directory so that the
-         * process can be started as if it were run from the job program
-         * itself.
-         */
-        env: std::env::vars_os().collect::<Vec<_>>(),
-        pwd: std::env::current_dir()?.to_str().unwrap().to_string(),
-
-        uid: unsafe { libc::geteuid() },
-        gid: unsafe { libc::getegid() },
-    };
-
-    match l.context_mut().req(payload).await? {
+    let req = PayloadReq::ProcessStart(build_process(&l, a.args())?);
+    match l.context_mut().req(req).await? {
         PayloadRes::Error(e) => {
             /*
              * This request is purely local to the agent, so an
@@ -421,6 +456,30 @@ async fn cmd_process_start(mut l: Level<Stuff>) -> Result<()> {
         PayloadRes::Ack => Ok(()),
         other => bail!("unexpected response: {other:?}"),
     }
+}
+
+fn build_process(l: &Level<Stuff>, args: &[String]) -> Result<Process> {
+    if args.len() < 2 {
+        bad_args!(l, "specify at least a process name and a command to run");
+    }
+
+    Ok(Process {
+        name: args[0].clone(),
+        cmd: args[1].clone(),
+        args: args[2..].to_vec(),
+
+        /*
+         * The process will actually be spawned by the agent, which is
+         * running under service management.  To aid the user, we want
+         * to forward the environment and current directory so that the
+         * process can be started as if it were run from the job program
+         * itself.
+         */
+        env: std::env::vars_os().collect(),
+        pwd: std::env::current_dir()?.into_os_string(),
+        uid: unsafe { libc::geteuid() },
+        gid: unsafe { libc::getegid() },
+    })
 }
 
 async fn factory_info(s: &mut Stuff) -> Result<FactoryInfo> {

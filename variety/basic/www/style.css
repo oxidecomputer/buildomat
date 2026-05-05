@@ -76,6 +76,18 @@ tr.s_default {
     background-color: #dddddd;
 }
 
+tr.s_post {
+    background-color: #ffcceb;
+}
+
+tr.s_post_stdout {
+    background-color: #fff0f9;
+}
+
+tr.s_post_stderr {
+    background-color: #ffe5f5;
+}
+
 span.header {
     white-space: pre;
     font-family: monospace;

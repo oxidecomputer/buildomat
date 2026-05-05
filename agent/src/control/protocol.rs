@@ -24,19 +24,42 @@ pub struct StoreEntry {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+pub struct Process {
+    pub name: String,
+    pub cmd: String,
+    pub args: Vec<String>,
+    pub env: Vec<(OsString, OsString)>,
+    pub pwd: OsString,
+    pub uid: u32,
+    pub gid: u32,
+}
+
+impl Process {
+    pub fn validate(&self) -> Result<(), String> {
+        let name = &self.name;
+
+        if name.len() > 32 {
+            return Err(format!("process name {name:?} is longer than 32"));
+        }
+        if let Some(c) = name
+            .chars()
+            .find(|&c| !c.is_ascii_alphanumeric() && c != '-' && c != '_')
+        {
+            return Err(format!("invalid char {c:?} in process name {name:?}"));
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub enum PayloadReq {
     StoreGet(String),
     StorePut(String, String, bool),
     MetadataAddresses,
-    ProcessStart {
-        name: String,
-        cmd: String,
-        args: Vec<String>,
-        env: Vec<(OsString, OsString)>,
-        pwd: String,
-        uid: u32,
-        gid: u32,
-    },
+    ProcessStart(Process),
+    PostSuccess(Process),
+    PostFailure(Process),
     FactoryInfo,
 }
 
