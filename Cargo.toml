@@ -95,7 +95,7 @@ serde_urlencoded = "0.7"
 serde_with = "3"
 serde_yaml = "0.9"
 sigpipe = "0.1"
-slog = { version = "2.7", features = [ "release_max_level_debug" ] }
+slog = { version = "2.7", features = [ "release_max_level_trace", "max_level_trace" ] }
 slog-bunyan = "2.4"
 slog-term = "2.7"
 smf = { git = "https://github.com/illumos/smf-rs.git" }

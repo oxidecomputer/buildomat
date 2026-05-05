@@ -16,7 +16,7 @@ use sea_query::{
     SelectStatement, SqliteQueryBuilder, UpdateStatement, Value,
 };
 use sea_query_rusqlite::{RusqliteBinder, RusqliteValues};
-use slog::{debug, Logger};
+use slog::{trace, Logger};
 use thiserror::Error;
 
 #[usdt::provider]
@@ -622,7 +622,7 @@ impl<'a> Handle<'a> {
         s: SelectStatement,
     ) -> DBResult<Option<T>> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
-        debug!(self.log, "query: {q}"; "sql" => true);
+        trace!(self.log, "query: {q}"; "sql" => true);
 
         sql__query__start!(|| &q);
         let mut s = self.tx.prepare(&q)?;
@@ -639,7 +639,7 @@ impl<'a> Handle<'a> {
 
     pub fn get_strings(&mut self, s: SelectStatement) -> DBResult<Vec<String>> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
-        debug!(self.log, "query: {q}"; "sql" => true);
+        trace!(self.log, "query: {q}"; "sql" => true);
 
         sql__query__start!(|| &q);
         let mut s = self.tx.prepare(&q)?;
@@ -655,7 +655,7 @@ impl<'a> Handle<'a> {
         s: SelectStatement,
     ) -> DBResult<Vec<T>> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
-        debug!(self.log, "query: {q}"; "sql" => true);
+        trace!(self.log, "query: {q}"; "sql" => true);
 
         sql__query__start!(|| &q);
         let mut s = self.tx.prepare(&q)?;
@@ -668,7 +668,7 @@ impl<'a> Handle<'a> {
 
     pub fn get_row<T: FromRow>(&mut self, s: SelectStatement) -> DBResult<T> {
         let (q, v) = s.build_rusqlite(SqliteQueryBuilder);
-        debug!(self.log, "query: {q}"; "sql" => true);
+        trace!(self.log, "query: {q}"; "sql" => true);
 
         sql__query__start!(|| &q);
         let mut s = self.tx.prepare(&q)?;
@@ -685,19 +685,19 @@ impl<'a> Handle<'a> {
 
     pub fn exec_delete(&mut self, d: DeleteStatement) -> DBResult<usize> {
         let (q, v) = d.build_rusqlite(SqliteQueryBuilder);
-        debug!(self.log, "query: {q}"; "sql" => true);
+        trace!(self.log, "query: {q}"; "sql" => true);
         self.exec(q, v)
     }
 
     pub fn exec_update(&mut self, u: UpdateStatement) -> DBResult<usize> {
         let (q, v) = u.build_rusqlite(SqliteQueryBuilder);
-        debug!(self.log, "query: {q}"; "sql" => true);
+        trace!(self.log, "query: {q}"; "sql" => true);
         self.exec(q, v)
     }
 
     pub fn exec_insert(&mut self, i: InsertStatement) -> DBResult<usize> {
         let (q, v) = i.build_rusqlite(SqliteQueryBuilder);
-        debug!(self.log, "query: {q}"; "sql" => true);
+        trace!(self.log, "query: {q}"; "sql" => true);
         self.exec(q, v)
     }
 
