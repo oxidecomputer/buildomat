@@ -270,6 +270,53 @@ pub(crate) async fn factory_worker_flush(
     Ok(HttpResponseUpdatedNoContent())
 }
 
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub(crate) struct FactoryWorkerFail {
+    reason: String,
+}
+
+#[endpoint {
+    method = POST,
+    path = "/0/factory/worker/{worker}/fail",
+}]
+pub(crate) async fn factory_worker_fail(
+    rqctx: RequestContext<Arc<Central>>,
+    path: TypedPath<WorkerPath>,
+    body: TypedBody<FactoryWorkerFail>,
+) -> DSResult<HttpResponseUpdatedNoContent> {
+    let c = rqctx.context();
+    let log = &rqctx.log;
+
+    let worker_id = path.into_inner().worker()?;
+    let reason = body.into_inner().reason;
+
+    let factory = c.require_factory(log, &rqctx.request).await?;
+    let worker = c.db.worker(worker_id).or_500()?;
+    factory.owns(log, &worker)?;
+
+    warn!(
+        log, "worker failed!";
+        "id" => worker.id.to_string(), "reason" => &reason,
+    );
+
+    /*
+     * Record in the database that the worker has failed.  This routine will
+     * take care of reporting failure in any assigned jobs, marking the worker
+     * as held, etc.
+     */
+    let failed_jobs = c.db.worker_mark_failed(worker.id, &reason).or_500()?;
+    if !failed_jobs.is_empty() {
+        let jobs = failed_jobs
+            .into_iter()
+            .map(|j| j.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        warn!(log, "worker {} failing caused jobs {jobs} to fail", worker.id);
+    }
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct FactoryWorkerAssociate {
     private: String,

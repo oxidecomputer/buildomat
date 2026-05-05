@@ -1011,6 +1011,7 @@ async fn main() -> Result<()> {
     ad.register(api::factory::factory_ping)?;
     ad.register(api::factory::factory_worker_create)?;
     ad.register(api::factory::factory_worker_append)?;
+    ad.register(api::factory::factory_worker_fail)?;
     ad.register(api::factory::factory_worker_flush)?;
     ad.register(api::factory::factory_worker_associate)?;
     ad.register(api::factory::factory_worker_destroy)?;
