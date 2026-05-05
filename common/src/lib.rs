@@ -27,12 +27,12 @@ where
 }
 
 pub fn make_log(name: &'static str) -> Logger {
-    let filter_level = match std::env::var("BUILDOMAT_DEBUG")
-        .map(|v| v.to_ascii_lowercase())
-        .as_deref()
-    {
-        Ok("yes") | Ok("1") | Ok("true") => slog::Level::Debug,
-        _ => slog::Level::Info,
+    let filter_level = if bool_env("BUILDOMAT_TRACE") {
+        slog::Level::Trace
+    } else if bool_env("BUILDOMAT_DEBUG") {
+        slog::Level::Debug
+    } else {
+        slog::Level::Info
     };
 
     if std::io::stdout().is_terminal() {
@@ -58,6 +58,15 @@ pub fn make_log(name: &'static str) -> Logger {
         .filter_level(filter_level)
         .fuse();
         Logger::root(dr, o!())
+    }
+}
+
+fn bool_env(var: &str) -> bool {
+    if let Ok(content) = std::env::var(var) {
+        let lower = content.to_ascii_lowercase();
+        lower == "1" || lower == "yes" || lower == "true"
+    } else {
+        false
     }
 }
 
