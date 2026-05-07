@@ -289,14 +289,15 @@ fn run_common(
                 )
                 .unwrap();
 
-                /*
-                 * Only send an exit notification if this is the primary task
-                 * process.
-                 */
-                if ab.bgproc.is_none() {
-                    tx.blocking_send(ab.exit(&start, &end, i32::MAX)).unwrap();
+                if ab.bgproc.is_some() {
+                    /*
+                     * No further notifications are required for background
+                     * processes.
+                     */
+                    return;
                 }
 
+                tx.blocking_send(ab.exit(&start, &end, i32::MAX)).unwrap();
                 false
             }
             Ok(es) => {
@@ -317,6 +318,7 @@ fn run_common(
                      * No further notifications are required for background
                      * processes.
                      */
+                    return;
                 }
 
                 if let Some(sig) = es.signal() {
