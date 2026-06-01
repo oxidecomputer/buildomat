@@ -924,7 +924,7 @@ impl HostManager {
                 let pb = sys
                     .ssh_exec("svcs -Ho sta,nsta svc:/site/postboot:default")?;
                 let t = pb.out.split_whitespace().collect::<Vec<_>>();
-                if t.len() != 2 || t[0] == "ON" || t[1] == "-" {
+                if t.len() != 2 || t[0] != "ON" || t[1] != "-" {
                     bail!("postboot not ready: {t:?}");
                 }
 
@@ -1007,7 +1007,7 @@ impl HostManager {
                 let pb = sys
                     .ssh_exec("svcs -Ho sta,nsta svc:/site/postboot:default")?;
                 let t = pb.out.split_whitespace().collect::<Vec<_>>();
-                if t.len() != 2 || t[0] == "ON" || t[1] == "-" {
+                if t.len() != 2 || t[0] != "ON" || t[1] != "-" {
                     bail!("postboot not ready: {t:?}");
                 }
 
