@@ -10,7 +10,7 @@ use std::time::Duration;
 use anyhow::Result;
 use chrono::prelude::*;
 use rand::distr::Alphanumeric;
-use rand::{rng, Rng};
+use rand::{rng, RngExt as _};
 use regex::Regex;
 use rusty_ulid::Ulid;
 use serde::{Deserialize, Serialize};
