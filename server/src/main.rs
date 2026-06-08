@@ -133,6 +133,14 @@ pub(crate) fn unauth_response<T>() -> SResult<T, HttpError> {
     ))
 }
 
+pub(crate) fn bad_request<T>(message: impl ToString) -> SResult<T, HttpError> {
+    Err(HttpError::for_client_error(
+        None,
+        ClientErrorStatusCode::BAD_REQUEST,
+        message.to_string(),
+    ))
+}
+
 impl Central {
     fn _int_delegate_username(
         &self,

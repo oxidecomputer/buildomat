@@ -346,6 +346,8 @@ pub(crate) async fn worker_job_append_one(
     let j = c.db.job(path.into_inner().job()?).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
+    validate_stream(&a.stream)?;
+
     info!(log, "worker {} append to job {} stream {}", w.id, j.id, a.stream);
 
     c.db.job_append_event(
@@ -387,6 +389,10 @@ pub(crate) async fn worker_job_append(
     let j = c.db.job(path.into_inner().job()?).or_500()?; /* XXX */
     w.owns(log, &j)?;
 
+    for entry in &a {
+        validate_stream(&entry.stream)?;
+    }
+
     info!(log, "worker {} append {} events to job {}", w.id, a.len(), j.id);
 
     c.db.job_append_events(
@@ -422,6 +428,8 @@ pub(crate) async fn worker_task_append(
     let p = path.into_inner();
     let j = c.db.job(p.job()?).or_500()?; /* XXX */
     w.owns(log, &j)?;
+
+    validate_stream(&a.stream)?;
 
     info!(
         log,
@@ -674,13 +682,9 @@ pub(crate) async fn worker_job_add_output(
 
     let max = c.config.job.max_bytes_per_output();
     if add.size > max {
-        return Err(HttpError::for_client_error(
-            None,
-            ClientErrorStatusCode::BAD_REQUEST,
-            format!(
-                "output file size {} bigger than allowed maximum {max} bytes",
-                add.size,
-            ),
+        return bad_request(format!(
+            "output file size {} bigger than allowed maximum {max} bytes",
+            add.size,
         ));
     }
 
@@ -726,11 +730,7 @@ pub(crate) async fn worker_job_add_output(
                 add.size,
                 e,
             );
-            Err(HttpError::for_client_error(
-                Some("invalid".to_string()),
-                ClientErrorStatusCode::BAD_REQUEST,
-                format!("{}", e),
-            ))
+            bad_request(e)
         }
     }
 }
@@ -762,10 +762,9 @@ pub(crate) async fn worker_job_add_output_sync(
      */
     let add = add.into_inner();
     let addsize = if add.size < 0 || add.size > 1024 * 1024 * 1024 {
-        return Err(HttpError::for_client_error(
-            Some("invalid".to_string()),
-            ClientErrorStatusCode::BAD_REQUEST,
-            format!("size {} must be between 0 and 1073741824", add.size),
+        return bad_request(format!(
+            "size {} must be between 0 and 1073741824",
+            add.size
         ));
     } else {
         add.size as u64
@@ -793,11 +792,7 @@ pub(crate) async fn worker_job_add_output_sync(
                 addsize,
                 e,
             );
-            return Err(HttpError::for_client_error(
-                Some("invalid".to_string()),
-                ClientErrorStatusCode::BAD_REQUEST,
-                format!("{:?}", e),
-            ));
+            return bad_request(format!("{e:?}"));
         }
     };
 
@@ -864,6 +859,10 @@ pub(crate) async fn worker_append(
 
     let a = append.into_inner();
 
+    for entry in &a {
+        validate_stream(&entry.stream)?;
+    }
+
     info!(log, "worker {} append {} self events", w.id, a.len());
 
     c.db.worker_append_events(
@@ -924,4 +923,22 @@ pub(crate) async fn worker_diagnostics_enable(
     info!(log, "worker {} post-job diagnostics enabled", w.id);
 
     Ok(HttpResponseUpdatedNoContent())
+}
+
+pub(crate) fn validate_stream(name: &str) -> DSResult<()> {
+    if name.len() > 64 {
+        return bad_request(format!(
+            "stream name {name:?} is longer than 64 bytes"
+        ));
+    }
+
+    if let Some(c) = name.chars().find(|c| {
+        !c.is_ascii_alphanumeric() && *c != '-' && *c != '_' && *c != '.'
+    }) {
+        return bad_request(format!(
+            "invalid char {c:?} in stream name {name:?}"
+        ));
+    }
+
+    Ok(())
 }

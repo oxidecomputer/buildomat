@@ -3,7 +3,9 @@
  */
 
 mod prelude {
-    pub(crate) use crate::{db, unauth_response, Central, MakeInternalError};
+    pub(crate) use crate::{
+        bad_request, db, unauth_response, Central, MakeInternalError,
+    };
     pub use anyhow::Result;
     pub use buildomat_download::{PotentialRange, RequestContextEx};
     pub use buildomat_sse::{HeaderMapEx, ServerSentEvents};
