@@ -2,6 +2,8 @@
  * Copyright 2025 Oxide Computer Company
  */
 
+mod job_streams;
+
 use std::io::{IsTerminal, Read};
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
@@ -15,6 +17,8 @@ use regex::Regex;
 use rusty_ulid::Ulid;
 use serde::{Deserialize, Serialize};
 use slog::{o, Drain, Logger};
+
+pub use job_streams::JobStream;
 
 pub fn read_toml<P: AsRef<Path>, T>(n: P) -> Result<T>
 where
