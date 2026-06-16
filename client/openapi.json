@@ -922,6 +922,42 @@
         }
       }
     },
+    "/0/factory/worker/{worker}/fail": {
+      "post": {
+        "operationId": "factory_worker_fail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FactoryWorkerFail"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/0/factory/worker/{worker}/flush": {
       "post": {
         "operationId": "factory_worker_flush",
@@ -2941,6 +2977,17 @@
         },
         "required": [
           "target"
+        ]
+      },
+      "FactoryWorkerFail": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
         ]
       },
       "FactoryWorkerResult": {
