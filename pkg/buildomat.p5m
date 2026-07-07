@@ -1,0 +1,55 @@
+#
+# Copyright 2026 Oxide Computer Company
+#
+
+set name=pkg.fmri \
+    value=pkg://%PUBLISHER%/application/buildomat@0.0.%COMMIT_COUNT%
+set name=pkg.summary value="buildomat server"
+set name=variant.opensolaris.zone value=global value=nonglobal
+dir  path=lib owner=root group=bin mode=0755
+dir  path=lib/svc owner=root group=bin mode=0755
+dir  path=lib/svc/manifest/application owner=root group=sys mode=0755
+dir  path=lib/svc/manifest/application/buildomat owner=root group=sys mode=0755
+file path=lib/svc/manifest/application/buildomat/api.xml owner=root group=sys \
+    mode=0444 restart_fmri=svc:/system/manifest-import:default
+file path=lib/svc/manifest/application/buildomat/aws.xml owner=root group=sys \
+    mode=0444 restart_fmri=svc:/system/manifest-import:default
+file path=lib/svc/manifest/application/buildomat/github.xml owner=root \
+    group=sys mode=0444 restart_fmri=svc:/system/manifest-import:default
+dir  path=opt owner=root group=sys mode=0755
+dir  path=opt/buildomat owner=root group=sys mode=0755
+dir  path=opt/buildomat/lib owner=root group=sys mode=0755
+
+#
+# Though the agents are executable programs, on the server machine they are
+# effectively data files and should not be executed.
+#
+file path=opt/buildomat/lib/buildomat-agent owner=root group=sys mode=0444
+file path=opt/buildomat/lib/buildomat-agent-linux owner=root group=sys mode=0444
+file path=opt/buildomat/lib/buildomat-agent-linux.gz owner=root group=sys \
+    mode=0444
+file path=opt/buildomat/lib/buildomat-agent.gz owner=root group=sys mode=0444
+
+#
+# Service binaries are deployed in /opt/buildomat/lib, as they are generally not
+# executed directly by operators:
+#
+file path=opt/buildomat/lib/buildomat-factory-aws owner=root group=bin mode=0555
+file path=opt/buildomat/lib/buildomat-github-dbtool owner=root group=bin \
+    mode=0555
+file path=opt/buildomat/lib/buildomat-github-ghtool owner=root group=bin \
+    mode=0555
+file path=opt/buildomat/lib/buildomat-github-server owner=root group=bin \
+    mode=0555
+file path=opt/buildomat/lib/buildomat-server owner=root group=bin mode=0555
+dir  path=opt/buildomat/share owner=root group=sys mode=0755
+dir  path=opt/buildomat/share/variety owner=root group=sys mode=0755
+dir  path=opt/buildomat/share/variety/basic owner=root group=sys mode=0755
+dir  path=opt/buildomat/share/variety/basic/www owner=root group=sys mode=0755
+file path=opt/buildomat/share/variety/basic/www/live.js owner=root group=sys \
+    mode=0444
+file path=opt/buildomat/share/variety/basic/www/style.css owner=root group=sys \
+    mode=0444
+dir  path=opt/buildomat/share/www owner=root group=sys mode=0755
+file path=opt/buildomat/share/www/bunyan.css owner=root group=sys mode=0444
+file path=opt/buildomat/share/www/bunyan.js owner=root group=sys mode=0444

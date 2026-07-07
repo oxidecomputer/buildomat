@@ -1,4 +1,6 @@
 /target
+/pkg/packages
+/pkg/proto
 
 #
 # Files needed when running buildomat locally with xtask.

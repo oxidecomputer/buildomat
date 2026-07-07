@@ -934,6 +934,7 @@ async fn main() -> Result<()> {
     let mut opts = Options::new();
 
     opts.optopt("b", "", "bind address:port", "BIND_ADDRESS");
+    opts.optopt("D", "", "data directory", "DIR");
     opts.optopt("f", "", "configuration file", "CONFIG");
     opts.optopt("S", "", "dump OpenAPI schema", "FILE");
 
@@ -1049,14 +1050,16 @@ async fn main() -> Result<()> {
 
     let log = make_log("buildomat");
 
-    let mut datadir = std::env::current_dir()?;
-    datadir.push("data");
+    let datadir = if let Some(d) = p.opt_str("D").as_deref() {
+        PathBuf::from(d)
+    } else {
+        std::env::current_dir()?.join("data")
+    };
     if !datadir.is_dir() {
-        bail!("{:?} must be a directory", datadir);
+        bail!("{datadir:?} must be a directory");
     }
 
-    let mut dbfile = datadir.clone();
-    dbfile.push("data.sqlite3");
+    let dbfile = datadir.join("data.sqlite3");
     let db = db::Database::new(log.clone(), dbfile, config.sqlite.cache_kb)?;
 
     let awscfg = AwsConfig {
