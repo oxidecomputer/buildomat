@@ -2,7 +2,7 @@
 #:
 #: name = "pkg-agent-linux"
 #: variety = "basic"
-#: target = "ubuntu-18.04"
+#: target = "ubuntu-20.04"
 #: rust_toolchain = true
 #: output_rules = [
 #:	"=/out/buildomat-agent-linux.gz",
