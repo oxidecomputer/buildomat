@@ -18,12 +18,6 @@ pfexec mkdir -p /out
 pfexec chown "$UID" /out
 
 #
-# Install basic build tools:
-#
-apt-get -y update
-apt-get -y install build-essential pkg-config
-
-#
 # Build the agent with a static OpenSSL:
 #
 cargo build --features vendored-openssl --release --locked -p buildomat-agent
