@@ -94,7 +94,7 @@ $(REPO):
 archive: $(ARCHIVE) | $(REPO)
 
 .PHONY: $(ARCHIVE)
-$(ARCHIVE):
+$(ARCHIVE): package
 	@rm -f $@
 	pkgrecv -a -d $@ -s $(REPO) -v -m latest '*'
 
