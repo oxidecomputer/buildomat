@@ -1,0 +1,35 @@
+<?xml version='1.0'?>
+<!DOCTYPE service_bundle SYSTEM '/usr/share/lib/xml/dtd/service_bundle.dtd.1'>
+<service_bundle type='manifest' name='export'>
+<service name='application/buildomat/github' type='service' version='0'>
+  <create_default_instance enabled='false'/>
+
+  <dependency name='dep0' grouping='require_all' restart_on='error' type='service'>
+    <service_fmri value='svc:/milestone/multi-user:default'/>
+  </dependency>
+
+  <exec_method name='start' type='method' exec='/opt/buildomat/lib/buildomat-github-server -d %{config/confdir} -D %{config/datadir} -b %{config/address}:%{config/port} &amp;' timeout_seconds='10'>
+    <method_context working_directory='/data/buildomat/github'>
+      <method_credential user='buildomat' group='buildomat'/>
+      <method_environment>
+        <envvar name='UMEM_OPTIONS' value='backend=mmap'/>
+      </method_environment>
+    </method_context>
+  </exec_method>
+
+  <exec_method name='stop' type='method' exec=':kill' timeout_seconds='60'/>
+
+  <property_group name='config' type='application'>
+    <propval name='confdir' type='astring' value='/etc/opt/buildomat/github'/>
+    <propval name='datadir' type='astring' value='/var/opt/buildomat/github'/>
+    <propval name='address' type='net_address' value='127.0.0.1'/>
+    <propval name='port' type='count' value='4021'/>
+  </property_group>
+
+  <template>
+    <common_name>
+      <loctext xml:lang='C'>buildomat GitHub server</loctext>
+    </common_name>
+  </template>
+</service>
+</service_bundle>

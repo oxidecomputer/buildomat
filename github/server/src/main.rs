@@ -13,12 +13,14 @@ use buildomat_github_database::types::*;
 use buildomat_github_hooktypes as hooktypes;
 use buildomat_jobsh::jobfile::JobFileSet;
 use chrono::{DateTime, Utc};
+use getopts::Options;
 use serde::{Deserialize, Serialize};
 #[allow(unused_imports)]
 use slog::{debug, error, info, o, trace, warn, Logger};
-use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use std::{collections::HashSet, process::exit};
 use variety::control::{ControlPrivate, CONTROL_RUN_NAME};
 
 mod config;
@@ -2011,17 +2013,48 @@ async fn bgtask(app: Arc<App>) {
 async fn main() -> Result<()> {
     usdt::register_probes().unwrap();
 
+    let mut opts = Options::new();
+
+    opts.optopt("b", "", "bind address:port", "BIND_ADDRESS");
+    opts.optopt("d", "", "configuration directory", "DIR");
+    opts.optopt("D", "", "data directory", "DIR");
+
+    let p = match opts.parse(std::env::args().skip(1)) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("ERROR: usage: {}", e);
+            eprintln!("       {}", opts.usage("usage"));
+            exit(1);
+        }
+    };
+
     let log = make_log("github-server");
 
     info!(log, "ok");
 
+    let bind_address =
+        p.opt_str("b").as_deref().unwrap_or("127.0.0.1:4021").parse()?;
+
+    /*
+     * The configuration and data directories are either specified explicitly
+     * with option arguments, or relative to the working directory by default.
+     */
+    let confdir = p
+        .opt_str("d")
+        .map(|p| Ok(PathBuf::from(p)))
+        .unwrap_or_else(|| std::env::current_dir().map(|d| d.join("etc")))?;
+    let datadir = p
+        .opt_str("D")
+        .map(|p| Ok(PathBuf::from(p)))
+        .unwrap_or_else(|| std::env::current_dir().map(|d| d.join("var")))?;
+
     /*
      * Load our files from disk...
      */
-    let key = config::load_bytes("etc/privkey.pem")?;
+    let key = config::load_bytes(confdir.join("privkey.pem"))?;
     let key =
         pem::parse(&key).map_err(|e| anyhow!("parse privkey: {:?}", e))?;
-    let config = config::load_config("etc/app.toml")?;
+    let config = config::load_config(confdir.join("app.toml"))?;
 
     let jwt = buildomat_github_client::JWTCredentials::new(
         config.id,
@@ -2033,7 +2066,7 @@ async fn main() -> Result<()> {
         jwt: jwt.clone(),
         db: buildomat_github_database::Database::new(
             log.new(o!("component" => "db")),
-            "var/data.sqlite3",
+            datadir.join("data.sqlite3"),
             config.sqlite.cache_kb,
         )?,
         config,
@@ -2096,7 +2129,7 @@ async fn main() -> Result<()> {
     /*
      * Listen for web requests from GitHub and users.
      */
-    http::server(app0, "0.0.0.0:4021".parse().unwrap()).await?;
+    http::server(app0, bind_address).await?;
 
     Ok(())
 }

@@ -24,6 +24,7 @@ base64 = { workspace = true }
 chrono = { workspace = true }
 dropshot = { workspace = true }
 futures = { workspace = true }
+getopts = { workspace = true }
 hmac-sha256 = { workspace = true }
 html-escape = { workspace = true }
 http-body-util = { workspace = true }

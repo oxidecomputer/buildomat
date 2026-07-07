@@ -989,6 +989,7 @@ dependencies = [
  "chrono",
  "dropshot",
  "futures",
+ "getopts",
  "hmac-sha256",
  "html-escape",
  "http-body-util",

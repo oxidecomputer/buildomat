@@ -1,0 +1,4 @@
+#
+# Drop "pkg.depend.bypass-generate" attributes from the final package:
+#
+<transform file -> delete pkg.depend.bypass-generate .*>
