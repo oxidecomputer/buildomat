@@ -31,8 +31,8 @@ cargo build --release --locked
 #
 cd pkg
 gmake \
-    INPUT_AGENT_ILLUMOS=/input/illumos/out/buildomat-agent \
-    INPUT_AGENT_LINUX=/input/linux/out/buildomat-agent-linux \
+    INPUT_AGENT_ILLUMOS_GZ=/input/illumos/out/buildomat-agent.gz \
+    INPUT_AGENT_LINUX_GZ=/input/linux/out/buildomat-agent-linux.gz \
     ARCHIVE=/out/buildomat.p5p \
     archive
 sha256sum /out/buildomat.p5p >/out/buildomat.p5p.sha256.txt

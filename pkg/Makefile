@@ -110,21 +110,21 @@ $(BINS): | $(DIRS)
 	@rm -f $@
 	cp ../target/release/$(@F) $@
 
-$(PROTO)/$(BINDIR)/buildomat-agent: $(INPUT_AGENT_ILLUMOS) | $(DIRS)
+$(PROTO)/$(BINDIR)/buildomat-agent.gz: $(INPUT_AGENT_ILLUMOS_GZ) | $(DIRS)
 	@rm -f $@
-	test -n "$(INPUT_AGENT_ILLUMOS)" || \
-	    (echo "set INPUT_AGENT_ILLUMOS?"; exit 1)
-	cp $(INPUT_AGENT_ILLUMOS) $@
+	test -n "$(INPUT_AGENT_ILLUMOS_GZ)" || \
+	    (echo "set INPUT_AGENT_ILLUMOS_GZ?"; exit 1)
+	cp $(INPUT_AGENT_ILLUMOS_GZ) $@
 
-$(PROTO)/$(BINDIR)/buildomat-agent-linux: $(INPUT_AGENT_LINUX) | $(DIRS)
+$(PROTO)/$(BINDIR)/buildomat-agent-linux.gz: $(INPUT_AGENT_LINUX_GZ) | $(DIRS)
 	@rm -f $@
-	test -n "$(INPUT_AGENT_LINUX)" || \
-	    (echo "set INPUT_AGENT_LINUX?"; exit 1)
-	cp $(INPUT_AGENT_LINUX) $@
+	test -n "$(INPUT_AGENT_LINUX_GZ)" || \
+	    (echo "set INPUT_AGENT_LINUX_GZ?"; exit 1)
+	cp $(INPUT_AGENT_LINUX_GZ) $@
 
-$(PROTO)/$(BINDIR)/%.gz: $(PROTO)/$(BINDIR)/% | $(DIRS)
+$(PROTO)/$(BINDIR)/%: $(PROTO)/$(BINDIR)/%.gz | $(DIRS)
 	@rm -f $@
-	gzip < $< > $@
+	gunzip < $< > $@
 
 $(PROTO)/$(WWWDIR)/%: ../github/server/www/% | $(DIRS)
 	@rm -f $@
