@@ -566,6 +566,14 @@ async fn status_impl(
         .collect::<HashMap<_, _>>();
     let mut users: HashMap<String, String> = Default::default();
 
+    fn github_repo(
+        app: &App,
+        tags: &HashMap<String, String>,
+    ) -> Option<Repository> {
+        let repo_id = tags.get("gong.repo.id")?.parse().ok()?;
+        app.db.load_repository(repo_id).ok()
+    }
+
     fn github_url(tags: &HashMap<String, String>) -> Option<String> {
         let owner = tags.get("gong.repo.owner")?;
         let name = tags.get("gong.repo.name")?;
@@ -604,19 +612,35 @@ async fn status_impl(
         Some(out)
     }
 
-    fn dump_info(job: &buildomat_client::types::Job) -> String {
+    fn dump_info(app: &App, job: &buildomat_client::types::Job) -> String {
         let tags = &job.tags;
 
         let mut out = String::new();
-        if let Some(info) = github_info(tags) {
-            out += &format!("&nbsp;&nbsp;&nbsp;<b>{}</b><br>\n", info);
+
+        if let Some(repo) = github_repo(app, tags) {
+            if repo.visibility.as_deref() == Some("public") {
+                if let Some(info) = github_info(tags) {
+                    out += &format!("&nbsp;&nbsp;&nbsp;<b>{}</b><br>\n", info);
+                }
+                if let Some(url) = commit_url(tags) {
+                    out += &format!(
+                        "&nbsp;&nbsp;&nbsp;<b>commit:</b> {}<br>\n",
+                        url
+                    );
+                }
+                if let Some(url) = github_url(tags) {
+                    out +=
+                        &format!("&nbsp;&nbsp;&nbsp;<b>url:</b> {}<br>\n", url);
+                }
+            } else {
+                out += "&nbsp;&nbsp;&nbsp;<i>This build is linked to a \
+                        private GitHub repository.</i><br>\n";
+            }
+        } else {
+            out += "&nbsp;&nbsp;&nbsp;<i>This build is not linked to a \
+                    GitHub repository.</i><br>\n";
         }
-        if let Some(url) = commit_url(tags) {
-            out += &format!("&nbsp;&nbsp;&nbsp;<b>commit:</b> {}<br>\n", url);
-        }
-        if let Some(url) = github_url(tags) {
-            out += &format!("&nbsp;&nbsp;&nbsp;<b>url:</b> {}<br>\n", url);
-        }
+
         if job.target == job.target_real {
             out += &format!(
                 "&nbsp;&nbsp;&nbsp;<b>target:</b> {}<br>\n",
@@ -723,7 +747,7 @@ async fn status_impl(
                         users.get(&job.owner).unwrap()
                     );
                     if let Some(job) = jobs.iter().find(|j| j.id == job.id) {
-                        out += &dump_info(job);
+                        out += &dump_info(app, job);
                     }
                     out += "<br>\n";
                 }
@@ -784,7 +808,7 @@ async fn status_impl(
             out += "<li>";
             out +=
                 &format!("{} user {}", job.id, users.get(&job.owner).unwrap());
-            out += &dump_info(job);
+            out += &dump_info(app, job);
             out += "<br>\n";
         }
 
@@ -820,7 +844,7 @@ async fn status_impl(
             " <span style=\"background-color: #{}\">[{}]</span>",
             colour, word
         );
-        out += &dump_info(job);
+        out += &dump_info(app, job);
         out += "<br>\n";
     }
     out += "</ul>\n";
