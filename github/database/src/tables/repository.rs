@@ -10,19 +10,25 @@ pub struct Repository {
     pub id: i64,
     pub owner: String,
     pub name: String,
+    pub visibility: Option<String>,
 }
 
 impl FromRow for Repository {
     fn columns() -> Vec<ColumnRef> {
-        [RepositoryDef::Id, RepositoryDef::Owner, RepositoryDef::Name]
-            .into_iter()
-            .map(|col| {
-                ColumnRef::TableColumn(
-                    SeaRc::new(RepositoryDef::Table),
-                    SeaRc::new(col),
-                )
-            })
-            .collect()
+        [
+            RepositoryDef::Id,
+            RepositoryDef::Owner,
+            RepositoryDef::Name,
+            RepositoryDef::Visibility,
+        ]
+        .into_iter()
+        .map(|col| {
+            ColumnRef::TableColumn(
+                SeaRc::new(RepositoryDef::Table),
+                SeaRc::new(col),
+            )
+        })
+        .collect()
     }
 
     fn from_row(row: &Row) -> rusqlite::Result<Self> {
@@ -30,6 +36,7 @@ impl FromRow for Repository {
             id: row.get(0)?,
             owner: row.get(1)?,
             name: row.get(2)?,
+            visibility: row.get(3)?,
         })
     }
 }
@@ -51,6 +58,7 @@ impl Repository {
                 self.id.into(),
                 self.owner.clone().into(),
                 self.name.clone().into(),
+                self.visibility.clone().into(),
             ])
             .to_owned()
     }

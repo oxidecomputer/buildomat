@@ -79,6 +79,7 @@ pub struct Repository {
     pub node_id: String,
     pub name: String,
     pub owner: Owner,
+    pub visibility: String,
 }
 
 #[derive(Deserialize, Debug)]

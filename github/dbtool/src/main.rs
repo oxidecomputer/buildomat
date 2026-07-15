@@ -334,6 +334,7 @@ async fn do_repository_list(mut l: Level<Stuff>) -> Result<()> {
     l.add_column("id", 10, true);
     l.add_column("owner", 36, true);
     l.add_column("name", 36, true);
+    l.add_column("visibility", 10, true);
 
     let a = no_args!(l);
     let mut t = a.table();
@@ -343,6 +344,7 @@ async fn do_repository_list(mut l: Level<Stuff>) -> Result<()> {
         r.add_u64("id", repo.id as u64);
         r.add_str("owner", repo.owner);
         r.add_str("name", repo.name);
+        r.add_str("visibility", repo.visibility.as_deref().unwrap_or("-"));
 
         t.add_row(r);
     }
