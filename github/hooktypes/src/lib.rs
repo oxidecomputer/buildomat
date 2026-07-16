@@ -148,14 +148,15 @@ pub enum PullRequestState {
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckSuiteStatus {
-    Requested,
+    Queued,
     InProgress,
     Completed,
-    Queued,
     /*
-     * This status is not documented, and does not appear in the schema,
-     * but GitHub Actions (of course) seems to generate it sometimes:
+     * These status values are reserved for GitHub Actions, but do for whatever
+     * reason still sometimes appear in events we receive:
      */
+    Waiting,
+    Requested,
     Pending,
 }
 
@@ -166,9 +167,11 @@ pub enum CheckRunStatus {
     InProgress,
     Completed,
     /*
-     * This status is not documented, and does not appear in the schema,
-     * but GitHub Actions (of course) seems to generate it sometimes:
+     * These status values are reserved for GitHub Actions, but do for whatever
+     * reason still sometimes appear in events we receive:
      */
+    Waiting,
+    Requested,
     Pending,
 }
 
