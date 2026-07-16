@@ -447,6 +447,7 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                         repo.id,
                         &repo.owner.login,
                         &repo.name,
+                        &repo.visibility,
                     )?;
                 };
                 app.db.delivery_ack(del.seq, ack)?;
@@ -479,6 +480,7 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                         repo.id,
                         &repo.owner.login,
                         &repo.name,
+                        &repo.visibility,
                     )?;
                     repo
                 } else {
@@ -536,6 +538,7 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                     pr.head.repo().id,
                     &pr.head.repo().owner.login,
                     &pr.head.repo().name,
+                    &pr.head.repo().visibility,
                 )?;
 
                 let gh = app.install_client(instid);
@@ -952,6 +955,7 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                         repo.id,
                         &repo.owner.login,
                         &repo.name,
+                        &repo.visibility,
                     )?;
                     repo
                 } else {

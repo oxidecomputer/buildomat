@@ -358,9 +358,14 @@ impl Database {
         id: i64,
         owner: &str,
         name: &str,
+        visibility: &str,
     ) -> DBResult<()> {
-        let r =
-            Repository { id, owner: owner.to_string(), name: name.to_string() };
+        let r = Repository {
+            id,
+            owner: owner.to_string(),
+            name: name.to_string(),
+            visibility: Some(visibility.to_string()),
+        };
 
         self.sql.tx(|h| {
             h.exec_insert(
@@ -369,6 +374,7 @@ impl Database {
                         OnConflict::column(RepositoryDef::Id)
                             .update_column(RepositoryDef::Name)
                             .update_column(RepositoryDef::Owner)
+                            .update_column(RepositoryDef::Visibility)
                             .to_owned(),
                     )
                     .to_owned(),

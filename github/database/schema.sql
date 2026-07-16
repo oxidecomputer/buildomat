@@ -87,3 +87,7 @@ ALTER TABLE check_run ADD COLUMN
 
 -- v 13
 CREATE INDEX check_run_check_suite ON check_run (check_suite);
+
+-- v 14
+ALTER TABLE repository ADD COLUMN
+    visibility      TEXT;
