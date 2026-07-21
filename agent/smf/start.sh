@@ -11,4 +11,4 @@ exec /usr/bin/ctrun \
     -l child \
     -o noorphan,regent \
     \
-    /opt/buildomat/lib/agent run
+    %AGENT_BIN% run

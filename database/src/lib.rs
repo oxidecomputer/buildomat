@@ -258,7 +258,6 @@ macro_rules! sqlite_ulid_new_type {
             PartialOrd,
             Ord,
             Hash,
-            Debug,
             serde::Serialize,
             serde::Deserialize,
             $($derives),*
@@ -308,6 +307,12 @@ macro_rules! sqlite_ulid_new_type {
         impl std::fmt::Display for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(f, "{}", self.0.to_string())
+            }
+        }
+
+        impl std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}({})", stringify!($name), self.0.to_string())
             }
         }
 
