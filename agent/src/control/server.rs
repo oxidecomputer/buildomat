@@ -15,10 +15,8 @@ use tokio::{
     },
 };
 
-use super::{
-    protocol::{Decoder, Message, Payload, PayloadReq, PayloadRes},
-    SOCKET_PATH,
-};
+use super::protocol::{Decoder, Message, Payload, PayloadReq, PayloadRes};
+use crate::InstallLocation;
 
 #[derive(Debug)]
 pub struct Request {
@@ -48,19 +46,21 @@ impl Request {
 }
 
 pub fn listen() -> Result<Receiver<Request>> {
+    let loc = InstallLocation::detect()?;
+
     /*
      * Create the UNIX socket that the control program will use to contact the
      * agent.
      */
-    std::fs::remove_file(SOCKET_PATH).ok();
-    let ul = UnixListener::bind(SOCKET_PATH)?;
+    std::fs::remove_file(loc.control_sock()).ok();
+    let ul = UnixListener::bind(loc.control_sock())?;
 
     /*
      * Allow everyone to connect:
      */
-    let mut perm = std::fs::metadata(SOCKET_PATH)?.permissions();
+    let mut perm = std::fs::metadata(loc.control_sock())?.permissions();
     perm.set_mode(0o777);
-    std::fs::set_permissions(SOCKET_PATH, perm)?;
+    std::fs::set_permissions(loc.control_sock(), perm)?;
 
     /*
      * Create channel to hand requests back to the main loop.

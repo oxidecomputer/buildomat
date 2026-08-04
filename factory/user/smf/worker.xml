@@ -1,0 +1,8 @@
+<?xml version='1.0'?>
+<!DOCTYPE service_bundle SYSTEM '/usr/share/lib/xml/dtd/service_bundle.dtd.1'>
+<service_bundle name='buildomat-worker' type='manifest'>
+    <service name='site/buildomat/factory-user-worker' type='service' version='0'>
+        <exec_method name='start' type='method' timeout_seconds='60' exec='/opt/buildomat/lib/factory-user __bootstrap_agent' />
+        <exec_method name='stop' type='method' timeout_seconds='60' exec=':kill' />
+    </service>
+</service_bundle>

@@ -10,6 +10,7 @@ members = [
 	"download",
 	"factory/aws",
 	"factory/gimlet",
+	"factory/user",
 	"factory/lab",
 	"factory/propolis",
 	"github/client",
@@ -44,6 +45,7 @@ wrong_self_convention = "allow"
 [workspace.dependencies]
 ansi-to-html = { version = "0.2", features =  [ "lazy-init" ] }
 anyhow = "1"
+async-compression = { version = "0.4", features = ["gzip", "tokio"] }
 aws-config = "1"
 aws-credential-types = "1"
 aws-runtime = "1"
@@ -58,6 +60,7 @@ devinfo = { version = "0.1", features = [ "private" ] }
 dialoguer = { version = "0.12.0", default-features = false }
 dirs-next = "2"
 dropshot = "0.16"
+expect-test = "1"
 futures = "0.3"
 futures-core = "0.3"
 getopts = "0.2"
@@ -80,6 +83,7 @@ percent-encoding = "2.1"
 progenitor = { version = "0.11" }
 progenitor-client = { version = "0.11" }
 rand = "0.10"
+rand_pcg = "0.10"
 regex = "1"
 reqwest = { version = "0.12", features = [ "json", "stream" ] }
 rust-toolchain-file = "0.1"

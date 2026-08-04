@@ -1,0 +1,100 @@
+/*
+ * Copyright 2026 Oxide Computer
+ */
+
+use crate::config::{validate_config, ConfigFile};
+use crate::coordinator::coordinator_loop;
+use crate::db::Database;
+use crate::factory::factory_loop;
+use anyhow::{bail, Result};
+use buildomat_common::*;
+use getopts::Options;
+use slog::Logger;
+use std::{sync::Arc, time::Duration};
+
+mod bootstrap_agent;
+mod config;
+mod coordinator;
+mod db;
+mod factory;
+mod illumos;
+
+struct Central {
+    log: Logger,
+    client: buildomat_client::Client,
+    config: ConfigFile,
+    db: Database,
+}
+
+/*
+ * This factory may run on large AMD machines (e.g., 100+ SMT threads) and thus
+ * could up with far too many worker threads by default.
+ */
+#[tokio::main(worker_threads = 4)]
+async fn main() -> Result<()> {
+    usdt::register_probes().unwrap();
+
+    if std::env::args().nth(1).as_deref() == Some("__bootstrap_agent") {
+        bootstrap_agent::run().await?;
+        return Ok(());
+    }
+
+    let mut opts = Options::new();
+
+    opts.optopt("f", "", "configuration file", "CONFIG");
+    opts.optopt("d", "", "database file", "FILE");
+
+    let p = match opts.parse(std::env::args().skip(1)) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("ERROR: usage: {}", e);
+            eprintln!("       {}", opts.usage("usage"));
+            std::process::exit(1);
+        }
+    };
+
+    let log = make_log("factory-user");
+
+    let config: ConfigFile = if let Some(f) = p.opt_str("f").as_deref() {
+        read_toml(f)?
+    } else {
+        bail!("must specify configuration file (-f)");
+    };
+    validate_config(&config)?;
+
+    let db = if let Some(p) = p.opt_str("d") {
+        Database::new(log.clone(), p, None)?
+    } else {
+        bail!("must specify database file (-d)");
+    };
+
+    let client = buildomat_client::ClientBuilder::new(&config.general.baseurl)
+        .bearer_token(&config.factory.token)
+        .build()?;
+
+    /*
+     * Install a custom panic hook that will try to exit the process after a
+     * short delay.  This is unfortunate, but I am not sure how else to avoid a
+     * panicked worker thread leaving the process stuck without some of its
+     * functionality.
+     */
+    let orig_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        orig_hook(info);
+        eprintln!("FATAL: THREAD PANIC DETECTED; EXITING IN 5 SECONDS...");
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(5));
+            std::process::exit(101);
+        });
+    }));
+
+    let c = Arc::new(Central { log, config, client, db });
+
+    let t_coordinator = tokio::spawn(coordinator_loop(Arc::clone(&c)));
+    let t_factory = tokio::spawn(factory_loop(Arc::clone(&c)));
+
+    tokio::select! {
+        _ = t_coordinator => bail!("coordinator task stopped early"),
+        _ = t_factory => bail!("factory task stopped early"),
+    }
+}
