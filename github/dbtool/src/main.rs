@@ -297,7 +297,11 @@ async fn do_delivery_list(mut l: Level<Stuff>) -> Result<()> {
         match serde_json::from_value::<hooktypes::Payload>(del.payload.0) {
             Ok(payload) => {
                 r.add_str("action", &payload.action);
-                r.add_str("sender", &payload.sender.login);
+                if let Some(sender) = &payload.sender {
+                    r.add_str("sender", &sender.login);
+                } else {
+                    r.add_str("sender", "-");
+                }
                 if let Some(inst) = &payload.installation {
                     r.add_str("install", inst.id.to_string());
                 } else {
