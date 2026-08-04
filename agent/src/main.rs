@@ -36,6 +36,7 @@ mod shadow;
 mod upload;
 
 use control::protocol::{FactoryInfo, PayloadReq, PayloadRes};
+use exec::ActivityBuilder;
 
 struct Agent {
     log: Logger,
@@ -92,18 +93,14 @@ impl ConfigFile {
 }
 
 struct OutputRecord {
-    stream: String,
+    stream: JobStream,
     time: DateTime<Utc>,
     msg: String,
 }
 
 impl OutputRecord {
-    fn new(stream: &str, msg: &str) -> OutputRecord {
-        OutputRecord {
-            stream: stream.to_string(),
-            time: Utc::now(),
-            msg: msg.to_string(),
-        }
+    fn new(stream: JobStream, msg: &str) -> OutputRecord {
+        OutputRecord { stream, time: Utc::now(), msg: msg.to_string() }
     }
 }
 
@@ -154,13 +151,13 @@ async fn append_job_worker(
             events.push(match ae {
                 AppendJobEntry::JobEvent(rec) => WorkerAppendJobOrTask {
                     task: None,
-                    stream: rec.stream,
+                    stream: rec.stream.to_string(),
                     payload: rec.msg,
                     time: rec.time,
                 },
                 AppendJobEntry::TaskEvent(task, rec) => WorkerAppendJobOrTask {
                     task: Some(task),
-                    stream: rec.stream,
+                    stream: rec.stream.to_string(),
                     payload: rec.msg,
                     time: rec.time,
                 },
@@ -242,7 +239,7 @@ async fn append_worker_worker(
 
             events.push(match ae {
                 AppendWorkerEntry::WorkerEvent(rec) => WorkerAppend {
-                    stream: rec.stream,
+                    stream: rec.stream.to_string(),
                     payload: rec.msg,
                     time: rec.time,
                 },
@@ -305,8 +302,11 @@ impl ClientWrap {
     }
 
     async fn append_worker_msg(&self, name: &str, msg: &str) {
-        self.append_worker(OutputRecord::new(&format!("diag.{name}"), msg))
-            .await
+        self.append_worker(OutputRecord::new(
+            JobStream::Diag { name: name.into() },
+            msg,
+        ))
+        .await
     }
 
     async fn append_worker(&self, rec: OutputRecord) {
@@ -331,7 +331,7 @@ impl ClientWrap {
     }
 
     async fn append_msg(&self, msg: &str) {
-        self.append(OutputRecord::new("worker", msg)).await;
+        self.append(OutputRecord::new(JobStream::Worker, msg)).await;
     }
 
     async fn append_task(&self, task: &WorkerPingTask, rec: OutputRecord) {
@@ -344,7 +344,7 @@ impl ClientWrap {
     }
 
     async fn append_task_msg(&self, task: &WorkerPingTask, msg: &str) {
-        self.append_task(task, OutputRecord::new("task", msg)).await;
+        self.append_task(task, OutputRecord::new(JobStream::Task, msg)).await;
     }
 
     async fn flush_job_barrier(&self) {
@@ -656,7 +656,7 @@ impl ClientWrap {
         cmd.uid(0);
         cmd.gid(0);
 
-        match exec::run_diagnostic(cmd, name) {
+        match exec::run(cmd, ActivityBuilder::Diag(name.into())) {
             Ok(c) => Ok(c),
             Err(e) => {
                 /*
@@ -666,7 +666,7 @@ impl ClientWrap {
                 self.client
                     .worker_append()
                     .body(vec![WorkerAppend {
-                        stream: "agent".into(),
+                        stream: JobStream::Agent.to_string(),
                         time: Utc::now(),
                         payload: format!("ERROR: diag.{name} exec: {e:?}"),
                     }])
@@ -1633,7 +1633,7 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                 cmd.uid(t.uid);
                 cmd.gid(t.gid);
 
-                match exec::run(cmd) {
+                match exec::run(cmd, ActivityBuilder::Task) {
                     Ok(c) => {
                         stage = Stage::Child(c, t, None);
                     }
@@ -1649,7 +1649,7 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                             .job(cw.job_id().unwrap())
                             .body(vec![WorkerAppendJobOrTask {
                                 task: None,
-                                stream: "agent".into(),
+                                stream: JobStream::Agent.to_string(),
                                 time: Utc::now(),
                                 payload: format!("ERROR: exec: {:?}", e),
                             }])

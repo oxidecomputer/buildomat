@@ -456,74 +456,43 @@ pub(crate) async fn run(
                     p.event_minseq = ev.seq + 1;
                 }
 
-                let stdio = ev.stream == "stdout" || ev.stream == "stderr";
-                let console = ev.stream == "console";
-                let panic = ev.stream == "panic";
-                let worker = ev.stream == "worker";
-                let bgproc = ev.stream.starts_with("bg.");
-
-                if stdio || console || panic {
-                    /*
-                     * Some commands, like "cargo build --verbose", generate
-                     * exceptionally long output lines, running into the
-                     * thousands of characters.  The long lines present two
-                     * challenges: they are not readily visible without
-                     * horizontal scrolling in the GitHub UI; the maximum status
-                     * message length GitHub will accept is 64KB, and even a
-                     * small number of long lines means our status update will
-                     * not be accepted.
-                     *
-                     * If a line is longer than 90 characters, truncate it.
-                     * Users will still be able to see the full output in our
-                     * detailed view where we get to render the whole page.
-                     */
-                    let mut line = if console {
-                        "|C| "
-                    } else if panic {
-                        "|!|"
-                    } else {
-                        "| "
+                match JobStream::from_str(&ev.stream) {
+                    JobStream::Stderr | JobStream::Stdout => {
+                        let l = format!("| {}", truncate_line(&ev.payload));
+                        p.events_tail.push_back((None, l));
                     }
-                    .to_string();
-
-                    /*
-                     * We support ANSI escapes in the log renderer, which means
-                     * that tools will generate ANSI sequences.  That doesn't
-                     * work in the GitHub renderer, so we need to strip them out
-                     * entirely.
-                     */
-                    let payload = strip_ansi_escapes::strip_str(&ev.payload);
-                    let mut chars = payload.chars();
-
-                    for _ in 0..MAX_LINE_LENGTH {
-                        if let Some(c) = chars.next() {
-                            line.push(c);
-                        } else {
-                            break;
-                        }
+                    JobStream::Console => {
+                        let l = format!("|C| {}", truncate_line(&ev.payload));
+                        p.events_tail.push_back((None, l));
                     }
-                    if chars.next().is_some() {
+                    JobStream::Panic => {
+                        let l = format!("|!| {}", truncate_line(&ev.payload));
+                        p.events_tail.push_back((None, l));
+                    }
+                    JobStream::Worker => {
                         /*
-                         * If any characters remain, the string was truncated.
+                         * A job may produce a large number of files.  We must
+                         * not treat worker output (which is mostly about file
+                         * uploads) as headers.  They must be regular records
+                         * that are discarded as they scroll off the top.
                          */
-                        line.push_str(" [...]");
+                        let line = format!("|W| {}", ev.payload);
+                        p.events_tail.push_back((None, line));
                     }
-
-                    p.events_tail.push_back((None, line));
-                } else if worker {
-                    /*
-                     * A job may produce a large number of files.  We must not
-                     * treat worker output (which is mostly about file uploads
-                     * and so on) as headers.  They must be regular records that
-                     * are discarded as they scroll off the top.
-                     */
-                    let line = format!("|W| {}", ev.payload);
-                    p.events_tail.push_back((None, line));
-                } else if !bgproc {
-                    p.events_tail.push_back((
-                        Some(format!("{}/{:?}", ev.stream, ev.task)),
-                        format!("{}: {}", ev.stream, ev.payload),
-                    ));
+                    JobStream::Agent
+                    | JobStream::Control
+                    | JobStream::Diag { .. }
+                    | JobStream::Error
+                    | JobStream::Task
+                    | JobStream::Unknown(_) => {
+                        p.events_tail.push_back((
+                            Some(format!("{}/{:?}", ev.stream, ev.task)),
+                            format!("{}: {}", ev.stream, ev.payload),
+                        ));
+                    }
+                    JobStream::Bg { .. }
+                    | JobStream::BgStderr { .. }
+                    | JobStream::BgStdout { .. } => {}
                 }
             }
 
@@ -835,6 +804,44 @@ pub(crate) async fn run(
     cr.set_private(p)?;
     db.update_check_run(cr)?;
     Ok(true)
+}
+
+/*
+ * Some commands, like "cargo build --verbose", generate exceptionally long
+ * output lines, running into the thousands of characters.  The long lines
+ * present two challenges: they are not readily visible without horizontal
+ * scrolling in the GitHub UI; the maximum status message length GitHub will
+ * accept is 64KB, and even a small number of long lines means our status
+ * update will not be accepted.
+ *
+ * If a line is longer than 90 characters, truncate it. Users will still be
+ * able to see the full output in our detailed view where we get to render the
+ * whole page.
+ */
+fn truncate_line(payload: &str) -> String {
+    /*
+     * We support ANSI escapes in the log renderer, which means that tools will
+     * generate ANSI sequences.  That doesn't work in the GitHub renderer, so
+     * we need to strip them out entirely.
+     */
+    let payload = strip_ansi_escapes::strip_str(payload);
+    let mut chars = payload.chars();
+
+    let mut line = String::new();
+    for _ in 0..MAX_LINE_LENGTH {
+        if let Some(c) = chars.next() {
+            line.push(c);
+        } else {
+            break;
+        }
+    }
+    if chars.next().is_some() {
+        /*
+         * If any characters remain, the string was truncated.
+         */
+        line.push_str(" [...]");
+    }
+    line
 }
 
 async fn bunyan_to_html(

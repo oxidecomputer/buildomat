@@ -5,25 +5,19 @@
 use std::borrow::Cow;
 
 use buildomat_client::types::JobEvent;
+use buildomat_common::JobStream;
 use chrono::SecondsFormat;
 use serde::Serialize;
 
 pub mod jobfile;
 pub mod variety;
 
-/*
- * Classes for these streams are defined in the "variety/basic/www/style.css",
- * which we send along with the generated HTML output.
- */
-const CSS_STREAM_CLASSES: &[&str] =
-    &["stdout", "stderr", "task", "worker", "control", "console", "panic"];
-
 pub trait JobEventEx {
     /**
      * Choose a colour (CSS class name) for the stream to which this event
      * belongs.
      */
-    fn css_class(&self) -> String;
+    fn css_class(&self) -> &'static str;
 
     /**
      * Turn a job event into a somewhat abstract object with pre-formatted HTML
@@ -34,15 +28,22 @@ pub trait JobEventEx {
 }
 
 impl JobEventEx for JobEvent {
-    fn css_class(&self) -> String {
-        let s = self.stream.as_str();
-
-        if CSS_STREAM_CLASSES.contains(&s) {
-            format!("s_{s}")
-        } else if s.starts_with("bg.") {
-            "s_bgtask".into()
-        } else {
-            "s_default".into()
+    fn css_class(&self) -> &'static str {
+        match JobStream::from_str(&self.stream) {
+            JobStream::Console => "s_console",
+            JobStream::Control => "s_control",
+            JobStream::Panic => "s_panic",
+            JobStream::Stderr => "s_stderr",
+            JobStream::Stdout => "s_stdout",
+            JobStream::Task => "s_task",
+            JobStream::Worker => "s_worker",
+            JobStream::Bg { .. }
+            | JobStream::BgStderr { .. }
+            | JobStream::BgStdout { .. } => "s_bgtask",
+            JobStream::Agent
+            | JobStream::Error
+            | JobStream::Diag { .. }
+            | JobStream::Unknown(_) => "s_default",
         }
     }
 
@@ -137,7 +138,7 @@ fn encode_payload(payload: &str) -> Cow<'_, str> {
 #[derive(Debug, Serialize)]
 pub struct EventRow {
     task: Option<u32>,
-    css_class: String,
+    css_class: &'static str,
     fields: Vec<EventField>,
 }
 
