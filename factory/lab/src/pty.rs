@@ -18,8 +18,8 @@ impl Pty {
                 &mut m,
                 &mut s,
                 ptr::null_mut(),
-                ptr::null(),
-                ptr::null(),
+                ptr::null_mut(),
+                ptr::null_mut(),
             )
         };
         if r != 0 {
