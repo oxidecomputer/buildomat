@@ -35,7 +35,7 @@ pub fn app_client(jwt: JWTCredentials) -> Result<Client> {
 }
 
 pub fn install_client(jwt: JWTCredentials, install_id: i64) -> Result<Client> {
-    let iat = InstallationTokenGenerator::new(install_id.try_into()?, jwt);
+    let iat = InstallationTokenGenerator::new(install_id, jwt);
 
     let mut client = Client::custom(
         USER_AGENT,
