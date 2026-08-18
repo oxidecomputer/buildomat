@@ -94,7 +94,7 @@ impl App {
         extra_repos: Option<&Vec<i64>>,
     ) -> Result<String> {
         use buildomat_github_client::types::{
-            AppPermissions, AppsCreateInstallationAccessTokenRequest, Pages,
+            AppPermissions, AppsCreateInstallationAccessTokenRequest,
         };
 
         let gh = self.install_client(install_id);
@@ -108,15 +108,13 @@ impl App {
             }
         }
 
-        let permissions = Some(AppPermissions {
-            contents: Some(Pages::Read),
-            ..Default::default()
-        });
+        let permissions: AppPermissions =
+            serde_json::from_value(serde_json::json!({ "contents": "read" }))?;
 
         let body = AppsCreateInstallationAccessTokenRequest {
-            permissions,
+            permissions: Some(permissions),
+            repositories: Vec::new(),
             repository_ids: ids,
-            ..Default::default()
         };
 
         let t = gh
@@ -124,7 +122,7 @@ impl App {
             .create_installation_access_token(install_id, &body)
             .await?;
 
-        Ok(t.token)
+        Ok(t.body.token)
     }
 
     async fn load_file(
@@ -141,6 +139,7 @@ impl App {
 
         match f {
             Ok(f) => {
+                let f = f.body;
                 if f.encoding != "base64" {
                     bail!("encoding {} is not base64", f.encoding);
                 }
@@ -191,7 +190,7 @@ impl App {
             )
             .await
         {
-            Ok(entries) => entries,
+            Ok(entries) => entries.body,
             Err(e) => {
                 if e.to_string().contains("404 Not Found") {
                     /*
@@ -257,10 +256,10 @@ impl App {
             .repos()
             .list_commits(&repo.owner, &repo.name, "", "", "", None, None, 1, 0)
             .await?;
-        if commits.len() != 1 {
+        if commits.body.len() != 1 {
             bail!("could not get head of default branch");
         }
-        let sha = commits[0].sha.to_string();
+        let sha = commits.body[0].sha.to_string();
 
         /*
          * Load the top-level configuration file from the default branch of the
@@ -559,7 +558,8 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                         100,
                         0,
                     )
-                    .await?;
+                    .await?
+                    .body;
 
                 if suites.check_suites.len() > 1 {
                     warn!(
@@ -599,7 +599,8 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                                 head_sha: pr.head.sha.to_string(),
                             },
                         )
-                        .await?;
+                        .await?
+                        .body;
 
                     info!(
                         log,
@@ -1063,7 +1064,8 @@ async fn reconcile_check_runs(app: &Arc<App>, cs: &CheckSuite) -> Result<()> {
             100,
             0,
         )
-        .await?;
+        .await?
+        .body;
 
     if runs.total_count >= 100 {
         warn!(
@@ -1160,9 +1162,15 @@ async fn reconcile_check_runs(app: &Arc<App>, cs: &CheckSuite) -> Result<()> {
 
         info!(log, "cancelling GitHub check run {}", id);
         let body = ChecksUpdateRequest {
+            actions: Vec::new(),
+            completed_at: None,
             conclusion: Some(Cancelled),
+            details_url: String::new(),
+            external_id: String::new(),
+            name: String::new(),
+            output: None,
+            started_at: None,
             status: Some(Completed),
-            ..Default::default()
         };
         let res = gh.checks().update(&repo.owner, &repo.name, id, &body).await;
         if let Err(e) = res {
@@ -1384,21 +1392,23 @@ async fn flush_check_runs(
              * This check run exists on GitHub already, so update it.
              */
             let output = Some(ChecksUpdateRequestOutput {
+                annotations: Vec::new(),
+                images: Vec::new(),
                 summary: out.summary,
                 text: out.detail,
                 title: out.title,
-                ..Default::default()
             });
 
             let body = ChecksUpdateRequest {
                 conclusion,
                 details_url,
+                external_id: String::new(),
+                name: String::new(),
                 output,
                 status,
                 actions: out.actions,
                 started_at: out.started_at,
                 completed_at: out.completed_at,
-                ..Default::default()
             };
 
             gh.checks()
@@ -1417,10 +1427,11 @@ async fn flush_check_runs(
             info!(log, "check suite {} run {} updated", cs.id, cr.id);
         } else {
             let output = Some(ChecksCreateRequestOutput {
+                annotations: Vec::new(),
+                images: Vec::new(),
                 summary: out.summary,
                 text: out.detail,
                 title: out.title,
-                ..Default::default()
             });
 
             let body = ChecksCreateRequest {
@@ -1452,10 +1463,13 @@ async fn flush_check_runs(
 
             info!(
                 log,
-                "check suite {} run {} created as {}", cs.id, cr.id, res.id
+                "check suite {} run {} created as {}",
+                cs.id,
+                cr.id,
+                res.body.id
             );
 
-            cr.github_id = Some(res.id);
+            cr.github_id = Some(res.body.id);
         }
 
         cr.flushed = true;
@@ -2024,7 +2038,7 @@ async fn main() -> Result<()> {
     let config = config::load_config("etc/app.toml")?;
 
     let jwt = buildomat_github_client::JWTCredentials::new(
-        config.id,
+        config.id.try_into()?,
         key.contents().to_vec(),
     )?;
 
@@ -2049,14 +2063,14 @@ async fn main() -> Result<()> {
      */
     let c = app0.app_client();
     let ghapp = c.apps().get_authenticated().await?;
-    println!("app slug: {}", ghapp.slug);
+    println!("app slug: {}", ghapp.body.slug);
 
     /*
      * XXX Move this to a background task that periodically sweeps to ensure we
      * detect new installations even if we miss the webhook delivery.
      */
     let insts = c.apps().list_all_installations(None, "").await?;
-    for i in insts.iter() {
+    for i in &insts.body {
         println!(
             "  installation: {} [{}] ({}/{})",
             i.id, i.account.simple_user.login, i.app_id, i.app_slug,

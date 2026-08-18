@@ -74,14 +74,15 @@ ipnet = "2.8"
 jmclib = { git = "https://github.com/jclulow/rust-jmclib", features = ["sqlite"] }
 libc = "0.2.113"
 new_mime_guess = "4"
-octorust = { git = "https://github.com/oxidecomputer/third-party-api-clients", branch = "jclulow" }
+octorust = { git = "https://github.com/oxidecomputer/third-party-api-clients", tag = "v0.11.0-rc.0", default-features = false, features = [ "native-tls" ] }
 pem = "3"
+parse_link_header = "0.3"
 percent-encoding = "2.1"
-progenitor = { version = "0.11" }
-progenitor-client = { version = "0.11" }
+progenitor = { version = "0.14" }
+progenitor-client = { version = "0.14" }
 rand = "0.10"
 regex = "1"
-reqwest = { version = "0.12", features = [ "json", "stream" ] }
+reqwest = { version = "0.13", default-features = false, features = [ "charset", "http2", "json", "native-tls", "stream", "system-proxy" ] }
 rust-toolchain-file = "0.1"
 rusty_ulid = { git = "https://github.com/huxi/rusty_ulid", version = "2" }
 schemars = { version = "0.8", features = [ "chrono" ] }

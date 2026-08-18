@@ -21,6 +21,7 @@ chrono = { workspace = true }
 hiercmd = { workspace = true }
 hyper = { workspace = true }
 pem = { workspace = true }
+parse_link_header = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

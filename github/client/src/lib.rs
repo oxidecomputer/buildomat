@@ -14,7 +14,13 @@ pub use octorust::types;
 pub use octorust::Client;
 
 fn mk_reqwest_client() -> Result<reqwest::Client> {
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        "X-GitHub-Api-Version",
+        reqwest::header::HeaderValue::from_static("2022-11-28"),
+    );
     Ok(reqwest::ClientBuilder::new()
+        .default_headers(headers)
         .timeout(Duration::from_secs(45))
         .tcp_keepalive(Duration::from_secs(45))
         .connect_timeout(Duration::from_secs(30))
@@ -22,21 +28,20 @@ fn mk_reqwest_client() -> Result<reqwest::Client> {
 }
 
 pub fn app_client(jwt: JWTCredentials) -> Result<Client> {
-    Ok(Client::custom(
-        GITHUB_API_URL,
-        USER_AGENT,
-        Credentials::JWT(jwt),
-        mk_reqwest_client()?,
-    ))
+    let mut client =
+        Client::custom(USER_AGENT, Credentials::JWT(jwt), mk_reqwest_client()?);
+    client.with_host_override(GITHUB_API_URL);
+    Ok(client)
 }
 
 pub fn install_client(jwt: JWTCredentials, install_id: i64) -> Result<Client> {
     let iat = InstallationTokenGenerator::new(install_id.try_into()?, jwt);
 
-    Ok(Client::custom(
-        GITHUB_API_URL,
+    let mut client = Client::custom(
         USER_AGENT,
         Credentials::InstallationToken(iat),
         mk_reqwest_client()?,
-    ))
+    );
+    client.with_host_override(GITHUB_API_URL);
+    Ok(client)
 }
