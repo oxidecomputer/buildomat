@@ -74,17 +74,17 @@ async fn do_webhooks(mut l: Level<Stuff>) -> Result<()> {
             }
         }
 
-        let response = c
+        let res = c
             .apps()
             .list_webhook_deliveries(perpage, cursor.as_deref().unwrap_or(""))
             .await?;
-        let link = response
+        let link = res
             .headers
             .get("link")
             .and_then(|value| value.to_str().ok())
             .and_then(|value| parse_link_header::parse(value).ok());
 
-        for del in response.body {
+        for del in res.body {
             if let Some(count) = count {
                 if seen >= count {
                     return Ok(());

@@ -139,12 +139,11 @@ impl App {
 
         match f {
             Ok(f) => {
-                let f = f.body;
-                if f.encoding != "base64" {
-                    bail!("encoding {} is not base64", f.encoding);
+                if f.body.encoding != "base64" {
+                    bail!("encoding {} is not base64", f.body.encoding);
                 }
 
-                let encoded = f.content.trim().replace('\n', "");
+                let encoded = f.body.content.trim().replace('\n', "");
                 let ctx = || anyhow!("content: {:?}", &encoded);
                 Ok(Some(
                     String::from_utf8(
