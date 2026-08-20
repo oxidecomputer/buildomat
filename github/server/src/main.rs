@@ -94,7 +94,7 @@ impl App {
         extra_repos: Option<&Vec<i64>>,
     ) -> Result<String> {
         use buildomat_github_client::types::{
-            AppPermissions, AppsCreateInstallationAccessTokenRequest,
+            AppPermissions, AppsCreateInstallationAccessTokenRequest, Pages,
         };
 
         let gh = self.install_client(install_id);
@@ -108,13 +108,13 @@ impl App {
             }
         }
 
-        let permissions: AppPermissions =
-            serde_json::from_value(serde_json::json!({ "contents": "read" }))?;
-
         let body = AppsCreateInstallationAccessTokenRequest {
-            permissions: Some(permissions),
-            repositories: Vec::new(),
+            permissions: Some(AppPermissions {
+                contents: Some(Pages::Read),
+                ..Default::default()
+            }),
             repository_ids: ids,
+            ..Default::default()
         };
 
         let t = gh
@@ -1161,15 +1161,9 @@ async fn reconcile_check_runs(app: &Arc<App>, cs: &CheckSuite) -> Result<()> {
 
         info!(log, "cancelling GitHub check run {}", id);
         let body = ChecksUpdateRequest {
-            actions: Vec::new(),
-            completed_at: None,
             conclusion: Some(Cancelled),
-            details_url: String::new(),
-            external_id: String::new(),
-            name: String::new(),
-            output: None,
-            started_at: None,
             status: Some(Completed),
+            ..Default::default()
         };
         let res = gh.checks().update(&repo.owner, &repo.name, id, &body).await;
         if let Err(e) = res {
@@ -1391,23 +1385,21 @@ async fn flush_check_runs(
              * This check run exists on GitHub already, so update it.
              */
             let output = Some(ChecksUpdateRequestOutput {
-                annotations: Vec::new(),
-                images: Vec::new(),
                 summary: out.summary,
                 text: out.detail,
                 title: out.title,
+                ..Default::default()
             });
 
             let body = ChecksUpdateRequest {
                 conclusion,
                 details_url,
-                external_id: String::new(),
-                name: String::new(),
                 output,
                 status,
                 actions: out.actions,
                 started_at: out.started_at,
                 completed_at: out.completed_at,
+                ..Default::default()
             };
 
             gh.checks()
@@ -1426,11 +1418,10 @@ async fn flush_check_runs(
             info!(log, "check suite {} run {} updated", cs.id, cr.id);
         } else {
             let output = Some(ChecksCreateRequestOutput {
-                annotations: Vec::new(),
-                images: Vec::new(),
                 summary: out.summary,
                 text: out.detail,
                 title: out.title,
+                ..Default::default()
             });
 
             let body = ChecksCreateRequest {
@@ -1444,6 +1435,7 @@ async fn flush_check_runs(
                 actions: out.actions,
                 started_at: out.started_at,
                 completed_at: out.completed_at,
+                ..Default::default()
             };
 
             let res = gh
