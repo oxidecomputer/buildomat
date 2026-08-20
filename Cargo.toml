@@ -74,7 +74,7 @@ ipnet = "2.8"
 jmclib = { git = "https://github.com/jclulow/rust-jmclib", features = ["sqlite"] }
 libc = "0.2.113"
 new_mime_guess = "4"
-octorust = { git = "https://github.com/oxidecomputer/third-party-api-clients", tag = "v0.11.0-rc.0", default-features = false, features = [ "native-tls" ] }
+octorust = { git = "https://github.com/oxidecomputer/third-party-api-clients", tag = "v0.11.0-rc.1", default-features = false, features = [ "native-tls" ] }
 pem = "3"
 parse_link_header = "0.3"
 percent-encoding = "2.1"

@@ -2958,8 +2958,8 @@ dependencies = [
 
 [[package]]
 name = "octorust"
-version = "0.11.0-rc.0"
-source = "git+https://github.com/oxidecomputer/third-party-api-clients?tag=v0.11.0-rc.0#e6f9b31a32ce1e76618fff63a237243873211f0b"
+version = "0.11.0-rc.1"
+source = "git+https://github.com/oxidecomputer/third-party-api-clients?tag=v0.11.0-rc.1#fe7ca963d0cf740e926f6ab5c7ce7b4685a1568d"
 dependencies = [
  "async-recursion",
  "async-trait",
