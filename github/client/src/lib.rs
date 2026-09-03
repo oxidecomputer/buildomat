@@ -13,14 +13,7 @@ pub use octorust::types;
 pub use octorust::Client;
 
 fn mk_reqwest_client() -> Result<reqwest::Client> {
-    let mut headers = reqwest::header::HeaderMap::new();
-    headers.insert(
-        "X-GitHub-Api-Version",
-        reqwest::header::HeaderValue::from_static("2022-11-28"),
-    );
-
     Ok(reqwest::ClientBuilder::new()
-        .default_headers(headers)
         .timeout(Duration::from_secs(45))
         .tcp_keepalive(Duration::from_secs(45))
         .connect_timeout(Duration::from_secs(30))
