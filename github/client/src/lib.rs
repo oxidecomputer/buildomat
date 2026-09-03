@@ -1,9 +1,8 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 const USER_AGENT: &str = "buildomat-github-integration/0";
-const GITHUB_API_URL: &str = "https://api.github.com";
 
 use std::time::Duration;
 
@@ -22,19 +21,13 @@ fn mk_reqwest_client() -> Result<reqwest::Client> {
 }
 
 pub fn app_client(jwt: JWTCredentials) -> Result<Client> {
-    Ok(Client::custom(
-        GITHUB_API_URL,
-        USER_AGENT,
-        Credentials::JWT(jwt),
-        mk_reqwest_client()?,
-    ))
+    Ok(Client::custom(USER_AGENT, Credentials::JWT(jwt), mk_reqwest_client()?))
 }
 
 pub fn install_client(jwt: JWTCredentials, install_id: i64) -> Result<Client> {
-    let iat = InstallationTokenGenerator::new(install_id.try_into()?, jwt);
+    let iat = InstallationTokenGenerator::new(install_id, jwt);
 
     Ok(Client::custom(
-        GITHUB_API_URL,
         USER_AGENT,
         Credentials::InstallationToken(iat),
         mk_reqwest_client()?,

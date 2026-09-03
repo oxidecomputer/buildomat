@@ -108,13 +108,11 @@ impl App {
             }
         }
 
-        let permissions = Some(AppPermissions {
-            contents: Some(Pages::Read),
-            ..Default::default()
-        });
-
         let body = AppsCreateInstallationAccessTokenRequest {
-            permissions,
+            permissions: Some(AppPermissions {
+                contents: Some(Pages::Read),
+                ..Default::default()
+            }),
             repository_ids: ids,
             ..Default::default()
         };
@@ -124,7 +122,7 @@ impl App {
             .create_installation_access_token(install_id, &body)
             .await?;
 
-        Ok(t.token)
+        Ok(t.body.token)
     }
 
     async fn load_file(
@@ -141,11 +139,11 @@ impl App {
 
         match f {
             Ok(f) => {
-                if f.encoding != "base64" {
-                    bail!("encoding {} is not base64", f.encoding);
+                if f.body.encoding != "base64" {
+                    bail!("encoding {} is not base64", f.body.encoding);
                 }
 
-                let encoded = f.content.trim().replace('\n', "");
+                let encoded = f.body.content.trim().replace('\n', "");
                 let ctx = || anyhow!("content: {:?}", &encoded);
                 Ok(Some(
                     String::from_utf8(
@@ -191,7 +189,7 @@ impl App {
             )
             .await
         {
-            Ok(entries) => entries,
+            Ok(entries) => entries.body,
             Err(e) => {
                 if e.to_string().contains("404 Not Found") {
                     /*
@@ -257,10 +255,10 @@ impl App {
             .repos()
             .list_commits(&repo.owner, &repo.name, "", "", "", None, None, 1, 0)
             .await?;
-        if commits.len() != 1 {
+        if commits.body.len() != 1 {
             bail!("could not get head of default branch");
         }
-        let sha = commits[0].sha.to_string();
+        let sha = commits.body[0].sha.to_string();
 
         /*
          * Load the top-level configuration file from the default branch of the
@@ -559,7 +557,8 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                         100,
                         0,
                     )
-                    .await?;
+                    .await?
+                    .body;
 
                 if suites.check_suites.len() > 1 {
                     warn!(
@@ -599,7 +598,8 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                                 head_sha: pr.head.sha.to_string(),
                             },
                         )
-                        .await?;
+                        .await?
+                        .body;
 
                     info!(
                         log,
@@ -1063,7 +1063,8 @@ async fn reconcile_check_runs(app: &Arc<App>, cs: &CheckSuite) -> Result<()> {
             100,
             0,
         )
-        .await?;
+        .await?
+        .body;
 
     if runs.total_count >= 100 {
         warn!(
@@ -1452,10 +1453,13 @@ async fn flush_check_runs(
 
             info!(
                 log,
-                "check suite {} run {} created as {}", cs.id, cr.id, res.id
+                "check suite {} run {} created as {}",
+                cs.id,
+                cr.id,
+                res.body.id
             );
 
-            cr.github_id = Some(res.id);
+            cr.github_id = Some(res.body.id);
         }
 
         cr.flushed = true;
@@ -2024,7 +2028,7 @@ async fn main() -> Result<()> {
     let config = config::load_config("etc/app.toml")?;
 
     let jwt = buildomat_github_client::JWTCredentials::new(
-        config.id,
+        config.id.try_into()?,
         key.contents().to_vec(),
     )?;
 
@@ -2049,14 +2053,14 @@ async fn main() -> Result<()> {
      */
     let c = app0.app_client();
     let ghapp = c.apps().get_authenticated().await?;
-    println!("app slug: {}", ghapp.slug);
+    println!("app slug: {}", ghapp.body.slug);
 
     /*
      * XXX Move this to a background task that periodically sweeps to ensure we
      * detect new installations even if we miss the webhook delivery.
      */
     let insts = c.apps().list_all_installations(None, "").await?;
-    for i in insts.iter() {
+    for i in &insts.body {
         println!(
             "  installation: {} [{}] ({}/{})",
             i.id, i.account.simple_user.login, i.app_id, i.app_slug,

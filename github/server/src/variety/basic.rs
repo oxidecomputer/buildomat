@@ -682,8 +682,8 @@ pub(crate) async fn run(
                 let msg = if let Some((owner, name)) = dep.split_once('/') {
                     match gh.repos().get(owner, name).await {
                         Ok(fr) => {
-                            if !p.extra_repo_ids.contains(&fr.id) {
-                                p.extra_repo_ids.push(fr.id);
+                            if !p.extra_repo_ids.contains(&fr.body.id) {
+                                p.extra_repo_ids.push(fr.body.id);
                             }
                             continue;
                         }
