@@ -1,12 +1,12 @@
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use buildomat_common::*;
 use serde::Deserialize;
 
@@ -35,9 +35,12 @@ pub struct Config {
 
 pub fn load_bytes<P: AsRef<Path>>(p: P) -> Result<Vec<u8>> {
     let p = p.as_ref();
-    let mut f = OpenOptions::new().read(true).open(p)?;
+    let mut f = OpenOptions::new()
+        .read(true)
+        .open(p)
+        .map_err(|e| anyhow!("opening {p:?}: {e}"))?;
     let mut d = Vec::new();
-    f.read_to_end(&mut d)?;
+    f.read_to_end(&mut d).map_err(|e| anyhow!("reading {p:?}: {e}"))?;
     Ok(d)
 }
 

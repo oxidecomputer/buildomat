@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 use std::io::{IsTerminal, Read};
@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use chrono::prelude::*;
 use rand::distr::Alphanumeric;
 use rand::{rng, RngExt as _};
@@ -20,10 +20,12 @@ pub fn read_toml<P: AsRef<Path>, T>(n: P) -> Result<T>
 where
     for<'de> T: Deserialize<'de>,
 {
-    let mut f = std::fs::File::open(n.as_ref())?;
+    let n = n.as_ref();
+    let mut f =
+        std::fs::File::open(n).map_err(|e| anyhow!("opening {n:?}: {e}"))?;
     let mut buf = String::new();
-    f.read_to_string(&mut buf)?;
-    Ok(toml::from_str(&buf)?)
+    f.read_to_string(&mut buf).map_err(|e| anyhow!("reading {n:?}: {e}"))?;
+    Ok(toml::from_str(&buf).map_err(|e| anyhow!("parsing {n:?}: {e}"))?)
 }
 
 pub fn make_log(name: &'static str) -> Logger {

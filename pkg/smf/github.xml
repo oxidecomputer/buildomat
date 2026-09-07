@@ -9,7 +9,7 @@
   </dependency>
 
   <exec_method name='start' type='method' exec='/opt/buildomat/lib/buildomat-github-server -d %{config/confdir} -D %{config/datadir} -b %{config/address}:%{config/port} &amp;' timeout_seconds='10'>
-    <method_context working_directory='/data/buildomat/github'>
+    <method_context>
       <method_credential user='buildomat' group='buildomat'/>
       <method_environment>
         <envvar name='UMEM_OPTIONS' value='backend=mmap'/>
