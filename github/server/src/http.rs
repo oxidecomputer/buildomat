@@ -81,7 +81,7 @@ fn html_500(
         .into_bytes();
 
     let res = hyper::Response::builder()
-        .status(hyper::StatusCode::NOT_FOUND)
+        .status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
         .header(hyper::header::CONTENT_TYPE, "text/html; charset=utf-8")
         .header(hyper::header::CONTENT_LENGTH, body.len());
 
