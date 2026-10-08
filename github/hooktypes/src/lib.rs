@@ -9,7 +9,7 @@ use serde::Deserialize;
 pub struct Payload {
     #[serde(default)]
     pub action: String,
-    pub sender: User,
+    pub sender: Option<User>,
     pub repository: Option<Repository>,
     pub installation: Option<Installation>,
     pub check_suite: Option<CheckSuite>,
@@ -115,11 +115,11 @@ pub struct PullRequest {
 
 #[derive(Deserialize, Debug)]
 pub struct PullRequestCommit {
-    pub label: String,
+    pub label: Option<String>,
     #[serde(rename = "ref")]
     pub ref_: String,
     pub sha: String,
-    pub user: User,
+    pub user: Option<User>,
     pub repo: Option<Repository>,
 }
 
