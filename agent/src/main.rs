@@ -57,6 +57,7 @@ mod os_constants {
 mod os_constants {
     pub const UNIT: &str = "/etc/systemd/system/buildomat-agent.service";
 }
+#[cfg(any(target_os = "illumos", target_os = "linux"))]
 use os_constants::*;
 
 use crate::control::protocol::StoreEntry;
@@ -857,6 +858,11 @@ fn set_nodename(name: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(not(any(target_os = "illumos", target_os = "linux")))]
+fn set_nodename(_name: &str) -> Result<()> {
+    bail!("setting the nodename is not supported on this operating system")
 }
 
 fn zfs_exists(dataset: &str) -> Result<bool> {
