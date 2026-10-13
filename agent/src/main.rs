@@ -505,7 +505,7 @@ impl ClientWrap {
                 .client
                 .worker_job_add_output()
                 .job(self.job_id().unwrap())
-                .body(&wao)
+                .body(wao.clone())
                 .send()
                 .await
             {

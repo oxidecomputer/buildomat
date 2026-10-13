@@ -74,12 +74,17 @@ async fn do_webhooks(mut l: Level<Stuff>) -> Result<()> {
             }
         }
 
-        let (recentdels, link) = c
+        let res = c
             .apps()
             .list_webhook_deliveries(perpage, cursor.as_deref().unwrap_or(""))
             .await?;
+        let link = res
+            .headers
+            .get("link")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| parse_link_header::parse(value).ok());
 
-        for del in recentdels {
+        for del in res.body {
             if let Some(count) = count {
                 if seen >= count {
                     return Ok(());
@@ -161,14 +166,14 @@ async fn do_repos(mut l: Level<Stuff>) -> Result<()> {
     loop {
         let res = c.apps().list_repos_accessible_to_installation(0, p).await?;
 
-        if res.repositories.is_empty() {
+        if res.body.repositories.is_empty() {
             break;
         }
         p += 1;
 
         if b {
             println!("page {}", p);
-            for r in res.repositories {
+            for r in res.body.repositories {
                 let o = r.owner.unwrap();
                 println!("{:>16} {}/{}", r.id, o.login, r.name);
             }
@@ -355,10 +360,11 @@ async fn main() -> Result<()> {
         pem::parse(&key).map_err(|e| anyhow!("parse privkey: {:?}", e))?;
     let config = config::load_config("etc/app.toml")?;
 
-    s.context_mut().app_id = config.id as i64;
+    let app_id = config.id.try_into()?;
+    s.context_mut().app_id = app_id;
 
     s.context_mut().jwt = Some(buildomat_github_client::JWTCredentials::new(
-        config.id,
+        app_id,
         key.contents().to_vec(),
     )?);
 

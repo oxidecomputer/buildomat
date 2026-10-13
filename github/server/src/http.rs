@@ -1039,7 +1039,7 @@ async fn branch_to_commit(
         }
     };
 
-    let body = format!("{}\n", branch.commit.sha);
+    let body = format!("{}\n", branch.body.commit.sha);
 
     Ok(hyper::Response::builder()
         .status(hyper::StatusCode::OK)
