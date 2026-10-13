@@ -11,13 +11,14 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use anyhow::{anyhow, bail, Result};
+use buildomat_common::JobStream;
 use chrono::prelude::*;
 
 use super::OutputRecord;
 
 fn spawn_reader<T>(
     tx: Sender<Activity>,
-    name: String,
+    name: JobStream,
     stream: Option<T>,
 ) -> Option<std::thread::JoinHandle<()>>
 where
@@ -47,7 +48,10 @@ where
                     let s = String::from_utf8_lossy(&buf);
 
                     if tx
-                        .blocking_send(Activity::msg(&name, s.trim_end()))
+                        .blocking_send(Activity::msg(
+                            name.clone(),
+                            s.trim_end(),
+                        ))
                         .is_err()
                     {
                         /*
@@ -63,7 +67,7 @@ where
                      * server, but don't panic if we cannot.
                      */
                     tx.blocking_send(Activity::msg(
-                        "error",
+                        JobStream::Error,
                         &format!("failed to read {name}: {e:?}"),
                     ))
                     .ok();
@@ -76,7 +80,7 @@ where
 
 #[derive(Debug)]
 pub struct ExitDetails {
-    stream: String,
+    stream: JobStream,
     duration_ms: u64,
     when: DateTime<Utc>,
     code: i32,
@@ -85,7 +89,7 @@ pub struct ExitDetails {
 impl ExitDetails {
     pub(crate) fn to_record(&self) -> OutputRecord {
         OutputRecord {
-            stream: self.stream.to_string(),
+            stream: self.stream.clone(),
             msg: format!(
                 "process exited: duration {} ms, exit code {}",
                 self.duration_ms, self.code
@@ -101,7 +105,7 @@ impl ExitDetails {
 
 #[derive(Clone, Debug)]
 pub struct OutputDetails {
-    stream: String,
+    stream: JobStream,
     msg: String,
     time: DateTime<Utc>,
 }
@@ -109,7 +113,7 @@ pub struct OutputDetails {
 impl OutputDetails {
     pub(crate) fn to_record(&self) -> OutputRecord {
         OutputRecord {
-            stream: self.stream.to_string(),
+            stream: self.stream.clone(),
             msg: self.msg.to_string(),
             time: self.time,
         }
@@ -123,51 +127,76 @@ pub enum Activity {
     Complete,
 }
 
-struct ActivityBuilder {
-    error_stream: String,
-    exit_stream: String,
-    bgproc: Option<String>,
+#[derive(Clone)]
+pub enum ActivityBuilder {
+    Task,
+    Diag(String),
+    Bg(String),
 }
 
 impl ActivityBuilder {
-    fn exit(&self, start: &Instant, end: &Instant, code: i32) -> Activity {
-        Activity::Exit(ExitDetails {
-            stream: self.exit_stream.to_string(),
-            duration_ms: end.duration_since(*start).as_millis() as u64,
-            when: Utc::now(),
-            code,
-        })
-    }
-
-    fn stdout_stream(&self) -> String {
-        if let Some(n) = &self.bgproc {
-            format!("bg.{n}.stdout")
-        } else {
-            "stdout".to_string()
+    fn stdout_stream(&self) -> JobStream {
+        match self.clone() {
+            ActivityBuilder::Task => JobStream::Stdout,
+            ActivityBuilder::Diag(_) => JobStream::Stdout,
+            ActivityBuilder::Bg(name) => JobStream::BgStdout { name },
         }
     }
 
-    fn stderr_stream(&self) -> String {
-        if let Some(n) = &self.bgproc {
-            format!("bg.{n}.stderr")
-        } else {
-            "stderr".to_string()
+    fn stderr_stream(&self) -> JobStream {
+        match self.clone() {
+            ActivityBuilder::Task => JobStream::Stderr,
+            ActivityBuilder::Diag(_) => JobStream::Stderr,
+            ActivityBuilder::Bg(name) => JobStream::BgStderr { name },
         }
+    }
+
+    fn exit_stream(&self) -> JobStream {
+        match self.clone() {
+            ActivityBuilder::Task => JobStream::Task,
+            ActivityBuilder::Diag(name) => JobStream::Diag { name },
+            ActivityBuilder::Bg(name) => JobStream::Bg { name },
+        }
+    }
+
+    fn error_stream(&self) -> JobStream {
+        match self.clone() {
+            ActivityBuilder::Task => JobStream::Worker,
+            ActivityBuilder::Diag(name) => JobStream::Diag { name },
+            ActivityBuilder::Bg(name) => JobStream::Bg { name },
+        }
+    }
+
+    fn is_bg(&self) -> bool {
+        matches!(self, ActivityBuilder::Bg(_))
     }
 
     fn errmsg(&self, pfx: &str, msg: &str) -> String {
         let mut s = format!("{pfx}: ");
-        if let Some(bg) = &self.bgproc {
-            s += &format!("background process {bg:?}: ");
+        match self {
+            ActivityBuilder::Task => {}
+            ActivityBuilder::Diag(_) => {}
+            ActivityBuilder::Bg(name) => {
+                s += &format!("background process {name:?}: ")
+            }
         }
         s += ": ";
         s += msg;
         s
     }
 
+    fn exit(&self, start: &Instant, end: &Instant, code: i32) -> Activity {
+        Activity::Exit(ExitDetails {
+            stream: self.exit_stream(),
+            duration_ms: end.duration_since(*start).as_millis() as u64,
+            when: Utc::now(),
+            code,
+        })
+    }
+
     fn err(&self, msg: &str) -> Activity {
         Activity::Output(OutputDetails {
-            stream: self.error_stream.to_string(),
+            stream: self.error_stream(),
             msg: self.errmsg("exec error", msg),
             time: Utc::now(),
         })
@@ -175,7 +204,7 @@ impl ActivityBuilder {
 
     fn warn(&self, msg: &str) -> Activity {
         Activity::Output(OutputDetails {
-            stream: self.error_stream.to_string(),
+            stream: self.error_stream(),
             msg: self.errmsg("exec warning", msg),
             time: Utc::now(),
         })
@@ -183,9 +212,9 @@ impl ActivityBuilder {
 }
 
 impl Activity {
-    fn msg(stream: &str, msg: &str) -> Activity {
+    fn msg(stream: JobStream, msg: &str) -> Activity {
         Activity::Output(OutputDetails {
-            stream: stream.to_string(),
+            stream,
             msg: msg.to_string(),
             time: Utc::now(),
         })
@@ -229,39 +258,13 @@ pub fn thread_done(
     }
 }
 
-pub fn run_diagnostic(cmd: Command, name: &str) -> Result<Receiver<Activity>> {
+pub fn run(cmd: Command, ab: ActivityBuilder) -> Result<Receiver<Activity>> {
     let (tx, rx) = channel::<Activity>(100);
-
-    run_common(
-        cmd,
-        ActivityBuilder {
-            error_stream: format!("diag.{name}"),
-            exit_stream: format!("diag.{name}"),
-            bgproc: None,
-        },
-        tx,
-    )?;
-
+    run_inner(cmd, ab, tx)?;
     Ok(rx)
 }
 
-pub fn run(cmd: Command) -> Result<Receiver<Activity>> {
-    let (tx, rx) = channel::<Activity>(100);
-
-    run_common(
-        cmd,
-        ActivityBuilder {
-            error_stream: "worker".to_string(),
-            exit_stream: "task".to_string(),
-            bgproc: None,
-        },
-        tx,
-    )?;
-
-    Ok(rx)
-}
-
-fn run_common(
+fn run_inner(
     mut cmd: Command,
     ab: ActivityBuilder,
     tx: Sender<Activity>,
@@ -289,7 +292,7 @@ fn run_common(
                 )
                 .unwrap();
 
-                if ab.bgproc.is_some() {
+                if ab.is_bg() {
                     /*
                      * No further notifications are required for background
                      * processes.
@@ -313,7 +316,7 @@ fn run_common(
                 let stdio_warning = !thread_done(&mut readout, "stdout", until)
                     | !thread_done(&mut readerr, "stderr", until);
 
-                if ab.bgproc.is_some() {
+                if ab.is_bg() {
                     /*
                      * No further notifications are required for background
                      * processes.
@@ -333,7 +336,7 @@ fn run_common(
             }
         };
 
-        assert!(ab.bgproc.is_none());
+        assert!(!ab.is_bg());
 
         if stdio_warning {
             tx.blocking_send(ab.warn(
@@ -449,13 +452,9 @@ impl BackgroundProcesses {
         c.uid(uid);
         c.gid(gid);
 
-        let pid = run_common(
+        let pid = run_inner(
             c,
-            ActivityBuilder {
-                error_stream: format!("bg.{name}"),
-                exit_stream: format!("bg.{name}"),
-                bgproc: Some(name.to_string()),
-            },
+            ActivityBuilder::Bg(name.to_string()),
             self.tx.clone(),
         )
         .map_err(|e| anyhow!("starting background process {name:?}: {e}"))?;
@@ -522,8 +521,7 @@ impl BackgroundProcesses {
         self.rx.close();
         while let Some(a) = self.rx.recv().await {
             if let Activity::Output(o) = &a {
-                if o.stream.ends_with("stdout") || o.stream.ends_with("stderr")
-                {
+                if o.stream.is_output() {
                     lastwords.push(a);
                 }
             }
