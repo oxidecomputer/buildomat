@@ -438,14 +438,14 @@ dependencies = [
  "aws-smithy-runtime-api",
  "aws-smithy-types",
  "h2 0.3.27",
- "h2 0.4.13",
+ "h2 0.4.16",
  "http 0.2.12",
  "http 1.4.0",
  "http-body 0.4.6",
  "hyper 0.14.32",
- "hyper 1.8.1",
+ "hyper 1.11.0",
  "hyper-rustls 0.24.2",
- "hyper-rustls 0.27.7",
+ "hyper-rustls 0.27.9",
  "hyper-util",
  "pin-project-lite",
  "rustls 0.21.12",
@@ -778,7 +778,7 @@ dependencies = [
  "futures",
  "http-body-util",
  "http-range",
- "hyper 1.8.1",
+ "hyper 1.11.0",
  "reqwest",
  "slog",
  "tokio",
@@ -822,7 +822,7 @@ dependencies = [
  "devinfo",
  "dropshot",
  "getopts",
- "hyper 1.8.1",
+ "hyper 1.11.0",
  "iddqd",
  "libc",
  "rand",
@@ -853,7 +853,7 @@ dependencies = [
  "chrono",
  "dropshot",
  "getopts",
- "hyper 1.8.1",
+ "hyper 1.11.0",
  "libc",
  "rand",
  "schemars 0.8.22",
@@ -950,7 +950,7 @@ dependencies = [
  "buildomat-github-client",
  "chrono",
  "hiercmd",
- "hyper 1.8.1",
+ "hyper 1.11.0",
  "openssl",
  "pem",
  "reqwest",
@@ -992,7 +992,7 @@ dependencies = [
  "hmac-sha256",
  "html-escape",
  "http-body-util",
- "hyper 1.8.1",
+ "hyper 1.11.0",
  "pem",
  "reqwest",
  "rust-toolchain-file",
@@ -1035,7 +1035,7 @@ dependencies = [
  "dropshot",
  "futures",
  "html-escape",
- "hyper 1.8.1",
+ "hyper 1.11.0",
  "reqwest",
  "rust-toolchain-file",
  "rusty_ulid",
@@ -1070,7 +1070,7 @@ dependencies = [
  "futures",
  "getopts",
  "http-range",
- "hyper 1.8.1",
+ "hyper 1.11.0",
  "rusty_ulid",
  "schemars 0.8.22",
  "sea-query",
@@ -1095,7 +1095,7 @@ dependencies = [
  "dropshot",
  "http 1.4.0",
  "http-body-util",
- "hyper 1.8.1",
+ "hyper 1.11.0",
  "slog",
  "tokio",
  "tokio-stream",
@@ -1202,9 +1202,9 @@ dependencies = [
 
 [[package]]
 name = "cmov"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f88a43d011fc4a6876cb7344703e297c71dda42494fee094d5f7c76bf13f746"
+checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
 
 [[package]]
 name = "console"
@@ -1590,7 +1590,7 @@ dependencies = [
  "hostname 0.4.2",
  "http 1.4.0",
  "http-body-util",
- "hyper 1.8.1",
+ "hyper 1.11.0",
  "hyper-util",
  "indexmap 2.13.0",
  "multer",
@@ -2015,9 +2015,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.4.13"
+version = "0.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f44da3a8150a6703ed5d34e164b875fd14c2cdab9af1252a9a1020bde2bdc54"
+checksum = "a9f37a958b41b3b19ee2707c06439c0e9e547e847223eb791ecb0cb821c65e27"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -2282,22 +2282,21 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "1.8.1"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ab2d4f250c3d7b1c9fcdff1cece94ea4e2dfbec68614f7b87cb205f24ca9d11"
+checksum = "d22053281f852e11534f5198498373cbb59295120a20771d90f7ed1897490a72"
 dependencies = [
  "atomic-waker",
  "bytes",
  "futures-channel",
  "futures-core",
- "h2 0.4.13",
+ "h2 0.4.16",
  "http 1.4.0",
  "http-body 1.0.1",
  "httparse",
  "httpdate",
  "itoa",
  "pin-project-lite",
- "pin-utils",
  "smallvec",
  "tokio",
  "want",
@@ -2320,16 +2319,15 @@ dependencies = [
 
 [[package]]
 name = "hyper-rustls"
-version = "0.27.7"
+version = "0.27.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3c93eb611681b207e1fe55d5a71ecf91572ec8a6705cdb6857f7d8d5242cf58"
+checksum = "33ca68d021ef39cf6463ab54c1d0f5daf03377b70561305bb89a8f83aab66e0f"
 dependencies = [
  "http 1.4.0",
- "hyper 1.8.1",
+ "hyper 1.11.0",
  "hyper-util",
  "rustls 0.23.36",
  "rustls-native-certs",
- "rustls-pki-types",
  "tokio",
  "tokio-rustls 0.26.4",
  "tower-service",
@@ -2343,7 +2341,7 @@ checksum = "70206fc6890eaca9fde8a0bf71caa2ddfc9fe045ac9e5c70df101a7dbde866e0"
 dependencies = [
  "bytes",
  "http-body-util",
- "hyper 1.8.1",
+ "hyper 1.11.0",
  "hyper-util",
  "native-tls",
  "tokio",
@@ -2364,12 +2362,12 @@ dependencies = [
  "futures-util",
  "http 1.4.0",
  "http-body 1.0.1",
- "hyper 1.8.1",
+ "hyper 1.11.0",
  "ipnet",
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.2",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-layer",
@@ -3459,12 +3457,12 @@ dependencies = [
  "encoding_rs",
  "futures-core",
  "futures-util",
- "h2 0.4.13",
+ "h2 0.4.16",
  "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",
- "hyper 1.8.1",
- "hyper-rustls 0.27.7",
+ "hyper 1.11.0",
+ "hyper-rustls 0.27.9",
  "hyper-tls",
  "hyper-util",
  "js-sys",
