@@ -375,13 +375,7 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
         /*
          * Cache user information from the event sender in the database.
          */
-        app.db.store_user(
-            payload.sender.id,
-            &payload.sender.login,
-            UserType::from_github(payload.sender.type_),
-            payload.sender.name.as_deref(),
-            payload.sender.email.as_deref(),
-        )?;
+        store_webhook_user(app, &payload.sender)?;
 
         match del.event.as_str() {
             "installation" if &payload.action == "created" => {
@@ -411,13 +405,7 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                  * Store the user that owns the installation and then the
                  * installation itself:
                  */
-                app.db.store_user(
-                    owner.id,
-                    &owner.login,
-                    UserType::from_github(owner.type_),
-                    owner.name.as_deref(),
-                    owner.email.as_deref(),
-                )?;
+                store_webhook_user(app, owner)?;
                 app.db.store_install(inst.id, owner.id)?;
                 app.db.delivery_ack(del.seq, ack)?;
                 continue;
@@ -627,11 +615,15 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
                 )?;
 
                 /*
-                 * Record the user who triggered this pull request event so that
-                 * we can do authorisation checks later.
+                 * Record the user who created the pull request so that we can
+                 * do authorisation checks later.  Note that we consistently
+                 * use the pull request creator, rather than the event sender,
+                 * as some GitHub events can originate from unrelated users.
                  */
                 if cs.pr_by.is_none() {
-                    cs.pr_by = Some(payload.sender.id);
+                    store_webhook_user(app, &pr.user)?;
+
+                    cs.pr_by = Some(pr.user.id);
                     app.db.update_check_suite(&cs)?;
                 }
 
@@ -1034,6 +1026,17 @@ async fn process_deliveries(app: &Arc<App>) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn store_webhook_user(app: &Arc<App>, user: &hooktypes::User) -> Result<()> {
+    app.db.store_user(
+        user.id,
+        &user.login,
+        UserType::from_github(user.type_),
+        user.name.as_deref(),
+        user.email.as_deref(),
+    )?;
     Ok(())
 }
 

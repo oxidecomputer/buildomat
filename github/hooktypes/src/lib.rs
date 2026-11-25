@@ -108,6 +108,7 @@ pub struct PullRequest {
     pub number: i64,
     pub title: String,
     pub node_id: String,
+    pub user: User,
     pub state: PullRequestState,
     pub head: PullRequestCommit,
     pub base: PullRequestCommit,
