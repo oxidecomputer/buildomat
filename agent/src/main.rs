@@ -2,7 +2,7 @@
  * Copyright 2024 Oxide Computer Company
  */
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind::NotFound, Write};
@@ -13,7 +13,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use chrono::prelude::*;
 use futures::StreamExt;
 use hiercmd::prelude::*;
@@ -26,6 +26,7 @@ use tokio::sync::oneshot;
 use tokio::time::MissedTickBehavior;
 
 use buildomat_client::types::*;
+use buildomat_common::unix::{Passwd, Uid};
 use buildomat_common::*;
 use buildomat_types::*;
 
@@ -35,41 +36,120 @@ mod exec;
 mod shadow;
 mod upload;
 
-use control::protocol::{FactoryInfo, PayloadReq, PayloadRes};
+use control::protocol::{FactoryInfo, PayloadReq, PayloadRes, StoreEntry};
+use std::ffi::OsString;
 
 struct Agent {
     log: Logger,
 }
 
-const CONFIG_PATH: &str = "/opt/buildomat/etc/agent.json";
-const JOB_PATH: &str = "/opt/buildomat/etc/job.json";
-const AGENT: &str = "/opt/buildomat/lib/agent";
+const PATH: &[&str] = &[
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+    #[cfg(target_os = "illumos")]
+    "/opt/ooce/bin",
+    #[cfg(target_os = "illumos")]
+    "/opt/ooce/sbin",
+];
+
 const INPUT_PATH: &str = "/input";
 const CONTROL_PROGRAM: &str = "bmat";
 const SHADOW: &str = "/etc/shadow";
-#[cfg(target_os = "illumos")]
-mod os_constants {
-    pub const METHOD: &str = "/opt/buildomat/lib/start.sh";
-    pub const MANIFEST: &str = "/var/svc/manifest/site/buildomat-agent.xml";
-    pub const INPUT_DATASET: &str = "rpool/input";
-}
-#[cfg(target_os = "linux")]
-mod os_constants {
-    pub const UNIT: &str = "/etc/systemd/system/buildomat-agent.service";
-}
-use os_constants::*;
+const ILLUMOS_MANIFEST: &str = "/var/svc/manifest/site/buildomat-agent.xml";
+const ILLUMOS_INPUT_DATASET: &str = "rpool/input";
+const LINUX_UNIT: &str = "/etc/systemd/system/buildomat-agent.service";
 
-use crate::control::protocol::StoreEntry;
+#[derive(Debug, Clone, Copy)]
+enum InstallLocation {
+    System,
+    VarRun,
+}
 
-#[derive(Serialize, Deserialize)]
+impl InstallLocation {
+    fn detect() -> Result<Self> {
+        for loc in [InstallLocation::VarRun, InstallLocation::System] {
+            if loc.agent_config().is_file() {
+                return Ok(loc);
+            }
+        }
+        bail!("cannot find an agent installation");
+    }
+
+    fn agent_config(&self) -> &Path {
+        Path::new(match self {
+            InstallLocation::System => "/opt/buildomat/etc/agent.json",
+            InstallLocation::VarRun => "/var/run/buildomat/agent/agent.json",
+        })
+    }
+
+    fn agent_bin(&self) -> &Path {
+        Path::new(match self {
+            InstallLocation::System => "/opt/buildomat/lib/agent",
+            InstallLocation::VarRun => "/var/run/buildomat/agent/agent",
+        })
+    }
+
+    fn control_bin(&self) -> &Path {
+        Path::new(match self {
+            InstallLocation::System => "/usr/bin/bmat",
+            InstallLocation::VarRun => "/var/run/buildomat/agent/bin/bmat",
+        })
+    }
+
+    fn control_sock(&self) -> &Path {
+        Path::new(match self {
+            InstallLocation::System => "/var/run/buildomat.sock",
+            InstallLocation::VarRun => "/var/run/buildomat/agent/agent.sock",
+        })
+    }
+
+    fn illumos_start_script(&self) -> &Path {
+        Path::new(match self {
+            InstallLocation::System => "/opt/buildomat/lib/start.sh",
+            InstallLocation::VarRun => "/var/run/buildomat/agent/start.sh",
+        })
+    }
+
+    fn job_config(&self) -> &Path {
+        Path::new(match self {
+            InstallLocation::System => "/opt/buildomat/etc/job.json",
+            InstallLocation::VarRun => "/var/run/buildomat/agent/job.json",
+        })
+    }
+
+    fn system_path(&self) -> Result<OsString> {
+        let mut path = PATH.to_vec();
+
+        /*
+         * Make sure the "bmat" CLI is in the path.
+         */
+        let control_dir = self
+            .control_bin()
+            .parent()
+            .unwrap()
+            .to_str()
+            .ok_or_else(|| anyhow!("non-UTF-8 path: {path:?}"))?;
+        if !path.contains(&control_dir) {
+            path.insert(0, control_dir);
+        }
+
+        Ok(std::env::join_paths(&path)?)
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct ConfigFile {
     baseurl: String,
     bootstrap: String,
     token: String,
+    setuid: bool,
+    env: HashMap<String, String>,
 }
 
 impl ConfigFile {
-    fn make_client(&self, log: Logger) -> ClientWrap {
+    fn make_client(&self, log: Logger, loc: InstallLocation) -> ClientWrap {
         let client = buildomat_client::ClientBuilder::new(&self.baseurl)
             .bearer_token(&self.token)
             .build()
@@ -87,7 +167,15 @@ impl ConfigFile {
             rx,
         ));
 
-        ClientWrap { log, client, job: None, tx: None, worker_tx }
+        ClientWrap {
+            log,
+            loc,
+            config: self.clone(),
+            client,
+            job: None,
+            tx: None,
+            worker_tx,
+        }
     }
 }
 
@@ -277,6 +365,8 @@ async fn append_worker_worker(
 #[derive(Clone)]
 pub(crate) struct ClientWrap {
     log: Logger,
+    loc: InstallLocation,
+    config: ConfigFile,
     client: buildomat_client::Client,
     job: Option<Arc<WorkerPingJob>>,
     tx: Option<mpsc::Sender<AppendJobEntry>>,
@@ -631,6 +721,19 @@ impl ClientWrap {
 
         let mut cmd = Command::new("/bin/bash");
         cmd.arg(&s);
+        cmd.current_dir("/");
+
+        let passwd = if self.config.setuid {
+            /*
+             * Run the diagnostic script as root:
+             */
+            Passwd::by_name("root")?
+                .ok_or_else(|| anyhow!("missing root user"))?
+        } else {
+            Passwd::current_user()?
+        };
+        cmd.uid(passwd.uid.0);
+        cmd.gid(passwd.gid.0);
 
         /*
          * The diagnostic task should have a pristine and reproducible
@@ -638,23 +741,28 @@ impl ClientWrap {
          */
         cmd.env_clear();
 
-        cmd.env("HOME", "/root");
-        cmd.env("USER", "root");
-        cmd.env("LOGNAME", "root");
+        if let Some(dir) = &passwd.dir {
+            cmd.env("HOME", dir);
+        } else {
+            bail!("user {} doesn't have a home directory", passwd.uid.0);
+        }
+        if let Some(name) = &passwd.name {
+            cmd.env("USER", name);
+            cmd.env("LOGNAME", name);
+        } else {
+            bail!("user {} doesn't have a name", passwd.uid.0);
+        }
         cmd.env("TZ", "UTC");
-        cmd.env(
-            "PATH",
-            "/usr/bin:/bin:/usr/sbin:/sbin:/opt/ooce/bin:/opt/ooce/sbin",
-        );
+        cmd.env("PATH", self.loc.system_path()?);
         cmd.env("LANG", "en_US.UTF-8");
         cmd.env("LC_ALL", "en_US.UTF-8");
 
         /*
-         * Run the diagnostic script as root:
+         * Add variables configured at agent installation time.
          */
-        cmd.current_dir("/");
-        cmd.uid(0);
-        cmd.gid(0);
+        for (k, v) in &self.config.env {
+            cmd.env(k, v);
+        }
 
         match exec::run_diagnostic(cmd, name) {
             Ok(c) => Ok(c),
@@ -1022,11 +1130,37 @@ enum Stage {
 async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
     l.usage_args(Some("BASEURL BOOTSTRAP_TOKEN"));
     l.optopt("N", "", "set nodename of machine", "NODENAME");
+    l.optmulti("e", "", "add environment variables", "KEY=VALUE");
+    l.optflag("", "no-service", "avoid creating the system service");
+    l.optflag("", "no-setuid", "prevent the agent from changing users");
+    l.optflag("", "use-var-run", "store agent state in /var/run");
 
     let a = args!(l);
+    let start_service = !a.opts().opt_present("no-service");
+    let setuid = !a.opts().opt_present("no-setuid");
     let log = l.context().log.clone();
 
-    if a.args().len() < 2 {
+    let location = if a.opts().opt_present("use-var-run") {
+        InstallLocation::VarRun
+    } else {
+        InstallLocation::System
+    };
+
+    /*
+     * Parse "-e KEY=VALUE" into keys and values.
+     */
+    let env = a
+        .opts()
+        .opt_strs("e")
+        .into_iter()
+        .map(|v| {
+            v.split_once('=')
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .ok_or_else(|| anyhow!("invalid flag: -e {v}"))
+        })
+        .collect::<Result<HashMap<_, _>, _>>()?;
+
+    if a.args().len() != 2 {
         bad_args!(l, "specify base URL and bootstrap token value");
     }
 
@@ -1044,133 +1178,155 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
     }
 
     /*
-     * Write /opt/buildomat/etc/agent.json with this configuration.
+     * Write the configuration.
      */
-    make_dirs_for(CONFIG_PATH)?;
-    rmfile(CONFIG_PATH)?;
-    let cf = ConfigFile { baseurl, bootstrap, token: genkey(64) };
-    store(CONFIG_PATH, &cf)?;
+    make_dirs_for(location.agent_config())?;
+    rmfile(location.agent_config())?;
+    let cf = ConfigFile { baseurl, bootstrap, token: genkey(64), setuid, env };
+    store(location.agent_config(), &cf)?;
 
     /*
      * Copy the agent binary into a permanent home.
      */
     let exe = env::current_exe()?;
-    make_dirs_for(AGENT)?;
-    rmfile(AGENT)?;
-    std::fs::copy(&exe, AGENT)?;
-    make_executable(AGENT)?;
+    make_dirs_for(location.agent_bin())?;
+    rmfile(location.agent_bin())?;
+    std::fs::copy(&exe, location.agent_bin())?;
+    make_executable(location.agent_bin())?;
 
     /*
      * Install the agent binary with the control program name in a location in
      * the default PATH so that job programs can find it.
      */
-    let cprog = format!("/usr/bin/{CONTROL_PROGRAM}");
-    rmfile(&cprog)?;
-    std::fs::copy(&exe, &cprog)?;
-    make_executable(&cprog)?;
+    make_dirs_for(location.control_bin())?;
+    rmfile(location.control_bin())?;
+    std::fs::copy(&exe, location.control_bin())?;
+    make_executable(location.control_bin())?;
 
-    #[cfg(target_os = "illumos")]
-    {
-        /*
-         * Copy SMF method script and manifest into place.
-         */
-        let method = include_str!("../smf/start.sh");
-        make_dirs_for(METHOD)?;
-        rmfile(METHOD)?;
-        write_text(METHOD, method)?;
-        make_executable(METHOD)?;
-
-        let manifest = include_str!("../smf/agent.xml");
-        rmfile(MANIFEST)?;
-        write_text(MANIFEST, manifest)?;
-
-        /*
-         * Create the input directory.
-         */
-        let status = Command::new("/sbin/zfs")
-            .arg("create")
-            .arg("-o")
-            .arg(format!("mountpoint={INPUT_PATH}"))
-            .arg(INPUT_DATASET)
-            .env_clear()
-            .current_dir("/")
-            .status();
-        match status {
-            Ok(o) if o.success() => (),
-            Ok(o) => bail!("zfs create failure: {:?}", o),
-            Err(e) => bail!("could not execute zfs create: {:?}", e),
-        }
-
-        /*
-         * Import SMF service.
-         */
-        let status = Command::new("/usr/sbin/svccfg")
-            .arg("import")
-            .arg(MANIFEST)
-            .env_clear()
-            .current_dir("/")
-            .status();
-        match status {
-            Ok(o) if o.success() => (),
-            Ok(o) => bail!("svccfg import failure: {:?}", o),
-            Err(e) => bail!("could not execute svccfg import: {:?}", e),
+    /*
+     * Ubuntu 18.04 had a genuine pre-war separate /bin directory!
+     */
+    if cfg!(target_os = "linux") {
+        if let InstallLocation::System = location {
+            let binmd = std::fs::symlink_metadata("/bin")?;
+            if binmd.is_dir() {
+                std::os::unix::fs::symlink(
+                    format!("../usr/bin/{CONTROL_PROGRAM}"),
+                    format!("/bin/{CONTROL_PROGRAM}"),
+                )?;
+            }
         }
     }
 
-    #[cfg(target_os = "linux")]
-    {
-        /*
-         * Create the input directory.
-         */
-        std::fs::create_dir_all(INPUT_PATH)?;
+    if start_service {
+        if cfg!(target_os = "illumos") {
+            /*
+             * Copy SMF method script and manifest into place.
+             */
+            let script = include_str!("../smf/start.sh").replace(
+                "%AGENT_BIN%",
+                location
+                    .agent_bin()
+                    .to_str()
+                    .ok_or_else(|| anyhow!("non-UTF-8 path"))?,
+            );
+            make_dirs_for(location.illumos_start_script())?;
+            rmfile(location.illumos_start_script())?;
+            write_text(location.illumos_start_script(), &script)?;
+            make_executable(location.illumos_start_script())?;
 
-        /*
-         * Write a systemd unit file for the agent service.
-         */
-        let unit = include_str!("../systemd/agent.service");
-        make_dirs_for(UNIT)?;
-        rmfile(UNIT)?;
-        write_text(UNIT, unit)?;
+            let manifest = include_str!("../smf/agent.xml").replace(
+                "%START_SCRIPT%",
+                location
+                    .illumos_start_script()
+                    .to_str()
+                    .ok_or_else(|| anyhow!("non-UTF-8 path"))?,
+            );
+            rmfile(ILLUMOS_MANIFEST)?;
+            write_text(ILLUMOS_MANIFEST, &manifest)?;
 
-        /*
-         * Ask systemd to load the unit file we just wrote.
-         */
-        let status = Command::new("/bin/systemctl")
-            .arg("daemon-reload")
-            .env_clear()
-            .current_dir("/")
-            .status();
-        match status {
-            Ok(o) if o.success() => {}
-            Ok(o) => bail!("systemd reload failure: {:?}", o),
-            Err(e) => bail!("could not execute daemon-reload: {:?}", e),
+            /*
+             * Create the input directory.
+             */
+            let status = Command::new("/sbin/zfs")
+                .arg("create")
+                .arg("-o")
+                .arg(format!("mountpoint={INPUT_PATH}"))
+                .arg(ILLUMOS_INPUT_DATASET)
+                .env_clear()
+                .current_dir("/")
+                .status();
+            match status {
+                Ok(o) if o.success() => (),
+                Ok(o) => bail!("zfs create failure: {:?}", o),
+                Err(e) => bail!("could not execute zfs create: {:?}", e),
+            }
+
+            /*
+             * Import SMF service.
+             */
+            let status = Command::new("/usr/sbin/svccfg")
+                .arg("import")
+                .arg(ILLUMOS_MANIFEST)
+                .env_clear()
+                .current_dir("/")
+                .status();
+            match status {
+                Ok(o) if o.success() => (),
+                Ok(o) => bail!("svccfg import failure: {:?}", o),
+                Err(e) => bail!("could not execute svccfg import: {:?}", e),
+            }
+        } else if cfg!(target_os = "linux") {
+            /*
+             * Create the input directory.
+             */
+            std::fs::create_dir_all(INPUT_PATH)?;
+
+            /*
+             * Write a systemd unit file for the agent service.
+             */
+            let unit = include_str!("../systemd/agent.service");
+            make_dirs_for(LINUX_UNIT)?;
+            rmfile(LINUX_UNIT)?;
+            write_text(LINUX_UNIT, unit)?;
+
+            /*
+             * Ask systemd to load the unit file we just wrote.
+             */
+            let status = Command::new("/bin/systemctl")
+                .arg("daemon-reload")
+                .env_clear()
+                .current_dir("/")
+                .status();
+            match status {
+                Ok(o) if o.success() => {}
+                Ok(o) => bail!("systemd reload failure: {:?}", o),
+                Err(e) => bail!("could not execute daemon-reload: {:?}", e),
+            }
+
+            /*
+             * Attempt to start the service:
+             */
+            let status = Command::new("/bin/systemctl")
+                .arg("start")
+                .arg("buildomat-agent.service")
+                .env_clear()
+                .current_dir("/")
+                .status();
+            match status {
+                Ok(o) if o.success() => {}
+                Ok(o) => bail!("systemd start failure: {:?}", o),
+                Err(e) => bail!("could not execute systemctl: {:?}", e),
+            }
+        } else {
+            bail!("agent doesn't know how to start a service on this OS");
         }
-
+    } else {
         /*
-         * Attempt to start the service:
+         * If we are running without a service, fork a child to run the agent
+         * immediately rather than using the service manager.
          */
-        let status = Command::new("/bin/systemctl")
-            .arg("start")
-            .arg("buildomat-agent.service")
-            .env_clear()
-            .current_dir("/")
-            .status();
-        match status {
-            Ok(o) if o.success() => {}
-            Ok(o) => bail!("systemd start failure: {:?}", o),
-            Err(e) => bail!("could not execute systemctl: {:?}", e),
-        }
-
-        /*
-         * Ubuntu 18.04 had a genuine pre-war separate /bin directory!
-         */
-        let binmd = std::fs::symlink_metadata("/bin")?;
-        if binmd.is_dir() {
-            std::os::unix::fs::symlink(
-                format!("../usr/bin/{CONTROL_PROGRAM}"),
-                format!("/bin/{CONTROL_PROGRAM}"),
-            )?;
-        }
+        let _child = Command::new(location.agent_bin()).arg("run").spawn()?;
     }
 
     Ok(())
@@ -1179,11 +1335,12 @@ async fn cmd_install(mut l: Level<Agent>) -> Result<()> {
 async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
     no_args!(l);
 
-    let cf = load::<_, ConfigFile>(CONFIG_PATH)?;
+    let loc = InstallLocation::detect()?;
+    let cf = load::<_, ConfigFile>(loc.agent_config())?;
     let log = l.context().log.clone();
 
     info!(log, "agent starting"; "baseurl" => &cf.baseurl);
-    let mut cw = cf.make_client(log.clone());
+    let mut cw = cf.make_client(log.clone(), loc);
 
     let res = loop {
         let res = cw
@@ -1232,7 +1389,7 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
      * any evidence that we've done this before, we must report it to the
      * central server and do nothing else.
      */
-    if PathBuf::from(JOB_PATH).try_exists()? {
+    if PathBuf::from(loc.job_config()).try_exists()? {
         error!(log, "found previously assigned job; reporting failure");
 
         /*
@@ -1370,7 +1527,7 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                                     .create_new(true)
                                     .create(false)
                                     .write(true)
-                                    .open(JOB_PATH)?;
+                                    .open(loc.job_config())?;
                                 jf.write_all(&diag)?;
                                 jf.flush()?;
                                 jf.sync_all()?;
@@ -1591,6 +1748,25 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                 cmd.arg(&s);
 
                 /*
+                 * Each task may be expected to run under a different user
+                 * account or with a different working directory.
+                 */
+                cmd.current_dir(&t.workdir);
+                let passwd = if cf.setuid {
+                    cmd.uid(t.uid);
+                    cmd.gid(t.gid);
+                    Passwd::by_uid(Uid(t.uid))?.ok_or_else(|| {
+                        anyhow!("no user on the system with uid {}", t.uid)
+                    })?
+                } else {
+                    /*
+                     * XXX should we handle when a different uid/gid is
+                     * requested?
+                     */
+                    Passwd::current_user()?
+                };
+
+                /*
                  * The user task should have a pristine and reproducible
                  * environment that does not leak in artefacts of the
                  * agent.
@@ -1600,21 +1776,34 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                     /*
                      * Absent a request for an entirely clean slate, we
                      * set a few specific environment variables.
-                     * XXX HOME/USER/LOGNAME should probably respect "uid"
                      */
-                    cmd.env("HOME", "/root");
-                    cmd.env("USER", "root");
-                    cmd.env("LOGNAME", "root");
+                    if let Some(name) = &passwd.name {
+                        cmd.env("USER", name);
+                        cmd.env("LOGNAME", name);
+                    } else {
+                        bail!(
+                            "user {} doesn't have a home directory",
+                            passwd.uid.0
+                        );
+                    }
+                    if let Some(dir) = &passwd.dir {
+                        cmd.env("HOME", dir);
+                    } else {
+                        bail!("user {} doesn't have a name", passwd.uid.0);
+                    }
                     cmd.env("TZ", "UTC");
-                    cmd.env(
-                        "PATH",
-                        "/usr/bin:/bin:/usr/sbin:/sbin:\
-                            /opt/ooce/bin:/opt/ooce/sbin",
-                    );
+                    cmd.env("PATH", loc.system_path()?);
                     cmd.env("LANG", "en_US.UTF-8");
                     cmd.env("LC_ALL", "en_US.UTF-8");
                     cmd.env("BUILDOMAT_JOB_ID", cw.job_id().unwrap());
                     cmd.env("BUILDOMAT_TASK_ID", t.id.to_string());
+
+                    /*
+                     * Add variables configured at agent installation time.
+                     */
+                    for (k, v) in &cf.env {
+                        cmd.env(k, v);
+                    }
                 }
                 for (k, v) in t.env.iter() {
                     /*
@@ -1624,14 +1813,6 @@ async fn cmd_run(mut l: Level<Agent>) -> Result<()> {
                      */
                     cmd.env(k, v);
                 }
-
-                /*
-                 * Each task may be expected to run under a different user
-                 * account or with a different working directory.
-                 */
-                cmd.current_dir(&t.workdir);
-                cmd.uid(t.uid);
-                cmd.gid(t.gid);
 
                 match exec::run(cmd) {
                     Ok(c) => {

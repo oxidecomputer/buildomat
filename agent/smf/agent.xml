@@ -11,7 +11,7 @@
         </dependency>
 
         <exec_method name='start' type='method' timeout_seconds='60'
-          exec='/opt/buildomat/lib/start.sh'/>
+          exec='%START_SCRIPT%'/>
         <exec_method name='stop' type='method' timeout_seconds='60'
           exec=':kill'/>
 

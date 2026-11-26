@@ -13,14 +13,13 @@ use tokio::{
     net::UnixStream,
 };
 
+use crate::InstallLocation;
 use protocol::{
     Decoder, FactoryInfo, Message, Payload, PayloadReq, PayloadRes,
 };
 
 pub(crate) mod protocol;
 pub(crate) mod server;
-
-pub const SOCKET_PATH: &str = "/var/run/buildomat.sock";
 
 struct Stuff {
     us: Option<UnixStream>,
@@ -30,7 +29,8 @@ struct Stuff {
 
 impl Stuff {
     async fn connect(&mut self) -> Result<()> {
-        self.us = Some(UnixStream::connect(SOCKET_PATH).await?);
+        let loc = InstallLocation::detect()?;
+        self.us = Some(UnixStream::connect(loc.control_sock()).await?);
         self.dec = Some(Decoder::new());
         Ok(())
     }
